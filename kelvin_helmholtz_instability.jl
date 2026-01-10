@@ -9,11 +9,11 @@ grid = RectilinearGrid(size=(128, 4, 128), x=(-5, 5), y=(-5, 5), z=(-5, 5),
                        topology=(Periodic, Periodic, Bounded))
 
 # Create model without background fields
-model = NonhydrostaticModel(; grid,
-                              advection = UpwindBiased(order=5),
-                              closure = ScalarDiffusivity(ν=2e-4, κ=2e-4),
-                              buoyancy = BuoyancyTracer(),
-                              tracers = :b)
+model = NonhydrostaticModel(grid;
+                            advection = UpwindBiased(order=5),
+                            closure = ScalarDiffusivity(ν=2e-4, κ=2e-4),
+                            buoyancy = BuoyancyTracer(),
+                            tracers = :b)
 
 # Define initial conditions: shear flow with stratification and perturbation
 Ri = 0.1
@@ -44,12 +44,13 @@ b = model.tracers.b
 
 vorticity = Field(∂z(u) - ∂x(w))
 
+using NCDatasets
 simulation.output_writers[:fields] =
-    JLD2Writer(model, (ω=vorticity, b=b, u=u, w=w),
-               schedule = TimeInterval(0.5),
-               filename = "kelvin_helmholtz_instability.jld2",
-               indices = (:, 1, :),
-               overwrite_existing = true)
+    NetCDFWriter(model, (ω=vorticity, b=b, u=u, w=w),
+                 schedule = TimeInterval(0.5),
+                 filename = "kelvin_helmholtz_instability",
+                 indices = (:, 1, :),
+                 overwrite_existing = true)
 
 # Run simulation
 @info "Running Kelvin-Helmholtz instability simulation..."
