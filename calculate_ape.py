@@ -46,7 +46,7 @@ def calculate_ape_sorting(ds, time_idx):
 
     Note: We use negative sign convention for PE (PE increases downward)
     """
-    # Get the density field at this time
+    # Get the density field at this time (3D: x, y, z)
     rho = ds.rho.isel(time=time_idx).values
 
     # Get grid spacing from dataset
@@ -55,38 +55,23 @@ def calculate_ape_sorting(ds, time_idx):
     else:
         z = np.arange(rho.shape[-1])
 
-    # For 2D simulation (x, z)
-    if len(rho.shape) == 2:
-        # Get grid spacing from dataset
-        dx = ds.Δx_caa.values
-        dz = ds.Δz_aac.values
+    # Get grid spacing from dataset
+    dx = ds.Δx_caa.values
+    dy = ds.Δy_aca.values
+    dz = ds.Δz_aac.values
 
-        # Create meshgrid for dV (dx and dz can vary spatially)
-        DX, DZ = np.meshgrid(dx, dz, indexing='ij')
-        dV = DX * DZ
+    # Create meshgrid for dV (can vary spatially)
+    nx, ny, nz = rho.shape
+    dV = np.zeros_like(rho)
+    for i in range(nx):
+        for j in range(ny):
+            for k in range(nz):
+                dV[i, j, k] = dx[i] * dy[j] * dz[k]
 
-        # Create Z coordinate meshgrid
-        X, Z = np.meshgrid(ds.x_caa.values, z, indexing='ij')
-
-    # For 3D simulation (x, y, z) with y-slice
-    elif len(rho.shape) == 3:
-        # Get grid spacing from dataset
-        dx = ds.Δx_caa.values
-        dy = ds.Δy_aca.values
-        dz = ds.Δz_aac.values
-
-        # Create meshgrid for dV (can vary spatially)
-        nx, ny, nz = rho.shape
-        dV = np.zeros_like(rho)
-        for i in range(nx):
-            for j in range(ny):
-                for k in range(nz):
-                    dV[i, j, k] = dx[i] * dy[j] * dz[k]
-
-        # Create Z coordinate meshgrid
-        Z = np.zeros_like(rho)
-        for k in range(nz):
-            Z[:, :, k] = z[k]
+    # Create Z coordinate meshgrid
+    Z = np.zeros_like(rho)
+    for k in range(nz):
+        Z[:, :, k] = z[k]
 
     # Calculate Total Potential Energy (TPE)
     TPE = -np.sum(rho * Z * dV)
@@ -120,28 +105,22 @@ def calculate_ape_timeseries(ds):
     return APE, TPE, RPE
 
 def calculate_kinetic_energy(ds, time_idx):
-    """Calculate total kinetic energy"""
+    """Calculate total kinetic energy (3D: x, y, z)"""
     u = ds.u.isel(time=time_idx).values
     w = ds.w.isel(time=time_idx).values
 
     # Get grid spacing from dataset
-    if len(u.shape) == 2:
-        dx = ds.Δx_caa.values
-        dz = ds.Δz_aac.values
-        # Create meshgrid for dV
-        DX, DZ = np.meshgrid(dx, dz, indexing='ij')
-        dV = DX * DZ
-    elif len(u.shape) == 3:
-        dx = ds.Δx_caa.values
-        dy = ds.Δy_aca.values
-        dz = ds.Δz_aac.values
-        # Create dV array
-        nx, ny, nz = u.shape
-        dV = np.zeros_like(u)
-        for i in range(nx):
-            for j in range(ny):
-                for k in range(nz):
-                    dV[i, j, k] = dx[i] * dy[j] * dz[k]
+    dx = ds.Δx_caa.values
+    dy = ds.Δy_aca.values
+    dz = ds.Δz_aac.values
+
+    # Create dV array
+    nx, ny, nz = u.shape
+    dV = np.zeros_like(u)
+    for i in range(nx):
+        for j in range(ny):
+            for k in range(nz):
+                dV[i, j, k] = dx[i] * dy[j] * dz[k]
 
     KE = 0.5 * rho_0 * np.sum((u**2 + w**2) * dV)
     return KE
