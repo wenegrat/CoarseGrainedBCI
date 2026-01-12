@@ -49,7 +49,7 @@ def calculate_ape_sorting(ds, time_idx):
     # Get the density field at this time
     rho = ds.rho.isel(time=time_idx).values
 
-    # Get grid spacing
+    # Get grid spacing from dataset
     if 'z_aac' in ds.coords:
         z = ds.z_aac.values
     else:
@@ -57,22 +57,33 @@ def calculate_ape_sorting(ds, time_idx):
 
     # For 2D simulation (x, z)
     if len(rho.shape) == 2:
-        dx = np.gradient(ds.x_caa.values)[0]
-        dz = np.gradient(z)[0]
-        dV = dx * dz
+        # Get grid spacing from dataset
+        dx = ds.Δx_caa.values
+        dz = ds.Δz_aac.values
 
-        # Create meshgrid
+        # Create meshgrid for dV (dx and dz can vary spatially)
+        DX, DZ = np.meshgrid(dx, dz, indexing='ij')
+        dV = DX * DZ
+
+        # Create Z coordinate meshgrid
         X, Z = np.meshgrid(ds.x_caa.values, z, indexing='ij')
 
     # For 3D simulation (x, y, z) with y-slice
     elif len(rho.shape) == 3:
-        dx = np.gradient(ds.x_caa.values)[0]
-        dy = np.gradient(ds.y_aca.values)[0]
-        dz = np.gradient(z)[0]
-        dV = dx * dy * dz
+        # Get grid spacing from dataset
+        dx = ds.Δx_caa.values
+        dy = ds.Δy_aca.values
+        dz = ds.Δz_aac.values
 
-        # Create meshgrid
+        # Create meshgrid for dV (can vary spatially)
         nx, ny, nz = rho.shape
+        dV = np.zeros_like(rho)
+        for i in range(nx):
+            for j in range(ny):
+                for k in range(nz):
+                    dV[i, j, k] = dx[i] * dy[j] * dz[k]
+
+        # Create Z coordinate meshgrid
         Z = np.zeros_like(rho)
         for k in range(nz):
             Z[:, :, k] = z[k]
@@ -113,16 +124,24 @@ def calculate_kinetic_energy(ds, time_idx):
     u = ds.u.isel(time=time_idx).values
     w = ds.w.isel(time=time_idx).values
 
-    # Get grid spacing
+    # Get grid spacing from dataset
     if len(u.shape) == 2:
-        dx = np.gradient(ds.x_caa.values)[0]
-        dz = np.gradient(ds.z_aac.values)[0]
-        dV = dx * dz
+        dx = ds.Δx_caa.values
+        dz = ds.Δz_aac.values
+        # Create meshgrid for dV
+        DX, DZ = np.meshgrid(dx, dz, indexing='ij')
+        dV = DX * DZ
     elif len(u.shape) == 3:
-        dx = np.gradient(ds.x_caa.values)[0]
-        dy = np.gradient(ds.y_aca.values)[0]
-        dz = np.gradient(ds.z_aac.values)[0]
-        dV = dx * dy * dz
+        dx = ds.Δx_caa.values
+        dy = ds.Δy_aca.values
+        dz = ds.Δz_aac.values
+        # Create dV array
+        nx, ny, nz = u.shape
+        dV = np.zeros_like(u)
+        for i in range(nx):
+            for j in range(ny):
+                for k in range(nz):
+                    dV[i, j, k] = dx[i] * dy[j] * dz[k]
 
     KE = 0.5 * rho_0 * np.sum((u**2 + w**2) * dV)
     return KE
