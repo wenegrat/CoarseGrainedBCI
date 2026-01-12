@@ -34,6 +34,28 @@ def load_data(filename):
 
     return ds
 
+def sort_density_field(rho):
+    """
+    Sort the density field to obtain the reference state
+
+    This creates a sorted density field by flattening, sorting, and reshaping.
+    The sorted field represents the reference state with minimum potential energy.
+
+    Parameters
+    ----------
+    rho : xr.DataArray
+        3D density field (x, y, z)
+
+    Returns
+    -------
+    rho_sorted : xr.DataArray
+        Sorted density field with same shape as input
+    """
+    rho_flat = np.sort(np.ravel(rho.copy(), order='C'))
+    rho_sorted = xr.zeros_like(rho)
+    rho_sorted.data = rho_flat.reshape(rho.shape, order='C')
+    return rho_sorted
+
 def calculate_ape_sorting(ds, time_idx):
     """
     Calculate APE using the sorting method
@@ -47,38 +69,28 @@ def calculate_ape_sorting(ds, time_idx):
     Note: We use negative sign convention for PE (PE increases downward)
     """
     # Get the density field at this time (3D: x, y, z)
-    rho = ds.rho.isel(time=time_idx).values
+    rho = ds.rho.isel(time=time_idx)
+    x = ds.x_caa
+    y = ds.y_aca
+    z = ds.z_aac
 
     # Get grid spacing from dataset
-    if 'z_aac' in ds.coords:
-        z = ds.z_aac.values
-    else:
-        z = np.arange(rho.shape[-1])
-
-    # Get grid spacing from dataset
-    dx = ds.Δx_caa.values
-    dy = ds.Δy_aca.values
-    dz = ds.Δz_aac.values
+    dx = ds.Δx_caa
+    dy = ds.Δy_aca
+    dz = ds.Δz_aac
 
     # Create meshgrid for dV (can vary spatially)
     nx, ny, nz = rho.shape
-    dV = np.zeros_like(rho)
-    for i in range(nx):
-        for j in range(ny):
-            for k in range(nz):
-                dV[i, j, k] = dx[i] * dy[j] * dz[k]
+    dV = dx * dy * dz
 
     # Create Z coordinate meshgrid
-    Z = np.zeros_like(rho)
-    for k in range(nz):
-        Z[:, :, k] = z[k]
+    Z = z + 0*x*y
 
     # Calculate Total Potential Energy (TPE)
     TPE = -np.sum(rho * Z * dV)
 
-    # Sort the density field (flatten, sort, reshape)
-    rho_flat = np.sort(np.ravel(rho.copy(), order='F'))
-    rho_sorted = rho_flat.reshape(rho.shape, order='F')
+    # Sort the density field to get reference state
+    rho_sorted = sort_density_field(rho)
 
     # Calculate Reference Potential Energy (RPE)
     RPE = -np.sum(rho_sorted * Z * dV)
