@@ -117,7 +117,7 @@ def calculate_total_potential_energy(rho, dV=None, ds=None):
     return g * integrate(rho * rho.z_aac, dV)
 #---
 
-#+++ Calculate APE using sorting method
+#+++ Calculate reference state using sorting method
 def calculate_reference_potential_energy(ds, time_idx, test=False):
     """Calculate Reference Potential Energy (RPE)"""
     # Get the density field at this time (3D: x, y, z)
@@ -133,7 +133,7 @@ def calculate_reference_potential_energy(ds, time_idx, test=False):
 
     # Calculate Reference Potential Energy (RPE)
     dV_flat_1d_sorted = dz_flat_1d_sorted * ds.LxLy.values
-    return np.sum(rho_1d_sorted * z_star * dV_flat_1d_sorted)
+    return g * np.sum(rho_1d_sorted * z_star * dV_flat_1d_sorted)
 
 def calculate_potential_energies(ds, time_idx, test=False):
     """Calculate Available Potential Energy (APE)"""
@@ -259,7 +259,6 @@ assert np.isclose(val1, val2, rtol=1e-3), f"Mismatch: pe integral={val1}, -b*z i
 
 # Calculate PE time series
 APE, TPE, RPE = calculate_ape_timeseries(ds, test=False)
-pause
 
 # Calculate KE time series
 KE = calculate_ke_timeseries(ds)
