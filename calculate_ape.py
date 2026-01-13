@@ -17,10 +17,17 @@ from pathlib import Path
 g = 9.81  # gravitational acceleration [m/s^2]
 rho_0 = 1025  # reference density [kg/m^3]
 
+#+++ Load data
 def load_data(filename):
     """Load the simulation output"""
     print(f"Loading data from {filename}...")
     ds = xr.open_dataset(filename)
+
+    grid = xr.open_dataset(filename, group="underlying_grid_reconstruction_kwargs")
+
+    ds.attrs["Lx"] = np.diff(grid.x)
+    ds.attrs["Ly"] = np.diff(grid.y)
+    ds.attrs["Lz"] = np.diff(grid.z)
 
     # Convert buoyancy to density
     # b = g * (rho_0 - rho) / rho_0  =>  rho = rho_0 * (1 - b/g)
@@ -33,8 +40,10 @@ def load_data(filename):
         print("Warning: z_aac coordinate not found, trying to infer from data")
 
     return ds
+#---
 
-def sort_density_field(rho):
+#+++ Vertical sort density
+def vertical_sort_density(rho, dV, LxLy, test=False):
     """
     Sort the density field to obtain the reference state
 
@@ -45,25 +54,48 @@ def sort_density_field(rho):
     ----------
     rho : xr.DataArray
         3D density field (x, y, z)
+    dV : xr.DataArray
+        Volume of each grid cell (x, y, z)
+    LxLy : xr.DataArray or float
+        Horizontal area (Lx * Ly)
+    test : bool
+        Whether to test the sorting
 
     Returns
     -------
-    rho_sorted : xr.DataArray
+    dz_flat_1d_sorted : np.ndarray
+        Sorted vertical coordinate in sorted space
+    z_star : np.ndarray
+        Cumulative vertical coordinate in sorted space
+    rho_1d_sorted : np.ndarray
         Sorted density field with same shape as input
     """
-    rho_flat = np.sort(np.ravel(rho.copy(), order='C'))
-    rho_sorted = xr.zeros_like(rho)
-    rho_sorted.data = rho_flat.reshape(rho.shape, order='C')
-    return rho_sorted
+    rho_1d = np.ravel(rho.copy(), order='C')
 
-def calculate_ape_sorting(ds, time_idx):
+    dz_flat = dV / LxLy # 3D DataArray with the same shape as rho
+    dz_flat_1d = np.ravel(dz_flat.values, order='C')
+    if test:
+        assert(dz_flat.sum().values == ds.Lz)
+
+    # Get the permutation indices used to sort rho_1d
+    sort_indices = np.argsort(rho_1d)
+
+    # Sort dz_flat using the same permutation
+    dz_flat_1d_sorted = dz_flat_1d[sort_indices]
+    rho_1d_sorted = rho_1d[sort_indices]
+    z_star = np.cumsum(dz_flat_1d_sorted)
+    return dz_flat_1d_sorted, z_star, rho_1d_sorted
+#---
+
+#+++ Calculate APE using sorting method
+def calculate_ape_sorting(ds, time_idx, test=False):
     """
     Calculate APE using the sorting method
 
     Following the approach from IdealizedAPECalcs.ipynb:
     1. Sort the density field
     2. Calculate Total Potential Energy (TPE) = -∫ ρ z dV
-    3. Calculate Reference Potential Energy (RPE) = -∫ ρ_sorted z dV
+    3. Calculate Reference Potential Energy (RPE) = -∫ ρ⋆ z⋆ dV⋆ (where ρ⋆ and z⋆ are the sorted density and vertical coordinate)
     4. APE = TPE - RPE
 
     Note: We use negative sign convention for PE (PE increases downward)
@@ -80,7 +112,6 @@ def calculate_ape_sorting(ds, time_idx):
     dz = ds.Δz_aac
 
     # Create meshgrid for dV (can vary spatially)
-    nx, ny, nz = rho.shape
     dV = dx * dy * dz
 
     # Create Z coordinate meshgrid
@@ -90,17 +121,26 @@ def calculate_ape_sorting(ds, time_idx):
     TPE = -np.sum(rho * Z * dV)
 
     # Sort the density field to get reference state
-    rho_sorted = sort_density_field(rho)
+    LxLy = ds.Lx * ds.Ly
+    dz_flat_1d_sorted, z_star, rho_1d_sorted = vertical_sort_density(rho, dV, LxLy, test=test)
+
+    if test:
+        assert(all(np.diff(rho_1d_sorted) >= 0))
+        assert(all(np.diff(z_star) > 0))
+        assert(sum(dz_flat_1d_sorted) == ds.Lz)
 
     # Calculate Reference Potential Energy (RPE)
-    RPE = -np.sum(rho_sorted * Z * dV)
+    dV_flat_1d_sorted = dz_flat_1d_sorted * LxLy
+    RPE = -np.sum(rho_1d_sorted * z_star * dV_flat_1d_sorted)
 
     # Calculate APE
     APE = TPE - RPE
 
     return APE, TPE, RPE
+#---
 
-def calculate_ape_timeseries(ds):
+#+++ Calculate APE time series
+def calculate_ape_timeseries(ds, test=False):
     """Calculate APE for all time steps"""
     print("Calculating APE time series...")
 
@@ -111,20 +151,23 @@ def calculate_ape_timeseries(ds):
 
     for i in range(n_times):
         print(f"  Processing time step {i+1}/{n_times}", end='\r')
-        APE[i], TPE[i], RPE[i] = calculate_ape_sorting(ds, i)
+        APE[i], TPE[i], RPE[i] = calculate_ape_sorting(ds, i, test=test)
 
     print("\nDone!")
     return APE, TPE, RPE
+#---
 
+#+++ Calculate kinetic energy
 def calculate_kinetic_energy(ds, time_idx):
     """Calculate total kinetic energy (3D: x, y, z)"""
-    u = ds.u.isel(time=time_idx).values
-    w = ds.w.isel(time=time_idx).values
+    u = ds.u.isel(time=time_idx)
+    v = ds.v.isel(time=time_idx)
+    w = ds.w.isel(time=time_idx)
 
     # Get grid spacing from dataset
-    dx = ds.Δx_caa.values
-    dy = ds.Δy_aca.values
-    dz = ds.Δz_aac.values
+    dx = ds.Δx_caa
+    dy = ds.Δy_aca
+    dz = ds.Δz_aac
 
     # Create dV array
     nx, ny, nz = u.shape
@@ -136,7 +179,9 @@ def calculate_kinetic_energy(ds, time_idx):
 
     KE = 0.5 * rho_0 * np.sum((u**2 + w**2) * dV)
     return KE
+#---
 
+#+++ Calculate kinetic energy time series
 def calculate_ke_timeseries(ds):
     """Calculate KE for all time steps"""
     print("Calculating KE time series...")
@@ -150,7 +195,9 @@ def calculate_ke_timeseries(ds):
 
     print("\nDone!")
     return KE
+#---
 
+#+++ Plot energy timeseries
 def plot_energy_timeseries(ds, APE, TPE, RPE, KE=None):
     """Plot APE and energy components over time"""
     fig, axes = plt.subplots(2, 1, figsize=(10, 8))
@@ -184,7 +231,9 @@ def plot_energy_timeseries(ds, APE, TPE, RPE, KE=None):
 
     plt.tight_layout()
     return fig
+#---
 
+#+++ Plot energy budget
 def plot_energy_budget(ds, APE, KE):
     """Plot energy budget showing APE to KE conversion"""
     fig, ax = plt.subplots(figsize=(10, 6))
@@ -205,14 +254,17 @@ def plot_energy_budget(ds, APE, KE):
 
     plt.tight_layout()
     return fig
-
+#---
 
 # File path to the simulation output
 filename = "kelvin_helmholtz_instability.nc"
 ds = load_data(filename)
 
-# Calculate APE time series
-APE, TPE, RPE = calculate_ape_timeseries(ds)
+# Use a single time step to test the sorting method
+APE, TPE, RPE = calculate_ape_timeseries(ds.isel(time=[10]), test=True)
+
+# Calculate PE time series
+APE, TPE, RPE = calculate_ape_timeseries(ds, test=False)
 
 # Calculate KE time series
 KE = calculate_ke_timeseries(ds)
@@ -253,4 +305,3 @@ fig2.savefig('kelvin_helmholtz_energy_budget.png', dpi=150, bbox_inches='tight')
 print("Saved: kelvin_helmholtz_energy_budget.png")
 
 plt.show()
-

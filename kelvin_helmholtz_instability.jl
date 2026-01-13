@@ -5,7 +5,7 @@ using CairoMakie
 using Printf
 
 # Setup grid
-grid = RectilinearGrid(size=(128, 4, 128), x=(-5, 5), y=(-5, 5), z=(-5, 5),
+grid = RectilinearGrid(size=(128, 1, 128), x=(-5, 5), y=(-5, 5), z=(-5, 5),
                        topology=(Periodic, Periodic, Bounded))
 
 # Create model without background fields
