@@ -17,6 +17,14 @@ from pathlib import Path
 g = 9.81  # gravitational acceleration [m/s^2]
 rho_0 = 1025  # reference density [kg/m^3]
 
+#+++ Auxiliary functions
+def sum(da):
+    return da.sum(("x_caa", "y_aca", "z_aac"))
+
+def integrate(da, dV):
+    return (da * dV).sum(("x_caa", "y_aca", "z_aac"))
+#---
+
 #+++ Load data
 def load_data(filename):
     """Load the simulation output"""
@@ -35,9 +43,13 @@ def load_data(filename):
     ds.attrs["z_min"] = grid.z.min()
     ds.attrs["z_max"] = grid.z.max()
 
+    ds["dV"] = ds.Δx_caa * ds.Δy_aca * ds.Δz_aac
+    ds["LxLy"] = ds.Lx * ds.Ly
+
     # Convert buoyancy to density
     # b = g * (rho_0 - rho) / rho_0  =>  rho = rho_0 * (1 - b/g)
     ds["rho"] = rho_0 * (1 - ds.b / g)
+    ds["rho_z"] = rho_0 * (ds.z_aac + ds.pe / g) # pe  = -b*z
 
     # Add coordinate arrays
     if "z_aac" in ds.coords:
@@ -95,55 +107,40 @@ def vertical_sort_density(rho, dV, LxLy, test=False, z_min=0):
     return dz_flat_1d_sorted, z_star, rho_1d_sorted
 #---
 
+#+++ Calculate TPE
+def calculate_total_potential_energy(rho, dV=None, ds=None):
+    """Calculate Total Potential Energy (TPE)"""
+    if dV is None:
+        if ds is not None:
+            dV = ds.dV
+        else:
+            raise ValueError("Either dV or ds must be provided")
+    return g * integrate(rho * rho.z_aac, dV)
+#---
+
 #+++ Calculate APE using sorting method
-def calculate_ape_sorting(ds, time_idx, test=False):
-    """
-    Calculate APE using the sorting method
-
-    Following the approach from IdealizedAPECalcs.ipynb:
-    1. Sort the density field
-    2. Calculate Total Potential Energy (TPE) = -∫ ρ z dV
-    3. Calculate Reference Potential Energy (RPE) = -∫ ρ⋆ z⋆ dV⋆ (where ρ⋆ and z⋆ are the sorted density and vertical coordinate)
-    4. APE = TPE - RPE
-
-    Note: We use negative sign convention for PE (PE increases downward)
-    """
+def calculate_reference_potential_energy(ds, time_idx, test=False):
+    """Calculate Reference Potential Energy (RPE)"""
     # Get the density field at this time (3D: x, y, z)
     rho = ds.rho.isel(time=time_idx)
-    x = ds.x_caa
-    y = ds.y_aca
-    z = ds.z_aac
-
-    # Get grid spacing from dataset
-    dx = ds.Δx_caa
-    dy = ds.Δy_aca
-    dz = ds.Δz_aac
-
-    # Create meshgrid for dV (can vary spatially)
-    dV = dx * dy * dz
-
-    # Create Z coordinate meshgrid
-    Z = z + 0*x*y
-
-    # Calculate Total Potential Energy (TPE)
-    TPE = -np.sum(rho * Z * dV)
 
     # Sort the density field to get reference state
-    LxLy = ds.Lx * ds.Ly
-    dz_flat_1d_sorted, z_star, rho_1d_sorted = vertical_sort_density(rho, dV, LxLy, test=test, z_min=ds.z_min)
+    dz_flat_1d_sorted, z_star, rho_1d_sorted = vertical_sort_density(rho, ds.dV, ds.LxLy, test=test, z_min=ds.z_min)
 
     if test:
         assert(all(np.diff(rho_1d_sorted) >= 0))
         assert(all(np.diff(z_star) > 0))
-        assert(sum(dz_flat_1d_sorted) == ds.Lz)
+        assert(np.sum(dz_flat_1d_sorted) == ds.Lz)
 
     # Calculate Reference Potential Energy (RPE)
-    dV_flat_1d_sorted = dz_flat_1d_sorted * LxLy
-    RPE = -np.sum(rho_1d_sorted * z_star * dV_flat_1d_sorted)
+    dV_flat_1d_sorted = dz_flat_1d_sorted * ds.LxLy.values
+    return np.sum(rho_1d_sorted * z_star * dV_flat_1d_sorted)
 
-    # Calculate APE
+def calculate_potential_energies(ds, time_idx, test=False):
+    """Calculate Available Potential Energy (APE)"""
+    TPE = calculate_total_potential_energy(ds.rho.isel(time=time_idx), ds=ds)
+    RPE = calculate_reference_potential_energy(ds, time_idx, test=test)
     APE = TPE - RPE
-
     return APE, TPE, RPE
 #---
 
@@ -159,7 +156,7 @@ def calculate_ape_timeseries(ds, test=False):
 
     for i in range(n_times):
         print(f"  Processing time step {i+1}/{n_times}", end='\r')
-        APE[i], TPE[i], RPE[i] = calculate_ape_sorting(ds, i, test=test)
+        APE[i], TPE[i], RPE[i] = calculate_potential_energies(ds, i, test=test)
 
     print("\nDone!")
     return APE, TPE, RPE
@@ -248,11 +245,22 @@ def plot_energy_budget(ds, APE, KE):
 filename = "kelvin_helmholtz_instability.nc"
 ds = load_data(filename)
 
+TPE_online_from_r = g * integrate(ds.rho_z, ds.dV) # g ∭ ρz dV
+TPE_online_from_b = integrate(rho_0 * ds.pe, ds.dV) # ρ₀ ∭ (-bz) dV
+TPE_offline_from_r = calculate_total_potential_energy(ds.rho, ds=ds) # g ∭ ρz dV
+assert all(np.isclose(TPE_online_from_r, TPE_online_from_b, rtol=1e-3)), f"Mismatch: rho_z integral={TPE_online_from_r}, -pe integral={TPE_online_from_b}"
+
 # Use a single time step to test the sorting method
-APE, TPE, RPE = calculate_ape_timeseries(ds.isel(time=[0]), test=True)
+ds0 = ds.isel(time=[0])
+APE, TPE, RPE = calculate_ape_timeseries(ds0, test=True)
+
+val1 = integrate(ds0.pe, ds0.dV)
+val2 = integrate(-ds0.b * ds0.z_aac, ds0.dV)
+assert np.isclose(val1, val2, rtol=1e-3), f"Mismatch: pe integral={val1}, -b*z integral={val2}"
 
 # Calculate PE time series
 APE, TPE, RPE = calculate_ape_timeseries(ds, test=False)
+pause
 
 # Calculate KE time series
 KE = calculate_ke_timeseries(ds)
