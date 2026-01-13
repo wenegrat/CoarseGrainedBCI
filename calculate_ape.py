@@ -30,11 +30,11 @@ def load_data(filename):
 
     # Convert buoyancy to density
     # b = g * (rho_0 - rho) / rho_0  =>  rho = rho_0 * (1 - b/g)
-    ds['rho'] = rho_0 * (1 - ds.b / g)
+    ds["rho"] = rho_0 * (1 - ds.b / g)
 
     # Add coordinate arrays
-    if 'z_aac' in ds.coords:
-        ds['Z'] = ds.rho * 0 + ds.z_aac
+    if "z_aac" in ds.coords:
+        ds["Z"] = ds.rho * 0 + ds.z_aac
     else:
         print("Warning: z_aac coordinate not found, trying to infer from data")
 
@@ -69,7 +69,7 @@ def vertical_sort_density(rho, dV, LxLy, test=False):
     rho_1d_sorted : np.ndarray
         Sorted density field with same shape as input
     """
-    rho_1d = np.ravel(rho.copy(), order='C')
+    rho_1d = np.ravel(rho.copy(), order="C")
 
     dz_flat = dV / LxLy # 3D DataArray with the same shape as rho
     dz_flat_1d = np.ravel(dz_flat.values, order='C')
@@ -170,7 +170,7 @@ def calculate_ke_timeseries(ds):
 
     # Create dV array
     dV = dx * dy * dz
-    KE = np.sum(ke * dV)
+    KE = (ke * dV).sum(("x_caa", "y_aca", "z_aac"))
 
     print("\nDone!")
     return KE
@@ -266,7 +266,7 @@ output_ds = xr.Dataset({
     'APE': (['time'], APE),
     'TPE': (['time'], TPE),
     'RPE': (['time'], RPE),
-    'KE': (['time'], KE),
+    'KE': (['time'], KE.values),
     'time': ds.time
 })
 output_ds.to_netcdf('kelvin_helmholtz_ape.nc')
