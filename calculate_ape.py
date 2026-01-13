@@ -22,7 +22,6 @@ def load_data(filename):
     """Load the simulation output"""
     print(f"Loading data from {filename}...")
     ds = xr.open_dataset(filename)
-
     grid = xr.open_dataset(filename, group="underlying_grid_reconstruction_kwargs")
 
     ds.attrs["Lx"] = np.diff(grid.x)
@@ -157,12 +156,12 @@ def calculate_ape_timeseries(ds, test=False):
     return APE, TPE, RPE
 #---
 
-#+++ Calculate kinetic energy
-def calculate_kinetic_energy(ds, time_idx):
-    """Calculate total kinetic energy (3D: x, y, z)"""
-    u = ds.u.isel(time=time_idx)
-    v = ds.v.isel(time=time_idx)
-    w = ds.w.isel(time=time_idx)
+#+++ Calculate kinetic energy time series
+def calculate_ke_timeseries(ds):
+    """Calculate KE for all time steps"""
+    print("Calculating KE time series...")
+
+    ke = 0.5 * rho_0 * (ds.u**2 + ds.v**2 + ds.w**2)
 
     # Get grid spacing from dataset
     dx = ds.Δx_caa
@@ -170,28 +169,8 @@ def calculate_kinetic_energy(ds, time_idx):
     dz = ds.Δz_aac
 
     # Create dV array
-    nx, ny, nz = u.shape
-    dV = np.zeros_like(u)
-    for i in range(nx):
-        for j in range(ny):
-            for k in range(nz):
-                dV[i, j, k] = dx[i] * dy[j] * dz[k]
-
-    KE = 0.5 * rho_0 * np.sum((u**2 + w**2) * dV)
-    return KE
-#---
-
-#+++ Calculate kinetic energy time series
-def calculate_ke_timeseries(ds):
-    """Calculate KE for all time steps"""
-    print("Calculating KE time series...")
-
-    n_times = len(ds.time)
-    KE = np.zeros(n_times)
-
-    for i in range(n_times):
-        print(f"  Processing time step {i+1}/{n_times}", end='\r')
-        KE[i] = calculate_kinetic_energy(ds, i)
+    dV = dx * dy * dz
+    KE = np.sum(ke * dV)
 
     print("\nDone!")
     return KE

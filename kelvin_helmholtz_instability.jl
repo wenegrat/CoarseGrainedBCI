@@ -43,13 +43,14 @@ u, v, w = model.velocities
 b = model.tracers.b
 
 u_center = @at (Center, Center, Center) u
+v_center = @at (Center, Center, Center) v
 w_center = @at (Center, Center, Center) w
 
 vorticity = Field(∂z(u) - ∂x(w))
 
 using NCDatasets
 simulation.output_writers[:fields] =
-    NetCDFWriter(model, (ω=vorticity, b=b, u=u_center, w=w_center),
+    NetCDFWriter(model, (ω=vorticity, b=b, u=u_center, v=v_center, w=w_center),
                  schedule = TimeInterval(0.5),
                  filename = "kelvin_helmholtz_instability",
                  indices = (:, 1, :),
