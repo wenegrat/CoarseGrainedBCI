@@ -28,6 +28,13 @@ def load_data(filename):
     ds.attrs["Ly"] = np.diff(grid.y)
     ds.attrs["Lz"] = np.diff(grid.z)
 
+    ds.attrs["x_min"] = grid.x.min()
+    ds.attrs["x_max"] = grid.x.max()
+    ds.attrs["y_min"] = grid.y.min()
+    ds.attrs["y_max"] = grid.y.max()
+    ds.attrs["z_min"] = grid.z.min()
+    ds.attrs["z_max"] = grid.z.max()
+
     # Convert buoyancy to density
     # b = g * (rho_0 - rho) / rho_0  =>  rho = rho_0 * (1 - b/g)
     ds["rho"] = rho_0 * (1 - ds.b / g)
@@ -42,7 +49,7 @@ def load_data(filename):
 #---
 
 #+++ Vertical sort density
-def vertical_sort_density(rho, dV, LxLy, test=False):
+def vertical_sort_density(rho, dV, LxLy, test=False, z_min=0):
     """
     Sort the density field to obtain the reference state
 
@@ -82,7 +89,9 @@ def vertical_sort_density(rho, dV, LxLy, test=False):
     # Sort dz_flat using the same permutation
     dz_flat_1d_sorted = dz_flat_1d[sort_indices]
     rho_1d_sorted = rho_1d[sort_indices]
-    z_star = np.cumsum(dz_flat_1d_sorted)
+    # from IPython import embed; embed()
+    z_star = np.cumsum(dz_flat_1d_sorted) + z_min + dz_flat_1d_sorted[0]/2
+
     return dz_flat_1d_sorted, z_star, rho_1d_sorted
 #---
 
@@ -121,7 +130,7 @@ def calculate_ape_sorting(ds, time_idx, test=False):
 
     # Sort the density field to get reference state
     LxLy = ds.Lx * ds.Ly
-    dz_flat_1d_sorted, z_star, rho_1d_sorted = vertical_sort_density(rho, dV, LxLy, test=test)
+    dz_flat_1d_sorted, z_star, rho_1d_sorted = vertical_sort_density(rho, dV, LxLy, test=test, z_min=ds.z_min)
 
     if test:
         assert(all(np.diff(rho_1d_sorted) >= 0))
@@ -240,7 +249,7 @@ filename = "kelvin_helmholtz_instability.nc"
 ds = load_data(filename)
 
 # Use a single time step to test the sorting method
-APE, TPE, RPE = calculate_ape_timeseries(ds.isel(time=[10]), test=True)
+APE, TPE, RPE = calculate_ape_timeseries(ds.isel(time=[0]), test=True)
 
 # Calculate PE time series
 APE, TPE, RPE = calculate_ape_timeseries(ds, test=False)
