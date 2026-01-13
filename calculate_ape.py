@@ -95,7 +95,7 @@ def vertical_sort_density(rho, dV, LxLy, test=False, z_min=0):
         assert(dz_flat.sum().values == ds.Lz)
 
     # Get the permutation indices used to sort rho_1d
-    sort_indices = np.argsort(rho_1d)
+    sort_indices = np.argsort(-rho_1d) # descending order since this is density
 
     # Sort dz_flat using the same permutation
     dz_flat_1d_sorted = dz_flat_1d[sort_indices]
@@ -127,7 +127,7 @@ def calculate_reference_potential_energy(ds, time_idx, test=False):
     dz_flat_1d_sorted, z_star, rho_1d_sorted = vertical_sort_density(rho, ds.dV, ds.LxLy, test=test, z_min=ds.z_min)
 
     if test:
-        assert(all(np.diff(rho_1d_sorted) >= 0))
+        assert(all(np.diff(rho_1d_sorted) <= 0))
         assert(all(np.diff(z_star) > 0))
         assert(np.sum(dz_flat_1d_sorted) == ds.Lz)
 
@@ -255,7 +255,11 @@ APE, TPE, RPE = calculate_ape_timeseries(ds0, test=True)
 
 val1 = integrate(ds0.pe, ds0.dV)
 val2 = - rho_0 * integrate(ds0.b * ds0.z_aac, ds0.dV)
-assert np.isclose(val1, val2, rtol=1e-3), f"Mismatch: pe integral={val1}, -b*z integral={val2}"
+assert np.isclose(val1, val2, rtol=1e-3), f"Mismatch: pe integral={val1.values}, -b*z integral={val2.values}"
+
+val3 = calculate_reference_potential_energy(ds, 0, test=True)
+val4 = calculate_total_potential_energy(ds0.rho, ds=ds)
+assert np.isclose(val3, val4, rtol=1e-1), f"Mismatch: reference PE={val3}, total PE={val4}"
 
 # Calculate PE time series
 APE, TPE, RPE = calculate_ape_timeseries(ds, test=False)
@@ -297,5 +301,3 @@ print("Saved: kelvin_helmholtz_energy_timeseries.png")
 fig2 = plot_energy_budget(ds, APE, KE)
 fig2.savefig('kelvin_helmholtz_energy_budget.png', dpi=150, bbox_inches='tight')
 print("Saved: kelvin_helmholtz_energy_budget.png")
-
-plt.show()
