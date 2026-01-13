@@ -26,7 +26,7 @@ shear_flow(x, z) = tanh(z)
 stratification(x, z) = h * Ri * tanh(z / h)
 
 # Small perturbation to trigger instability
-perturbation(x, z) = 0.01 * sin(2π * x / 10) * exp(-z^2 / 2)
+perturbation(x, z) = 0 * sin(2π * x / 10) * exp(-z^2 / 2)
 
 # Set initial conditions
 uᵢ(x, y, z) = shear_flow(x, z)
@@ -36,7 +36,7 @@ wᵢ(x, y, z) = 0.01 * cos(2π * x / 10) * exp(-z^2 / 2)
 set!(model, u=uᵢ, b=bᵢ, w=wᵢ)
 
 # Setup simulation
-simulation = Simulation(model, Δt=0.01, stop_time=50.0)
+simulation = Simulation(model, Δt=0.01, stop_time=100.0)
 
 # Add output writer
 u, v, w = model.velocities
