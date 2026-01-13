@@ -91,8 +91,7 @@ def vertical_sort_density(rho, dV, LxLy, test=False, z_min=0):
 
     dz_flat = dV / LxLy # 3D DataArray with the same shape as rho
     dz_flat_1d = np.ravel(dz_flat.values, order='C')
-    if test:
-        assert(dz_flat.sum().values == ds.Lz)
+    if test: assert(dz_flat.sum().values == ds.Lz)
 
     # Get the permutation indices used to sort rho_1d
     sort_indices = np.argsort(-rho_1d) # descending order since this is density
@@ -184,9 +183,9 @@ def calculate_ke_timeseries(ds):
 #+++ Plot energy timeseries
 def plot_energy_timeseries(ds, APE, TPE, RPE, KE=None):
     """Plot APE and energy components over time"""
-    fig, axes = plt.subplots(2, 1, figsize=(10, 8))
+    fig, axes = plt.subplots(3, 1, figsize=(10, 12))
 
-    # Plot 1: APE, TPE, RPE
+    # Plot 1: TPE and RPE
     ax1 = axes[0]
     ax1.plot(ds.time, TPE, label='Total PE', linewidth=2)
     ax1.plot(ds.time, RPE, label='Reference PE', linewidth=2)
@@ -213,28 +212,22 @@ def plot_energy_timeseries(ds, APE, TPE, RPE, KE=None):
     ax2.grid(True, alpha=0.3)
     ax2.set_title('Available Potential Energy and Kinetic Energy')
 
-    plt.tight_layout()
-    return fig
-#---
+    # Plot 3: Normalized energy budget
+    ax3 = axes[2]
+    if KE is not None:
+        total_energy = APE + KE
+        total_energy_norm = total_energy / total_energy[0]
 
-#+++ Plot energy budget
-def plot_energy_budget(ds, APE, KE):
-    """Plot energy budget showing APE to KE conversion"""
-    fig, ax = plt.subplots(figsize=(10, 6))
+        ax3.plot(ds.time, APE / APE[0], label='APE (normalized)', linewidth=2, color='red')
+        ax3.plot(ds.time, KE / KE[0], label='KE (normalized)', linewidth=2, color='blue')
+        ax3.plot(ds.time, total_energy_norm, label='Total (APE + KE, normalized)',
+                linewidth=2, color='black', linestyle='--')
 
-    total_energy = APE + KE
-    total_energy_norm = total_energy / total_energy[0]
-
-    ax.plot(ds.time, APE / APE[0], label='APE (normalized)', linewidth=2, color='red')
-    ax.plot(ds.time, KE / KE[0], label='KE (normalized)', linewidth=2, color='blue')
-    ax.plot(ds.time, total_energy_norm, label='Total (APE + KE, normalized)',
-            linewidth=2, color='black', linestyle='--')
-
-    ax.set_xlabel('Time')
-    ax.set_ylabel('Normalized Energy')
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-    ax.set_title('Energy Budget: APE to KE Conversion')
+        ax3.set_xlabel('Time')
+        ax3.set_ylabel('Normalized Energy')
+        ax3.legend()
+        ax3.grid(True, alpha=0.3)
+        ax3.set_title('Energy Budget: APE to KE Conversion')
 
     plt.tight_layout()
     return fig
@@ -294,10 +287,6 @@ print("\nResults saved to: kelvin_helmholtz_ape.nc")
 # Create plots
 print("\nCreating plots...")
 
-fig1 = plot_energy_timeseries(ds, APE, TPE, RPE, KE)
-fig1.savefig('kelvin_helmholtz_energy_timeseries.png', dpi=150, bbox_inches='tight')
-print("Saved: kelvin_helmholtz_energy_timeseries.png")
-
-fig2 = plot_energy_budget(ds, APE, KE)
-fig2.savefig('kelvin_helmholtz_energy_budget.png', dpi=150, bbox_inches='tight')
-print("Saved: kelvin_helmholtz_energy_budget.png")
+fig = plot_energy_timeseries(ds, APE, TPE, RPE, KE)
+fig.savefig('kelvin_helmholtz_energy_analysis.png', dpi=150, bbox_inches='tight')
+print("Saved: kelvin_helmholtz_energy_analysis.png")
