@@ -5,13 +5,16 @@ using CairoMakie
 using Printf
 
 # Setup grid
-grid = RectilinearGrid(size=(128, 1, 128), x=(-5, 5), y=(-5, 5), z=(-5, 5),
+Nx = Nz = 128
+Lx = Ly = Lz = 10
+grid = RectilinearGrid(size=(Nx, 1, Nz), x=(-Lx/2, Lx/2), y=(-Ly/2, Ly/2), z=(-Lz/2, Lz/2),
                        topology=(Periodic, Periodic, Bounded))
 
 # Create model without background fields
+ν = 2e-3
 model = NonhydrostaticModel(grid;
                             advection = UpwindBiased(order=5),
-                            closure = ScalarDiffusivity(ν=2e-4, κ=2e-4),
+                            closure = ScalarDiffusivity(ν=ν, κ=ν),
                             buoyancy = BuoyancyTracer(),
                             tracers = :b)
 
@@ -36,7 +39,7 @@ wᵢ(x, y, z) = 0.01 * cos(2π * x / 10) * exp(-z^2 / 2)
 set!(model, u=uᵢ, b=bᵢ, w=wᵢ)
 
 # Setup simulation
-simulation = Simulation(model, Δt=0.01, stop_time=100.0)
+simulation = Simulation(model, Δt=0.01, stop_time=200.0)
 
 # Add output writer
 u, v, w = model.velocities
@@ -46,14 +49,19 @@ u_center = @at (Center, Center, Center) u
 v_center = @at (Center, Center, Center) v
 w_center = @at (Center, Center, Center) w
 
+using Oceanostics: PotentialEnergyEquation
+ρ₀ = 1025 # kg/ m^3
+pe = ρ₀ * PotentialEnergyEquation.PotentialEnergy(model)
+
+PE = Integral(pe)
+
 vorticity = Field(∂z(u) - ∂x(w))
 
 using NCDatasets
 simulation.output_writers[:fields] =
-    NetCDFWriter(model, (ω=vorticity, b=b, u=u_center, v=v_center, w=w_center),
-                 schedule = TimeInterval(0.5),
+    NetCDFWriter(model, (; ω=vorticity, b, pe, PE, u=u_center, v=v_center, w=w_center),
+                 schedule = TimeInterval(2),
                  filename = "kelvin_helmholtz_instability",
-                 indices = (:, 1, :),
                  overwrite_existing = true)
 
 # Run simulation

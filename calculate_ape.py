@@ -11,7 +11,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 import scipy.integrate as integrate
-from pathlib import Path
 
 # Physical constants
 g = 9.81  # gravitational acceleration [m/s^2]
@@ -49,7 +48,7 @@ def load_data(filename):
     # Convert buoyancy to density
     # b = g * (rho_0 - rho) / rho_0  =>  rho = rho_0 * (1 - b/g)
     ds["rho"] = rho_0 * (1 - ds.b / g)
-    ds["rho_z"] = rho_0 * (ds.z_aac + ds.pe / g) # pe  = -b*z
+    ds["rho_z"] = (rho_0 * ds.z_aac + ds.pe / g) # pe  = -b*z
 
     # Add coordinate arrays
     if "z_aac" in ds.coords:
@@ -246,7 +245,7 @@ filename = "kelvin_helmholtz_instability.nc"
 ds = load_data(filename)
 
 TPE_online_from_r = g * integrate(ds.rho_z, ds.dV) # g ∭ ρz dV
-TPE_online_from_b = integrate(rho_0 * ds.pe, ds.dV) # ρ₀ ∭ (-bz) dV
+TPE_online_from_b = integrate(ds.pe, ds.dV) # ∭ (-ρ₀ bz) dV
 TPE_offline_from_r = calculate_total_potential_energy(ds.rho, ds=ds) # g ∭ ρz dV
 assert all(np.isclose(TPE_online_from_r, TPE_online_from_b, rtol=1e-3)), f"Mismatch: rho_z integral={TPE_online_from_r}, -pe integral={TPE_online_from_b}"
 
@@ -255,7 +254,7 @@ ds0 = ds.isel(time=[0])
 APE, TPE, RPE = calculate_ape_timeseries(ds0, test=True)
 
 val1 = integrate(ds0.pe, ds0.dV)
-val2 = integrate(-ds0.b * ds0.z_aac, ds0.dV)
+val2 = - rho_0 * integrate(ds0.b * ds0.z_aac, ds0.dV)
 assert np.isclose(val1, val2, rtol=1e-3), f"Mismatch: pe integral={val1}, -b*z integral={val2}"
 
 # Calculate PE time series
