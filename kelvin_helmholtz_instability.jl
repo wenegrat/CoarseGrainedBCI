@@ -3,11 +3,23 @@
 using Oceananigans
 using CairoMakie
 using Printf
+using CUDA: has_cuda_gpu
 
-# Setup grid
-Nx = Nz = 128
+# Check for CUDA and set architecture
 Lx = Ly = Lz = 10
-grid = RectilinearGrid(size=(Nx, 1, Nz), x=(-Lx/2, Lx/2), y=(-Ly/2, Ly/2), z=(-Lz/2, Lz/2),
+Nx = Nz = 128
+if has_cuda_gpu()
+    arch = GPU()
+    Ny = 128
+    @info "CUDA GPU detected! Running 3D simulation with $(Nx)×$(Ny)×$(Nz) grid on GPU"
+else
+    arch = CPU()
+    Ny = 1
+    @info "No CUDA GPU detected. Running 2D simulation with $(Nx)×$(Ny)×$(Nz) grid on CPU"
+end
+
+grid = RectilinearGrid(arch; size=(Nx, Ny, Nz),
+                       x=(-Lx/2, Lx/2), y=(-Ly/2, Ly/2), z=(-Lz/2, Lz/2),
                        topology=(Periodic, Periodic, Bounded))
 
 # Create model without background fields
@@ -38,10 +50,37 @@ wᵢ(x, y, z) = 0.01 * cos(2π * x / 10) * exp(-z^2 / 2)
 
 set!(model, u=uᵢ, b=bᵢ, w=wᵢ)
 
-# Setup simulation
+#+++ Setup simulation
 simulation = Simulation(model, Δt=0.01, stop_time=200.0)
 
-# Add output writer
+#+++ Add progress messenger
+using Oceanostics.ProgressMessengers
+walltime_per_timestep = StepDuration(with_prefix=false)
+walltime = Walltime()
+
+progress(simulation) = @info (PercentageProgress(with_prefix=false, with_units=false)
+                              + walltime
+                              + TimeStep()
+                              + "CFL = " * AdvectiveCFLNumber(with_prefix=false)
+                              + "Diffusive CFL = " * DiffusiveCFLNumber(with_prefix=false)
+                              + MaxUVelocity()
+                              + "step dur = " * walltime_per_timestep
+                              )(simulation)
+simulation.callbacks[:progress] = Callback(progress, IterationInterval(20))
+#---
+
+#+++ Add TimeStepWizard for adaptive timestepping
+N²_max = ∂z(b) |> Field |> maximum
+max_Δt = 0.2 / √N²_max # Max timestep is 0.2 times the buoyancy period
+conjure_time_step_wizard!(simulation, IterationInterval(1);
+                          max_change=1.05,
+                          cfl=0.7,
+                          min_Δt=1e-4,
+                          max_Δt)
+#---
+#---
+
+#+++ Add output writer
 u, v, w = model.velocities
 b = model.tracers.b
 
@@ -58,15 +97,25 @@ PE = Integral(pe)
 vorticity = Field(∂z(u) - ∂x(w))
 
 using NCDatasets
+output_filename = "kelvin_helmholtz_instability_$(Nx)x$(Ny)x$(Nz)"
 simulation.output_writers[:fields] =
     NetCDFWriter(model, (; ω=vorticity, b, pe, PE, u=u_center, v=v_center, w=w_center),
                  schedule = TimeInterval(2),
-                 filename = "kelvin_helmholtz_instability",
+                 filename = output_filename,
                  overwrite_existing = true)
+
+@info "Output will be saved to: $(output_filename).nc"
+#---
 
 # Run simulation
 @info "Running Kelvin-Helmholtz instability simulation..."
 run!(simulation)
+
+# Show GPU status after simulation if available
+if has_cuda_gpu()
+    @info "Simulation complete. Final GPU status:"
+    show_gpu_status()
+end
 
 # Load and plot results
 @info "Creating animation..."
@@ -101,9 +150,10 @@ Colorbar(fig[2, 4], hm_b)
 
 frames = 1:length(times)
 
-record(fig, "kelvin_helmholtz_instability.mp4", frames, framerate=8) do i
+animation_filename = output_filename * ".mp4"
+record(fig, animation_filename, frames, framerate=12) do i
     @info "Plotting frame $i of $(frames[end])..."
     n[] = i
 end
 
-@info "Animation saved as kelvin_helmholtz_instability.mp4"
+@info "Animation saved as $(animation_filename)"
