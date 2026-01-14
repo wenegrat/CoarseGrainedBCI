@@ -102,7 +102,7 @@ PE = Integral(pe)
 vorticity = Field(∂z(u) - ∂x(w))
 
 using NCDatasets
-output_filename = "kelvin_helmholtz_instability_$(Nx)x$(Ny)x$(Nz)"
+output_filename = "output/kelvin_helmholtz_instability_$(Nx)x$(Ny)x$(Nz)"
 simulation.output_writers[:fields] =
     NetCDFWriter(model, (; ω=vorticity, b, pe, PE, u=u_center, v=v_center, w=w_center),
                  schedule = TimeInterval(2),
@@ -153,7 +153,7 @@ Colorbar(fig[2, 4], hm_b)
 
 frames = 1:length(times)
 
-animation_filename = output_filename * ".mp4"
+animation_filename = "animations/$(output_filename).mp4"
 record(fig, animation_filename, frames, framerate=12) do i
     @info "Plotting frame $i of $(frames[end])..."
     n[] = i
