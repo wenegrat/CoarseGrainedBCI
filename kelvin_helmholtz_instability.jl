@@ -4,8 +4,9 @@ using Oceananigans
 using CairoMakie
 using Printf
 using CUDA: has_cuda_gpu
+using Oceananigans.Architectures: on_architecture
 
-# Check for CUDA and set architecture
+#+++ Create grid
 Lx = Ly = Lz = 10
 Nx = Nz = 128
 if has_cuda_gpu()
@@ -21,8 +22,9 @@ end
 grid = RectilinearGrid(arch; size=(Nx, Ny, Nz),
                        x=(-Lx/2, Lx/2), y=(-Ly/2, Ly/2), z=(-Lz/2, Lz/2),
                        topology=(Periodic, Periodic, Bounded))
+#---
 
-# Create model without background fields
+#+++ Create model
 ν = 2e-3
 model = NonhydrostaticModel(grid;
                             advection = UpwindBiased(order=5),
@@ -30,9 +32,14 @@ model = NonhydrostaticModel(grid;
                             buoyancy = BuoyancyTracer(),
                             tracers = :b)
 
-# Define initial conditions: shear flow with stratification and perturbation
+u, v, w = model.velocities
+b = model.tracers.b
+#---
+
+#+++ Define initial conditions: shear flow with stratification and perturbation
 Ri = 0.1
 h = 1/4
+perturbation_amplitude = 0
 
 # Base shear flow
 shear_flow(x, z) = tanh(z)
@@ -41,14 +48,15 @@ shear_flow(x, z) = tanh(z)
 stratification(x, z) = h * Ri * tanh(z / h)
 
 # Small perturbation to trigger instability
-perturbation(x, z) = 0 * sin(2π * x / 10) * exp(-z^2 / 2)
+perturbation(x, z) = perturbation_amplitude * sin(2π * x / 10) * exp(-z^2 / 2)
 
 # Set initial conditions
 uᵢ(x, y, z) = shear_flow(x, z)
 bᵢ(x, y, z) = stratification(x, z) + perturbation(x, z)
-wᵢ(x, y, z) = 0.01 * cos(2π * x / 10) * exp(-z^2 / 2)
+wᵢ(x, y, z) = perturbation_amplitude * cos(2π * x / 10) * exp(-z^2 / 2)
 
 set!(model, u=uᵢ, b=bᵢ, w=wᵢ)
+#---
 
 #+++ Setup simulation
 simulation = Simulation(model, Δt=0.01, stop_time=200.0)
@@ -81,9 +89,6 @@ conjure_time_step_wizard!(simulation, IterationInterval(1);
 #---
 
 #+++ Add output writer
-u, v, w = model.velocities
-b = model.tracers.b
-
 u_center = @at (Center, Center, Center) u
 v_center = @at (Center, Center, Center) v
 w_center = @at (Center, Center, Center) w
@@ -111,26 +116,24 @@ simulation.output_writers[:fields] =
 @info "Running Kelvin-Helmholtz instability simulation..."
 run!(simulation)
 
-# Show GPU status after simulation if available
-if has_cuda_gpu()
-    @info "Simulation complete. Final GPU status:"
-    show_gpu_status()
-end
-
-# Load and plot results
+#+++ Load and plot results
 @info "Creating animation..."
 
 filepath = simulation.output_writers[:fields].filepath
 
-ω_timeseries = FieldTimeSeries(filepath, "ω")
-b_timeseries = FieldTimeSeries(filepath, "b")
+ω_timeseries = FieldTimeSeries(filepath, "ω", architecture=CPU())
+b_timeseries = FieldTimeSeries(filepath, "b", architecture=CPU())
+
+# The architecture of the FieldTimeSeries isn't working as expected, so we need to load the data on the CPU manually:
+ω_timeseries = on_architecture(CPU(), ω_timeseries)
+b_timeseries = on_architecture(CPU(), b_timeseries)
 
 times = ω_timeseries.times
 
 n = Observable(1)
 
-ωₙ = @lift ω_timeseries[$n]
-bₙ = @lift b_timeseries[$n]
+ωₙ = @lift view(ω_timeseries[$n], :, 1, :)
+bₙ = @lift view(b_timeseries[$n], :, 1, :)
 
 fig = Figure(size=(900, 500))
 
@@ -157,3 +160,4 @@ record(fig, animation_filename, frames, framerate=12) do i
 end
 
 @info "Animation saved as $(animation_filename)"
+#---
