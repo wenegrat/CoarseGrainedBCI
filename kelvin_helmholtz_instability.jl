@@ -39,7 +39,7 @@ b = model.tracers.b
 #+++ Define initial conditions: shear flow with stratification and perturbation
 Ri = 0.1
 h = 1/4
-perturbation_amplitude = 0
+perturbation_amplitude = 0.01
 
 # Base shear flow
 shear_flow(x, z) = tanh(z)
@@ -52,7 +52,7 @@ perturbation(x, z) = perturbation_amplitude * sin(2π * x / 10) * exp(-z^2 / 2)
 
 # Set initial conditions
 uᵢ(x, y, z) = shear_flow(x, z)
-bᵢ(x, y, z) = stratification(x, z) + perturbation(x, z)
+bᵢ(x, y, z) = stratification(x, z)
 wᵢ(x, y, z) = perturbation_amplitude * cos(2π * x / 10) * exp(-z^2 / 2)
 
 set!(model, u=uᵢ, b=bᵢ, w=wᵢ)
@@ -82,7 +82,7 @@ N²_max = ∂z(b) |> Field |> maximum
 max_Δt = 0.2 / √N²_max # Max timestep is 0.2 times the buoyancy period
 conjure_time_step_wizard!(simulation, IterationInterval(1);
                           max_change=1.05,
-                          cfl=0.7,
+                          cfl=0.8,
                           min_Δt=1e-4,
                           max_Δt)
 #---
@@ -153,7 +153,7 @@ Colorbar(fig[2, 4], hm_b)
 
 frames = 1:length(times)
 
-animation_filename = "animations/$(output_filename).mp4"
+animation_filename = "animations/$(basename(output_filename)).mp4"
 record(fig, animation_filename, frames, framerate=12) do i
     @info "Plotting frame $i of $(frames[end])..."
     n[] = i
