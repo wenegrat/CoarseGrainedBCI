@@ -28,7 +28,7 @@ def integrate(da, dV):
 def load_data(filename):
     """Load the simulation output"""
     print(f"Loading data from {filename}...")
-    ds = xr.open_dataset(filename)
+    ds = xr.open_dataset(filename, decode_times=False)
     grid = xr.open_dataset(filename, group="underlying_grid_reconstruction_kwargs")
 
     ds.attrs["Lx"] = np.diff(grid.x)
@@ -234,7 +234,7 @@ def plot_energy_timeseries(ds, APE, TPE, RPE, KE=None):
 #---
 
 # File path to the simulation output
-filename = "kelvin_helmholtz_instability.nc"
+filename = "output/kelvin_helmholtz_instability_256x128x256.nc"
 ds = load_data(filename)
 
 TPE_online_from_r = g * integrate(ds.rho_z, ds.dV) # g ∭ ρz dV
@@ -264,11 +264,7 @@ KE = calculate_ke_timeseries(ds)
 print("\n" + "="*60)
 print("APE Calculation Summary")
 print("="*60)
-print(f"Initial APE: {APE[0]:.4e}")
-print(f"Final APE:   {APE[-1]:.4e}")
 print(f"APE Change:  {APE[-1] - APE[0]:.4e} ({(APE[-1]/APE[0] - 1)*100:.2f}%)")
-print(f"\nInitial KE:  {KE[0]:.4e}")
-print(f"Final KE:    {KE[-1]:.4e}")
 print(f"KE Change:   {KE[-1] - KE[0]:.4e} ({(KE[-1]/KE[0] - 1)*100:.2f}%)")
 print(f"\nTotal Energy Conservation: {(APE[-1] + KE[-1]) / (APE[0] + KE[0]):.6f}")
 print("="*60)
@@ -287,6 +283,8 @@ print("\nResults saved to: kelvin_helmholtz_ape.nc")
 # Create plots
 print("\nCreating plots...")
 
+from os.path import basename
+figname = f"figures/{basename(filename)}_energy_analysis.png"
 fig = plot_energy_timeseries(ds, APE, TPE, RPE, KE)
-fig.savefig('kelvin_helmholtz_energy_analysis.png', dpi=150, bbox_inches='tight')
-print("Saved: kelvin_helmholtz_energy_analysis.png")
+fig.savefig(figname, dpi=150, bbox_inches='tight')
+print(f"Saved: {figname}")
