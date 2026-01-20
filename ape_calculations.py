@@ -13,13 +13,53 @@ g = 9.81  # gravitational acceleration [m/s^2]
 rho_0 = 1025  # reference density [kg/m^3]
 
 
+#+++ Auxiliary functions
+def volume_sum(da):
+    return da.sum(("x_caa", "y_aca", "z_aac"))
+
 def integrate(da, dV):
     """Integrate a DataArray over spatial dimensions"""
     return (da * dV).sum(("x_caa", "y_aca", "z_aac"))
+#---
+
+#+++ Load data
+def load_data(filename):
+    """Load the simulation output"""
+    print(f"Loading data from {filename}...")
+    ds = xr.open_dataset(filename, decode_times=False)
+    grid = xr.open_dataset(filename, group="underlying_grid_reconstruction_kwargs")
+
+    ds.attrs["Lx"] = np.diff(grid.x)
+    ds.attrs["Ly"] = np.diff(grid.y)
+    ds.attrs["Lz"] = np.diff(grid.z)
+
+    ds.attrs["x_min"] = grid.x.min()
+    ds.attrs["x_max"] = grid.x.max()
+    ds.attrs["y_min"] = grid.y.min()
+    ds.attrs["y_max"] = grid.y.max()
+    ds.attrs["z_min"] = grid.z.min()
+    ds.attrs["z_max"] = grid.z.max()
+
+    ds["dV"] = ds.Δx_caa * ds.Δy_aca * ds.Δz_aac
+    ds["LxLy"] = ds.Lx * ds.Ly
+
+    # Convert buoyancy to density
+    # b = g * (rho_0 - rho) / rho_0  =>  rho = rho_0 * (1 - b/g)
+    ds["rho"] = rho_0 * (1 - ds.b / g)
+    ds["rho_z"] = (rho_0 * ds.z_aac + ds.pe / g) # pe  = -b*z
+
+    # Add coordinate arrays
+    if "z_aac" in ds.coords:
+        ds["Z"] = ds.rho * 0 + ds.z_aac
+    else:
+        print("Warning: z_aac coordinate not found, trying to infer from data")
+
+    return ds
+#---
 
 
 #+++ Vertical sort density
-def vertical_sort_density(rho, dV, LxLy, test=False, z_min=0):
+def vertical_sort_density(rho, dV, LxLy, test=False, z_min=0, Lz=None):
     """
     Sort the density field to obtain the reference state
 
@@ -36,6 +76,8 @@ def vertical_sort_density(rho, dV, LxLy, test=False, z_min=0):
         Horizontal area (Lx * Ly)
     test : bool
         Whether to test the sorting
+    Lz : float, optional
+        Total vertical extent for testing
 
     Returns
     -------
@@ -50,8 +92,8 @@ def vertical_sort_density(rho, dV, LxLy, test=False, z_min=0):
 
     dz_flat = dV / LxLy # 3D DataArray with the same shape as rho
     dz_flat_1d = np.ravel(dz_flat.values, order='C')
-    if test:
-        assert(dz_flat.sum().values == ds.Lz)
+    if test and Lz is not None:
+        assert(dz_flat.sum().values == Lz)
 
     # Get the permutation indices used to sort rho_1d
     sort_indices = np.argsort(-rho_1d) # descending order since this is density
@@ -102,7 +144,7 @@ def calculate_reference_potential_energy(ds, time_idx, test=False):
     rho = ds.rho.isel(time=time_idx)
 
     # Sort the density field to get reference state
-    vertically_sorted_ds, threed_sorted_ds = vertical_sort_density(rho, ds.dV, ds.LxLy, test=test, z_min=ds.z_min)
+    vertically_sorted_ds, threed_sorted_ds = vertical_sort_density(rho, ds.dV, ds.LxLy, test=test, z_min=ds.z_min, Lz=ds.Lz)
 
     if test:
         assert(all(np.diff(vertically_sorted_ds.rho_1d_sorted) <= 0))

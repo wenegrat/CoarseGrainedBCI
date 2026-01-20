@@ -7,7 +7,6 @@ and calculates the APE using the sorting method following Winters et al. (1995)
 and the approaches used in CrossScaleAPE notebooks.
 """
 
-import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 import scipy.integrate as integrate
@@ -18,106 +17,13 @@ from ape_calculations import (
     calculate_reference_potential_energy,
     calculate_total_potential_energy,
     vertical_sort_density,
+    load_data,
+    integrate,
     g,
     rho_0,
 )
-
-
-#+++ Auxiliary functions
-def sum(da):
-    return da.sum(("x_caa", "y_aca", "z_aac"))
-
-def integrate(da, dV):
-    return (da * dV).sum(("x_caa", "y_aca", "z_aac"))
-#---
-
-#+++ Load data
-def load_data(filename):
-    """Load the simulation output"""
-    print(f"Loading data from {filename}...")
-    ds = xr.open_dataset(filename, decode_times=False)
-    grid = xr.open_dataset(filename, group="underlying_grid_reconstruction_kwargs")
-
-    ds.attrs["Lx"] = np.diff(grid.x)
-    ds.attrs["Ly"] = np.diff(grid.y)
-    ds.attrs["Lz"] = np.diff(grid.z)
-
-    ds.attrs["x_min"] = grid.x.min()
-    ds.attrs["x_max"] = grid.x.max()
-    ds.attrs["y_min"] = grid.y.min()
-    ds.attrs["y_max"] = grid.y.max()
-    ds.attrs["z_min"] = grid.z.min()
-    ds.attrs["z_max"] = grid.z.max()
-
-    ds["dV"] = ds.Δx_caa * ds.Δy_aca * ds.Δz_aac
-    ds["LxLy"] = ds.Lx * ds.Ly
-
-    # Convert buoyancy to density
-    # b = g * (rho_0 - rho) / rho_0  =>  rho = rho_0 * (1 - b/g)
-    ds["rho"] = rho_0 * (1 - ds.b / g)
-    ds["rho_z"] = (rho_0 * ds.z_aac + ds.pe / g) # pe  = -b*z
-
-    # Add coordinate arrays
-    if "z_aac" in ds.coords:
-        ds["Z"] = ds.rho * 0 + ds.z_aac
-    else:
-        print("Warning: z_aac coordinate not found, trying to infer from data")
-
-    return ds
-#---
-
-#+++ Plot energy timeseries
-def plot_energy_timeseries(ds, APE, TPE, RPE, KE=None):
-    """Plot APE and energy components over time"""
-    fig, axes = plt.subplots(3, 1, figsize=(10, 12))
-
-    # Plot 1: TPE and RPE
-    ax1 = axes[0]
-    ax1.plot(ds.time, TPE, label='Total PE', linewidth=2)
-    ax1.plot(ds.time, RPE, label='Reference PE', linewidth=2)
-    ax1.set_xlabel('Time')
-    ax1.set_ylabel('Potential Energy')
-    ax1.legend()
-    ax1.grid(True, alpha=0.3)
-    ax1.set_title('Potential Energy Components')
-
-    # Plot 2: APE and KE
-    ax2 = axes[1]
-    ax2.plot(ds.time, APE, label='APE', linewidth=2, color='red')
-    if KE is not None:
-        ax2_twin = ax2.twinx()
-        ax2_twin.plot(ds.time, KE, label='KE', linewidth=2, color='blue', alpha=0.7)
-        ax2_twin.set_ylabel('Kinetic Energy', color='blue')
-        ax2_twin.tick_params(axis='y', labelcolor='blue')
-        ax2_twin.legend(loc='upper right')
-
-    ax2.set_xlabel('Time')
-    ax2.set_ylabel('Available Potential Energy', color='red')
-    ax2.tick_params(axis='y', labelcolor='red')
-    ax2.legend(loc='upper left')
-    ax2.grid(True, alpha=0.3)
-    ax2.set_title('Available Potential Energy and Kinetic Energy')
-
-    # Plot 3: Normalized energy budget
-    ax3 = axes[2]
-    if KE is not None:
-        total_energy = APE + KE
-        total_energy_norm = total_energy / total_energy[0]
-
-        ax3.plot(ds.time, APE / APE[0], label='APE (normalized)', linewidth=2, color='red')
-        ax3.plot(ds.time, KE / KE[0], label='KE (normalized)', linewidth=2, color='blue')
-        ax3.plot(ds.time, total_energy_norm, label='Total (APE + KE, normalized)',
-                linewidth=2, color='black', linestyle='--')
-
-        ax3.set_xlabel('Time')
-        ax3.set_ylabel('Normalized Energy')
-        ax3.legend()
-        ax3.grid(True, alpha=0.3)
-        ax3.set_title('Energy Budget: APE to KE Conversion')
-
-    plt.tight_layout()
-    return fig
-#---
+from ape_plots import plot_energy_timeseries
+from matplotlib import pyplot as plt
 
 # File path to the simulation output
 filename = "output/kelvin_helmholtz_instability_128x1x128.nc"
