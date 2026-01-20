@@ -7,14 +7,16 @@ using CUDA: has_cuda_gpu
 using Oceananigans.Architectures: on_architecture
 
 #+++ Create grid
-Lx = Ly = Lz = 10
-Nx = Nz = 128
+Lx = Lz = 10
+Ly = 5
 if has_cuda_gpu()
     arch = GPU()
-    Ny = 128
+    Nx = Nz = 256
+    Ny = Nx÷2
     @info "CUDA GPU detected! Running 3D simulation with $(Nx)×$(Ny)×$(Nz) grid on GPU"
 else
     arch = CPU()
+    Nx = Nz = 128
     Ny = 1
     @info "No CUDA GPU detected. Running 2D simulation with $(Nx)×$(Ny)×$(Nz) grid on CPU"
 end
@@ -105,9 +107,18 @@ using NCDatasets
 output_filename = "output/kelvin_helmholtz_instability_$(Nx)x$(Ny)x$(Nz)"
 simulation.output_writers[:fields] =
     NetCDFWriter(model, (; ω=vorticity, b, pe, PE, u=u_center, v=v_center, w=w_center),
-                 schedule = TimeInterval(2),
+                 schedule = TimeInterval(4),
                  filename = output_filename,
                  overwrite_existing = true)
+
+output_filename_2d = "output/kelvin_helmholtz_instability_$(Nx)x$(Ny)x$(Nz)_2d.nc"
+simulation.output_writers[:twod_fields] =
+NetCDFWriter(model, (; ω=vorticity, b),
+            schedule = TimeInterval(2),
+            filename = output_filename_2d,
+            indices = (:, 1, :),
+            overwrite_existing = true)
+
 
 @info "Output will be saved to: $(output_filename).nc"
 #---
@@ -119,7 +130,7 @@ run!(simulation)
 #+++ Load and plot results
 @info "Creating animation..."
 
-filepath = simulation.output_writers[:fields].filepath
+filepath = simulation.output_writers[:twod_fields].filepath
 
 ω_timeseries = FieldTimeSeries(filepath, "ω", architecture=CPU())
 b_timeseries = FieldTimeSeries(filepath, "b", architecture=CPU())
