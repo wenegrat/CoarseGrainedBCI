@@ -91,7 +91,8 @@ def vertical_sort_density(rho, dV, LxLy, test=False, z_min=0):
 
     dz_flat = dV / LxLy # 3D DataArray with the same shape as rho
     dz_flat_1d = np.ravel(dz_flat.values, order='C')
-    if test: assert(dz_flat.sum().values == ds.Lz)
+    if test:
+        assert(dz_flat.sum().values == ds.Lz)
 
     # Get the permutation indices used to sort rho_1d
     sort_indices = np.argsort(-rho_1d) # descending order since this is density
@@ -101,10 +102,27 @@ def vertical_sort_density(rho, dV, LxLy, test=False, z_min=0):
     rho_1d_sorted = rho_1d[sort_indices]
     z_1d_sorted = np.cumsum(dz_flat_1d_sorted) + z_min + dz_flat_1d_sorted[0]/2
 
+    # Reshape z_1d_sorted back into the original shape used by rho
+    z_3d_sorted = z_1d_sorted.reshape(rho.shape, order="C")
+
+    # Reshape rho_1d_sorted back into the original shape used by rho
+    rho_3d_sorted = rho_1d_sorted.reshape(rho.shape, order="C")
+
+    # Put verticall sorted data into a Dataset
     rho_1d_sorted = xr.DataArray(rho_1d_sorted, dims="z_1d_sorted", coords=dict(z_1d_sorted=z_1d_sorted))
     dz_1d_sorted = xr.DataArray(dz_flat_1d_sorted, dims="z_1d_sorted", coords=dict(z_1d_sorted=z_1d_sorted))
+    vertically_sorted_ds = xr.Dataset(dict(rho_1d_sorted=rho_1d_sorted, dz_1d_sorted=dz_1d_sorted))
 
-    return xr.Dataset(dict(rho_1d_sorted=rho_1d_sorted, dz_1d_sorted=dz_1d_sorted))
+    # Put 3D sorted data into a Dataset
+    z_3d_sorted = xr.DataArray(z_3d_sorted, dims=rho.dims, coords=rho.coords)
+    rho_3d_sorted = xr.DataArray(rho_3d_sorted, dims=rho.dims, coords=rho.coords)
+    threed_sorted_ds = xr.Dataset(dict(rho_3d_sorted=rho_3d_sorted, z_3d_sorted=z_3d_sorted))
+
+    if test:
+        rho_3d_reshaped = rho_1d.reshape(rho.shape, order="C")
+        assert(np.all(rho == rho_3d_reshaped))
+
+    return vertically_sorted_ds, threed_sorted_ds
 #---
 
 #+++ Calculate TPE
@@ -125,16 +143,16 @@ def calculate_reference_potential_energy(ds, time_idx, test=False):
     rho = ds.rho.isel(time=time_idx)
 
     # Sort the density field to get reference state
-    sorted_ds = vertical_sort_density(rho, ds.dV, ds.LxLy, test=test, z_min=ds.z_min)
+    vertically_sorted_ds, threed_sorted_ds = vertical_sort_density(rho, ds.dV, ds.LxLy, test=test, z_min=ds.z_min)
 
     if test:
-        assert(all(np.diff(sorted_ds.rho_1d_sorted) <= 0))
-        assert(all(np.diff(sorted_ds.z_1d_sorted) > 0))
-        assert(np.sum(sorted_ds.dz_1d_sorted).values == ds.Lz)
+        assert(all(np.diff(vertically_sorted_ds.rho_1d_sorted) <= 0))
+        assert(all(np.diff(vertically_sorted_ds.z_1d_sorted) > 0))
+        assert(np.sum(vertically_sorted_ds.dz_1d_sorted).values == ds.Lz)
 
     # Calculate Reference Potential Energy (RPE)
-    dV_flat_1d_sorted = sorted_ds.dz_1d_sorted * ds.LxLy.values
-    return g * np.sum(sorted_ds.rho_1d_sorted * sorted_ds.z_1d_sorted * dV_flat_1d_sorted)
+    dV_flat_1d_sorted = vertically_sorted_ds.dz_1d_sorted * ds.LxLy.values
+    return g * np.sum(vertically_sorted_ds.rho_1d_sorted * vertically_sorted_ds.z_1d_sorted * dV_flat_1d_sorted)
 
 def calculate_potential_energies(ds, time_idx, test=False):
     """Calculate Available Potential Energy (APE)"""
