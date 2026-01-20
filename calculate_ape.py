@@ -99,10 +99,12 @@ def vertical_sort_density(rho, dV, LxLy, test=False, z_min=0):
     # Sort dz_flat using the same permutation
     dz_flat_1d_sorted = dz_flat_1d[sort_indices]
     rho_1d_sorted = rho_1d[sort_indices]
-    # from IPython import embed; embed()
-    z_star = np.cumsum(dz_flat_1d_sorted) + z_min + dz_flat_1d_sorted[0]/2
+    z_1d_sorted = np.cumsum(dz_flat_1d_sorted) + z_min + dz_flat_1d_sorted[0]/2
 
-    return dz_flat_1d_sorted, z_star, rho_1d_sorted
+    rho_1d_sorted = xr.DataArray(rho_1d_sorted, dims="z_1d_sorted", coords=dict(z_1d_sorted=z_1d_sorted))
+    dz_1d_sorted = xr.DataArray(dz_flat_1d_sorted, dims="z_1d_sorted", coords=dict(z_1d_sorted=z_1d_sorted))
+
+    return xr.Dataset(dict(rho_1d_sorted=rho_1d_sorted, dz_1d_sorted=dz_1d_sorted))
 #---
 
 #+++ Calculate TPE
@@ -123,16 +125,16 @@ def calculate_reference_potential_energy(ds, time_idx, test=False):
     rho = ds.rho.isel(time=time_idx)
 
     # Sort the density field to get reference state
-    dz_flat_1d_sorted, z_star, rho_1d_sorted = vertical_sort_density(rho, ds.dV, ds.LxLy, test=test, z_min=ds.z_min)
+    sorted_ds = vertical_sort_density(rho, ds.dV, ds.LxLy, test=test, z_min=ds.z_min)
 
     if test:
-        assert(all(np.diff(rho_1d_sorted) <= 0))
-        assert(all(np.diff(z_star) > 0))
-        assert(np.sum(dz_flat_1d_sorted) == ds.Lz)
+        assert(all(np.diff(sorted_ds.rho_1d_sorted) <= 0))
+        assert(all(np.diff(sorted_ds.z_1d_sorted) > 0))
+        assert(np.sum(sorted_ds.dz_1d_sorted).values == ds.Lz)
 
     # Calculate Reference Potential Energy (RPE)
-    dV_flat_1d_sorted = dz_flat_1d_sorted * ds.LxLy.values
-    return g * np.sum(rho_1d_sorted * z_star * dV_flat_1d_sorted)
+    dV_flat_1d_sorted = sorted_ds.dz_1d_sorted * ds.LxLy.values
+    return g * np.sum(sorted_ds.rho_1d_sorted * sorted_ds.z_1d_sorted * dV_flat_1d_sorted)
 
 def calculate_potential_energies(ds, time_idx, test=False):
     """Calculate Available Potential Energy (APE)"""
@@ -234,7 +236,7 @@ def plot_energy_timeseries(ds, APE, TPE, RPE, KE=None):
 #---
 
 # File path to the simulation output
-filename = "output/kelvin_helmholtz_instability_256x128x256.nc"
+filename = "output/kelvin_helmholtz_instability_128x1x128.nc"
 ds = load_data(filename)
 
 TPE_online_from_r = g * integrate(ds.rho_z, ds.dV) # g ∭ ρz dV
