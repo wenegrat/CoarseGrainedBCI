@@ -127,45 +127,147 @@ def vertical_sort_density(rho, dV, LxLy, test=False, z_min=0, Lz=None):
 #---
 
 #+++ Calculate TPE
-def calculate_total_potential_energy(rho, dV=None, ds=None):
-    """Calculate Total Potential Energy (TPE)"""
+def calculate_total_potential_energy(rho):
+    """
+    Calculate local Total Potential Energy density
+
+    Parameters
+    ----------
+    rho : xr.DataArray
+        Density field
+
+    Returns
+    -------
+    xr.DataArray
+        Local TPE density: g * rho * z
+    """
+    return g * rho * rho.z_aac
+
+def integrated_total_potential_energy(rho, dV=None, ds=None):
+    """
+    Calculate volume-integrated Total Potential Energy (TPE)
+
+    Parameters
+    ----------
+    rho : xr.DataArray
+        Density field
+    dV : xr.DataArray, optional
+        Volume element
+    ds : xr.Dataset, optional
+        Dataset containing dV
+
+    Returns
+    -------
+    float
+        Integrated TPE
+    """
     if dV is None:
         if ds is not None:
             dV = ds.dV
         else:
             raise ValueError("Either dV or ds must be provided")
-    return g * integrate(rho * rho.z_aac, dV)
+    tpe_local = calculate_total_potential_energy(rho)
+    return integrate(tpe_local, dV)
 #---
 
 #+++ Calculate reference state using sorting method
-def calculate_reference_potential_energy(ds, time_idx, test=False):
-    """Calculate Reference Potential Energy (RPE)"""
-    # Get the density field at this time (3D: x, y, z)
-    rho = ds.rho.isel(time=time_idx)
+def calculate_reference_potential_energy(rho, dV, LxLy, test=False, z_min=0, Lz=None):
+    """
+    Calculate local Reference Potential Energy density using sorted density
 
+    Parameters
+    ----------
+    rho : xr.DataArray
+        Density field
+    dV : xr.DataArray
+        Volume element
+    LxLy : float
+        Horizontal area
+    test : bool
+        Whether to run tests
+    z_min : float
+        Minimum z coordinate
+    Lz : float, optional
+        Total vertical extent for testing
+
+    Returns
+    -------
+    vertically_sorted_ds : xr.Dataset
+        Dataset containing sorted 1D density and coordinate
+    """
     # Sort the density field to get reference state
-    vertically_sorted_ds, threed_sorted_ds = vertical_sort_density(rho, ds.dV, ds.LxLy, test=test, z_min=ds.z_min, Lz=ds.Lz)
+    vertically_sorted_ds, threed_sorted_ds = vertical_sort_density(rho, dV, LxLy, test=test, z_min=z_min, Lz=Lz)
 
     if test:
         assert(all(np.diff(vertically_sorted_ds.rho_1d_sorted) <= 0))
         assert(all(np.diff(vertically_sorted_ds.z_1d_sorted) > 0))
-        assert(np.sum(vertically_sorted_ds.dz_1d_sorted).values == ds.Lz)
+        if Lz is not None:
+            assert(np.sum(vertically_sorted_ds.dz_1d_sorted).values == Lz)
 
-    # Calculate Reference Potential Energy (RPE)
-    dV_flat_1d_sorted = vertically_sorted_ds.dz_1d_sorted * ds.LxLy.values
+    return vertically_sorted_ds
+
+def integrated_reference_potential_energy(vertically_sorted_ds, LxLy):
+    """
+    Calculate volume-integrated Reference Potential Energy (RPE)
+
+    Parameters
+    ----------
+    vertically_sorted_ds : xr.Dataset
+        Sorted density dataset from calculate_reference_potential_energy
+    LxLy : float
+        Horizontal area
+
+    Returns
+    -------
+    float
+        Integrated RPE
+    """
+    dV_flat_1d_sorted = vertically_sorted_ds.dz_1d_sorted * LxLy
     return g * np.sum(vertically_sorted_ds.rho_1d_sorted * vertically_sorted_ds.z_1d_sorted * dV_flat_1d_sorted)
 
-def calculate_potential_energies(ds, time_idx, test=False):
-    """Calculate Available Potential Energy (APE)"""
-    TPE = calculate_total_potential_energy(ds.rho.isel(time=time_idx), ds=ds)
-    RPE = calculate_reference_potential_energy(ds, time_idx, test=test)
+def integrated_potential_energies(ds, time_idx, test=False):
+    """
+    Calculate volume-integrated potential energies (APE, TPE, RPE)
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        Dataset containing simulation data
+    time_idx : int
+        Time index
+    test : bool
+        Whether to run tests
+
+    Returns
+    -------
+    tuple
+        (APE, TPE, RPE) - all volume-integrated scalars
+    """
+    rho = ds.rho.isel(time=time_idx)
+    TPE = integrated_total_potential_energy(rho, ds=ds)
+    vertically_sorted_ds = calculate_reference_potential_energy(rho, ds.dV, ds.LxLy, test=test, z_min=ds.z_min, Lz=ds.Lz)
+    RPE = integrated_reference_potential_energy(vertically_sorted_ds, ds.LxLy.values)
     APE = TPE - RPE
     return APE, TPE, RPE
 #---
 
 #+++ Calculate APE time series
 def calculate_ape_timeseries(ds, test=False):
-    """Calculate APE for all time steps"""
+    """
+    Calculate volume-integrated APE for all time steps
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        Dataset containing simulation data
+    test : bool
+        Whether to run tests
+
+    Returns
+    -------
+    tuple
+        (APE, TPE, RPE) - time series of volume-integrated energies
+    """
     print("Calculating APE time series...")
 
     n_times = len(ds.time)
@@ -175,28 +277,75 @@ def calculate_ape_timeseries(ds, test=False):
 
     for i in range(n_times):
         print(f"  Processing time step {i+1}/{n_times}", end='\r')
-        APE[i], TPE[i], RPE[i] = calculate_potential_energies(ds, i, test=test)
+        APE[i], TPE[i], RPE[i] = integrated_potential_energies(ds, i, test=test)
 
     print("\nDone!")
     return APE, TPE, RPE
 #---
 
-#+++ Calculate kinetic energy time series
+#+++ Calculate kinetic energy
+def calculate_kinetic_energy(u, v, w):
+    """
+    Calculate local kinetic energy density
+
+    Parameters
+    ----------
+    u, v, w : xr.DataArray
+        Velocity components
+
+    Returns
+    -------
+    xr.DataArray
+        Local KE density: 0.5 * rho_0 * (u^2 + v^2 + w^2)
+    """
+    return 0.5 * rho_0 * (u**2 + v**2 + w**2)
+
+def integrated_kinetic_energy(ds, time_idx=None):
+    """
+    Calculate volume-integrated kinetic energy
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        Dataset containing velocity fields (u, v, w)
+    time_idx : int, optional
+        Time index to select. If None, integrates over all times.
+
+    Returns
+    -------
+    float or xr.DataArray
+        Integrated KE (scalar if time_idx given, time series otherwise)
+    """
+    if time_idx is not None:
+        u = ds.u.isel(time=time_idx)
+        v = ds.v.isel(time=time_idx)
+        w = ds.w.isel(time=time_idx)
+        dV = ds.dV
+    else:
+        u = ds.u
+        v = ds.v
+        w = ds.w
+        dV = ds.dV
+
+    ke_local = calculate_kinetic_energy(u, v, w)
+    return (ke_local * dV).sum(("x_caa", "y_aca", "z_aac"))
+
 def calculate_ke_timeseries(ds):
-    """Calculate KE for all time steps"""
+    """
+    Calculate volume-integrated KE for all time steps
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        Dataset containing velocity fields
+
+    Returns
+    -------
+    xr.DataArray
+        Time series of volume-integrated KE
+    """
     print("Calculating KE time series...")
-
-    ke = 0.5 * rho_0 * (ds.u**2 + ds.v**2 + ds.w**2)
-
-    # Get grid spacing from dataset
-    dx = ds.Δx_caa
-    dy = ds.Δy_aca
-    dz = ds.Δz_aac
-
-    # Create dV array
-    dV = dx * dy * dz
-    KE = (ke * dV).sum(("x_caa", "y_aca", "z_aac"))
-
+    KE = integrated_kinetic_energy(ds)
     print("\nDone!")
     return KE
 #---

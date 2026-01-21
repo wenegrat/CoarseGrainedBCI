@@ -13,9 +13,11 @@ import scipy.integrate as integrate
 from ape_calculations import (
     calculate_ape_timeseries,
     calculate_ke_timeseries,
-    calculate_potential_energies,
+    integrated_potential_energies,
     calculate_reference_potential_energy,
+    integrated_reference_potential_energy,
     calculate_total_potential_energy,
+    integrated_total_potential_energy,
     vertical_sort_density,
     load_data,
     integrate,
@@ -31,7 +33,7 @@ ds = load_data(filename)
 
 TPE_online_from_r = g * integrate(ds.rho_z, ds.dV) # g ∭ ρz dV
 TPE_online_from_b = integrate(ds.pe, ds.dV) # ∭ (-ρ₀ bz) dV
-TPE_offline_from_r = calculate_total_potential_energy(ds.rho, ds=ds) # g ∭ ρz dV
+TPE_offline_from_r = integrated_total_potential_energy(ds.rho, ds=ds) # g ∭ ρz dV
 assert all(np.isclose(TPE_online_from_r, TPE_online_from_b, rtol=1e-3)), f"Mismatch: rho_z integral={TPE_online_from_r}, -pe integral={TPE_online_from_b}"
 
 # Use a single time step to test the sorting method
@@ -41,8 +43,10 @@ val1 = integrate(ds0.pe, ds0.dV)
 val2 = - rho_0 * integrate(ds0.b * ds0.z_aac, ds0.dV)
 assert np.isclose(val1, val2, rtol=1e-3), f"Mismatch: pe integral={val1.values}, -b*z integral={val2.values}"
 
-val3 = calculate_reference_potential_energy(ds, 0, test=True)
-val4 = calculate_total_potential_energy(ds0.rho, ds=ds)
+rho0 = ds.rho.isel(time=0)
+vertically_sorted_ds = calculate_reference_potential_energy(rho0, ds.dV, ds.LxLy, test=True, z_min=ds.z_min, Lz=ds.Lz)
+val3 = integrated_reference_potential_energy(vertically_sorted_ds, ds.LxLy.values)
+val4 = integrated_total_potential_energy(ds0.rho, ds=ds)
 assert np.isclose(val3, val4, rtol=1e-1), f"Mismatch: reference PE={val3}, total PE={val4}"
 
 # Calculate PE time series
