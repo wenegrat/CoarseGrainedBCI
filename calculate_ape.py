@@ -14,7 +14,7 @@ from ape_calculations import (
     calculate_ape_timeseries,
     calculate_ke_timeseries,
     integrated_potential_energies,
-    calculate_reference_potential_energy,
+    calculate_reference_potential_energy_profile,
     integrated_reference_potential_energy,
     calculate_total_potential_energy,
     integrated_total_potential_energy,
@@ -46,7 +46,7 @@ assert np.isclose(TPE_online_from_b, TPE_offline_from_b, rtol=1e-3), f"Mismatch:
 #+++ Test that TPE at the initial time is close to the reference potential energy
 ds0 = ds.isel(time=[0])
 rho0 = ds.rho.isel(time=0)
-vertically_sorted_ds = calculate_reference_potential_energy(rho0, ds.dV, ds.LxLy, test=True, z_min=ds.z_min, Lz=ds.Lz)
+vertically_sorted_ds = calculate_reference_potential_energy_profile(rho0, ds.dV, ds.LxLy, test=True, z_min=ds.z_min, Lz=ds.Lz)
 val3 = integrated_reference_potential_energy(vertically_sorted_ds, ds.LxLy.values)
 val4 = integrated_total_potential_energy(ds0.rho, ds=ds)
 assert np.isclose(val3, val4, rtol=1e-1), f"Mismatch: reference PE={val3}, total PE={val4}"

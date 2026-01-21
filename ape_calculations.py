@@ -12,7 +12,6 @@ import xarray as xr
 g = 9.81  # gravitational acceleration [m/s^2]
 rho_0 = 1025  # reference density [kg/m^3]
 
-
 #+++ Auxiliary functions
 def volume_sum(da):
     return da.sum(("x_caa", "y_aca", "z_aac"))
@@ -56,7 +55,6 @@ def load_data(filename):
 
     return ds
 #---
-
 
 #+++ Vertical sort density
 def vertical_sort_density(rho, dV, LxLy, test=False, z_min=0, Lz=None):
@@ -171,7 +169,7 @@ def integrated_total_potential_energy(rho, dV=None, ds=None):
 #---
 
 #+++ Calculate reference state using sorting method
-def calculate_reference_potential_energy(rho, dV, LxLy, test=False, z_min=0, Lz=None):
+def calculate_reference_potential_energy_profile(rho, dV, LxLy, test=False, z_min=0, Lz=None):
     """
     Calculate local Reference Potential Energy density using sorted density
 
@@ -213,7 +211,7 @@ def integrated_reference_potential_energy(vertically_sorted_ds, LxLy):
     Parameters
     ----------
     vertically_sorted_ds : xr.Dataset
-        Sorted density dataset from calculate_reference_potential_energy
+        Sorted density dataset from calculate_reference_potential_energy_profile
     LxLy : float
         Horizontal area
 
@@ -245,7 +243,7 @@ def integrated_potential_energies(ds, time_idx, test=False):
     """
     rho = ds.rho.isel(time=time_idx)
     TPE = integrated_total_potential_energy(rho, ds=ds)
-    vertically_sorted_ds = calculate_reference_potential_energy(rho, ds.dV, ds.LxLy, test=test, z_min=ds.z_min, Lz=ds.Lz)
+    vertically_sorted_ds = calculate_reference_potential_energy_profile(rho, ds.dV, ds.LxLy, test=test, z_min=ds.z_min, Lz=ds.Lz)
     RPE = integrated_reference_potential_energy(vertically_sorted_ds, ds.LxLy.values)
     APE = TPE - RPE
     return APE, TPE, RPE
