@@ -89,7 +89,7 @@ def vertical_sort_density(rho, dV, LxLy, test=False, z_min=0, Lz=None):
     rho_1d = np.ravel(rho.copy(), order="C")
 
     dz_flat = dV / LxLy # 3D DataArray with the same shape as rho
-    dz_flat_1d = np.ravel(dz_flat.values, order='C')
+    dz_flat_1d = np.ravel(dz_flat.values, order="C")
     if test and Lz is not None:
         assert(dz_flat.sum().values == Lz)
 
@@ -101,21 +101,22 @@ def vertical_sort_density(rho, dV, LxLy, test=False, z_min=0, Lz=None):
     rho_1d_sorted = rho_1d[sort_indices]
     z_1d_sorted = np.cumsum(dz_flat_1d_sorted) + z_min + dz_flat_1d_sorted[0]/2
 
-    # Reshape z_1d_sorted back into the original shape used by rho
+    # Reshape z_1d_sorted and rho_1d_sorted back into the original shape used by rho
     z_3d_sorted = z_1d_sorted.reshape(rho.shape, order="C")
-
-    # Reshape rho_1d_sorted back into the original shape used by rho
     rho_3d_sorted = rho_1d_sorted.reshape(rho.shape, order="C")
+    sort_indices_3d = sort_indices.reshape(rho.shape, order="C")
 
-    # Put verticall sorted data into a Dataset
+    # Put vertically sorted data into a Dataset
+    sort_indices_1d = xr.DataArray(sort_indices, dims="z_1d_sorted", coords=dict(z_1d_sorted=z_1d_sorted))
     rho_1d_sorted = xr.DataArray(rho_1d_sorted, dims="z_1d_sorted", coords=dict(z_1d_sorted=z_1d_sorted))
     dz_1d_sorted = xr.DataArray(dz_flat_1d_sorted, dims="z_1d_sorted", coords=dict(z_1d_sorted=z_1d_sorted))
-    vertically_sorted_ds = xr.Dataset(dict(rho_1d_sorted=rho_1d_sorted, dz_1d_sorted=dz_1d_sorted))
+    vertically_sorted_ds = xr.Dataset(dict(rho_1d_sorted=rho_1d_sorted, dz_1d_sorted=dz_1d_sorted, sort_indices_1d=sort_indices_1d))
 
     # Put 3D sorted data into a Dataset
+    sort_indices_3d = xr.DataArray(sort_indices_3d, dims=rho.dims, coords=rho.coords)
     z_3d_sorted = xr.DataArray(z_3d_sorted, dims=rho.dims, coords=rho.coords)
     rho_3d_sorted = xr.DataArray(rho_3d_sorted, dims=rho.dims, coords=rho.coords)
-    threed_sorted_ds = xr.Dataset(dict(rho_3d_sorted=rho_3d_sorted, z_3d_sorted=z_3d_sorted))
+    threed_sorted_ds = xr.Dataset(dict(rho_3d_sorted=rho_3d_sorted, z_3d_sorted=z_3d_sorted, sort_indices_3d=sort_indices_3d))
 
     if test:
         rho_3d_reshaped = rho_1d.reshape(rho.shape, order="C")
