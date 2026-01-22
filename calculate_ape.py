@@ -52,12 +52,14 @@ val4 = integrated_total_potential_energy(ds0.rho, ds=ds)
 assert np.isclose(val3, val4, rtol=1e-1), f"Mismatch: reference PE={val3}, total PE={val4}"
 #---
 
-ds0 = ds.sel(time=[100])
+ds0 = ds.sel(time=100)
 vertically_sorted_ds, threed_sorted_ds = vertical_sort_density(ds0.rho, ds0.dV, ds0.LxLy, test=True, z_min=ds0.z_min, Lz=ds0.Lz)
 
 vertically_sorted_ds["rho_1d_sorted_cumulative_integral"] = (vertically_sorted_ds.rho_1d_sorted * vertically_sorted_ds.dz_1d_sorted).cumsum("z_1d_sorted")
 
+E_a = xr.zeros_like(ds0.rho)
 for x in ds0.x_caa:
+    print(f"x: {x.item()}")
     for y in ds0.y_aca:
         for z in ds0.z_aac:
             rho_sorted_profile = vertically_sorted_ds.rho_1d_sorted
@@ -65,12 +67,12 @@ for x in ds0.x_caa:
             rho = ds0.rho.sel(**position)
 
             where_it_went = threed_sorted_ds.sort_indices_3d.sel(**position)
+            z_0 = vertically_sorted_ds.sort_indices_1d.where(vertically_sorted_ds.sort_indices_1d == where_it_went, drop=True).z_1d_sorted.values[0]
 
+            displacement = z - z_0
             b_l = rho - rho_sorted_profile
-            z_0 = vertically_sorted_ds.rho_1d_sorted.where(vertically_sorted_ds.rho_1d_sorted==rho.values, drop=True).values[0]
-            z_1 = z
-            print(b_l)
-            pause
+            E_a.loc[dict(**position)] = g * b_l.sel(z_1d_sorted=slice(z_0, z)).integrate("z_1d_sorted") / rho_0
+
 
 # Calculate PE time series
 APE, TPE, RPE = calculate_ape_timeseries(ds, test=False)
