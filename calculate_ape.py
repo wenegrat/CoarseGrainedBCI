@@ -27,7 +27,7 @@ from matplotlib import pyplot as plt
 import pynanigans as pn
 
 # File path to the simulation output
-filename = "output/kelvin_helmholtz_instability_128x1x128.nc"
+filename = "output/kelvin_helmholtz_instability_64x1x64.nc"
 ds = load_data(filename)
 
 #+++ Test that convertion between ρ and b is correct
@@ -70,34 +70,42 @@ for x in ds0.x_caa:
             #+++ Needed by every method
             rho_sorted_profile = vertically_sorted_ds.rho_1d_sorted
             position = dict(x_caa=x, y_aca=y, z_aac=z)
-            rho = ds0.rho.sel(**position)
+            ρ = ds0.rho.sel(**position)
+            Δz_flat = vertically_sorted_ds.dz_1d_sorted
 
             density_index = threed_sorted_ds.sort_indices_3d.sel(**position) # Gets the density index from the permutation telling us where it ended up
             z_0 = vertically_sorted_ds.sort_indices_1d.where(vertically_sorted_ds.sort_indices_1d == density_index, drop=True).z_1d_sorted.values[0]
-            displacement_slice = slice(z_0, z) if z > z_0 else slice(z, z_0)
+            displacement = z - z_0
+            if displacement > 0:
+                displacement_slice = slice(z_0, z)
+            else:
+                displacement_slice = slice(z, z_0)
             #---
 
             #+++ Easy but slow method (straight from Eq. (11))
-            b_l = rho - rho_sorted_profile
-            bl_Δz = b_l * vertically_sorted_ds.dz_1d_sorted.sel(z_1d_sorted=displacement_slice)
-            summed_bl_Δz = bl_Δz.sum("z_1d_sorted")
-            E_a_slow_edges.loc[dict(**position)] = g * summed_bl_Δz / rho_0
+            rho_sorted_profile_slice = rho_sorted_profile.sel(z_1d_sorted=displacement_slice)
+            b_l = ρ - rho_sorted_profile_slice
+            bl_Δz = b_l * Δz_flat
+            bl_integrated = np.sign(displacement) * bl_Δz.sum("z_1d_sorted")
+            E_a_slow_edges.loc[dict(**position)] = g * bl_integrated / rho_0
             #---
 
             #+++ More correct method (using known dz)
-            summed_bl_Δz_cm = bl_Δz.sum("z_1d_sorted") - (bl_Δz[0] + bl_Δz[-1]) / 2
+            summed_bl_Δz_cm = bl_integrated - (bl_Δz[0] + bl_Δz[-1]) / 2
             E_a_slow_cm.loc[dict(**position)] = g * summed_bl_Δz_cm / rho_0
             #---
 
-            displacement = z - z_0
-            constant = rho * xr.ones_like(rho_sorted_profile).sel(z_1d_sorted=displacement_slice).integrate("z_1d_sorted")
-            constant2 = rho * displacement
+            constant_summand = ρ * Δz_flat.sel(z_1d_sorted=displacement_slice)
+            constant_integrated = np.sign(displacement) * constant_summand.sum("z_1d_sorted")
+            constant_integrated_cm = constant_integrated - np.sign(displacement) * (constant_summand[0] + constant_summand[-1]) / 2
+            constant_multiplied = ρ * displacement
 
-            profile_ = (rho_sorted_profile.sel(z_1d_sorted=displacement_slice) * vertically_sorted_ds.dz_1d_sorted).sum("z_1d_sorted")
-            # E_a_fast.loc[dict(**position)] = g * (constant - profile_) / rho_0
-            # E_a_fast2.loc[dict(**position)] = g * (constant2 - profile_) / rho_0
+            rho_sorted_Δz = np.sign(displacement) * (rho_sorted_profile.sel(z_1d_sorted=displacement_slice) * Δz_flat)
+            rho_sorted_integrated = rho_sorted_Δz.sum("z_1d_sorted")
+            E_a_fast.loc[dict(**position)] = g * (constant_integrated_cm - rho_sorted_integrated) / rho_0
+            E_a_fast2.loc[dict(**position)] = g * (constant_multiplied - rho_sorted_integrated) / rho_0
 
-            # if abs(displacement) > 0.06:
+            # if summed_bl_Δz_cm.item() > 2e-4:
             #     from IPython import embed; embed()
             #     pause
 
