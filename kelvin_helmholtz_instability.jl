@@ -43,14 +43,9 @@ Ri = 0.1
 h = 1/4
 perturbation_amplitude = 0.01
 
-# Base shear flow
-shear_flow(x, z) = tanh(z)
-
-# Base stratification
-stratification(x, z) = h * Ri * tanh(z / h)
-
-# Small perturbation to trigger instability
-perturbation(x, z) = perturbation_amplitude * sin(2π * x / 10) * exp(-z^2 / 2)
+shear_flow(x, z) = tanh(z) # Base shear flow
+stratification(x, z) = h * Ri * tanh(z / h) # Base stratification
+perturbation(x, z) = perturbation_amplitude * sin(2π * x / 10) * exp(-z^2 / 2) # Small perturbation to trigger instability
 
 # Set initial conditions
 uᵢ(x, y, z) = shear_flow(x, z)
@@ -109,6 +104,7 @@ simulation.output_writers[:fields] =
     NetCDFWriter(model, (; ω=vorticity, b, pe, PE, u=u_center, v=v_center, w=w_center),
                  schedule = TimeInterval(4),
                  filename = output_filename,
+                 array_type = Array{Float64},
                  overwrite_existing = true)
 
 output_filename_2d = "output/kelvin_helmholtz_instability_$(Nx)x$(Ny)x$(Nz)_2d.nc"
@@ -116,6 +112,7 @@ simulation.output_writers[:twod_fields] =
 NetCDFWriter(model, (; ω=vorticity, b),
             schedule = TimeInterval(2),
             filename = output_filename_2d,
+            array_type = Array{Float32},
             indices = (:, 1, :),
             overwrite_existing = true)
 
