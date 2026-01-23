@@ -98,11 +98,12 @@ for x in ds0.x_caa:
             constant_summand = ρ * Δz_flat.sel(z_1d_sorted=displacement_slice)
             constant_integrated = np.sign(displacement) * constant_summand.sum("z_1d_sorted")
             constant_integrated_cm = constant_integrated - np.sign(displacement) * (constant_summand[0] + constant_summand[-1]) / 2
-            constant_multiplied = ρ * displacement
 
-            rho_sorted_Δz = np.sign(displacement) * (rho_sorted_profile.sel(z_1d_sorted=displacement_slice) * Δz_flat)
+            rho_sorted_Δz = np.sign(displacement) * (rho_sorted_profile_slice * Δz_flat)
             rho_sorted_integrated = rho_sorted_Δz.sum("z_1d_sorted")
             E_a_fast.loc[dict(**position)] = g * (constant_integrated_cm - rho_sorted_integrated) / rho_0
+
+            constant_multiplied = ρ * displacement
             E_a_fast2.loc[dict(**position)] = g * (constant_multiplied - rho_sorted_integrated) / rho_0
 
             # if summed_bl_Δz_cm.item() > 2e-4:
