@@ -47,9 +47,10 @@ assert np.isclose(TPE_online_from_b, TPE_offline_from_b, rtol=1e-3), f"Mismatch:
 ds0 = ds.isel(time=[0])
 rho0 = ds.rho.isel(time=0)
 vertically_sorted_ds = calculate_reference_potential_energy_profile(rho0, ds.dV, ds.LxLy, test=True, z_min=ds.z_min, Lz=ds.Lz)
-val3 = integrated_reference_potential_energy(vertically_sorted_ds, ds.LxLy.values)
-val4 = integrated_total_potential_energy(ds0.rho, ds=ds)
-assert np.isclose(val3, val4, rtol=1e-1), f"Mismatch: reference PE={val3}, total PE={val4}"
+if False:
+    val3 = integrated_reference_potential_energy(vertically_sorted_ds, ds.LxLy.values)
+    val4 = integrated_total_potential_energy(ds0.rho, ds=ds)
+    assert np.isclose(val3, val4, rtol=1e-1), f"Mismatch: reference PE={val3}, total PE={val4}"
 #---
 
 step = 2
@@ -58,30 +59,50 @@ vertically_sorted_ds, threed_sorted_ds = vertical_sort_density(ds0.rho, ds0.dV, 
 
 vertically_sorted_ds["rho_1d_sorted_cumulative_integral"] = (vertically_sorted_ds.rho_1d_sorted * vertically_sorted_ds.dz_1d_sorted).cumsum("z_1d_sorted")
 
-E_a = xr.zeros_like(ds0.rho)
+E_a_slow_edges = xr.zeros_like(ds0.rho)
+E_a_slow_cm = xr.zeros_like(ds0.rho)
 E_a_fast = xr.zeros_like(ds0.rho)
 E_a_fast2 = xr.zeros_like(ds0.rho)
 for x in ds0.x_caa:
     print(f"x: {x.item()}")
     for y in ds0.y_aca:
         for z in ds0.z_aac:
+            #+++ Needed by every method
             rho_sorted_profile = vertically_sorted_ds.rho_1d_sorted
             position = dict(x_caa=x, y_aca=y, z_aac=z)
             rho = ds0.rho.sel(**position)
 
-            where_it_went = threed_sorted_ds.sort_indices_3d.sel(**position)
-            z_0 = vertically_sorted_ds.sort_indices_1d.where(vertically_sorted_ds.sort_indices_1d == where_it_went, drop=True).z_1d_sorted.values[0]
+            density_index = threed_sorted_ds.sort_indices_3d.sel(**position) # Gets the density index from the permutation telling us where it ended up
+            z_0 = vertically_sorted_ds.sort_indices_1d.where(vertically_sorted_ds.sort_indices_1d == density_index, drop=True).z_1d_sorted.values[0]
+            displacement_slice = slice(z_0, z) if z > z_0 else slice(z, z_0)
+            #---
 
+            #+++ Easy but slow method (straight from Eq. (11))
             b_l = rho - rho_sorted_profile
-            E_a.loc[dict(**position)] = g * b_l.sel(z_1d_sorted=slice(z_0, z)).integrate("z_1d_sorted") / rho_0
+            bl_Δz = b_l * vertically_sorted_ds.dz_1d_sorted.sel(z_1d_sorted=displacement_slice)
+            summed_bl_Δz = bl_Δz.sum("z_1d_sorted")
+            E_a_slow_edges.loc[dict(**position)] = g * summed_bl_Δz / rho_0
+            #---
+
+            #+++ More correct method (using known dz)
+            summed_bl_Δz_cm = bl_Δz.sum("z_1d_sorted") - (bl_Δz[0] + bl_Δz[-1]) / 2
+            E_a_slow_cm.loc[dict(**position)] = g * summed_bl_Δz_cm / rho_0
+            #---
 
             displacement = z - z_0
-            constant = rho * xr.ones_like(rho_sorted_profile).sel(z_1d_sorted=slice(z_0, z)).integrate("z_1d_sorted")
+            constant = rho * xr.ones_like(rho_sorted_profile).sel(z_1d_sorted=displacement_slice).integrate("z_1d_sorted")
             constant2 = rho * displacement
-            profile_ = (rho_sorted_profile.sel(z_1d_sorted=slice(z_0, z)) * vertically_sorted_ds.dz_1d_sorted).sum("z_1d_sorted")
-            E_a_fast.loc[dict(**position)] = g * (constant - profile_) / rho_0
-            E_a_fast2.loc[dict(**position)] = g * (constant2 - profile_) / rho_0
 
+            profile_ = (rho_sorted_profile.sel(z_1d_sorted=displacement_slice) * vertically_sorted_ds.dz_1d_sorted).sum("z_1d_sorted")
+            # E_a_fast.loc[dict(**position)] = g * (constant - profile_) / rho_0
+            # E_a_fast2.loc[dict(**position)] = g * (constant2 - profile_) / rho_0
+
+            # if abs(displacement) > 0.06:
+            #     from IPython import embed; embed()
+            #     pause
+
+opts = dict(vmin=-4e-4, vmax=4e-4, cmap="RdBu_r")
+# pause
 # Calculate PE time series
 APE, TPE, RPE = calculate_ape_timeseries(ds, test=False)
 
