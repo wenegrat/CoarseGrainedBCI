@@ -11,13 +11,15 @@ Lx = Lz = 10
 Ly = 5
 if has_cuda_gpu()
     arch = GPU()
-    Nx = Nz = 256
+    Nx = 256
     Ny = Nx÷2
+    Nz = 512
     @info "CUDA GPU detected! Running 3D simulation with $(Nx)×$(Ny)×$(Nz) grid on GPU"
 else
     arch = CPU()
-    Nx = Nz = 128
+    Nx = 64
     Ny = 1
+    Nz = 256
     @info "No CUDA GPU detected. Running 2D simulation with $(Nx)×$(Ny)×$(Nz) grid on CPU"
 end
 
@@ -33,7 +35,6 @@ model = NonhydrostaticModel(grid;
                             closure = ScalarDiffusivity(ν=ν, κ=ν),
                             buoyancy = BuoyancyTracer(),
                             tracers = :b)
-
 u, v, w = model.velocities
 b = model.tracers.b
 #---
