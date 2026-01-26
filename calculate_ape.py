@@ -62,20 +62,31 @@ vertically_sorted_ds, threed_sorted_ds = vertical_sort_density(ds0.rho, ds0.dV, 
 vertically_sorted_ds["rho_1d_sorted_cumulative_integral"] = (vertically_sorted_ds.rho_1d_sorted * vertically_sorted_ds.dz_1d_sorted).cumsum("z_1d_sorted")
 vertically_sorted_ds["dz_1d_sorted_cumulative_integral"] = (vertically_sorted_ds.dz_1d_sorted).cumsum("z_1d_sorted")
 
+# Create inverse lookup table for fast z_0 retrieval
+# Maps from density_index -> position in sorted array -> z coordinate
+print("Creating inverse lookup table for fast z_0 retrieval...")
+inverse_sort_indices = np.empty(len(vertically_sorted_ds.sort_indices_1d), dtype=int)
+for i, idx in enumerate(vertically_sorted_ds.sort_indices_1d.values):
+    inverse_sort_indices[int(idx)] = i
+z_1d_sorted_values = vertically_sorted_ds.z_1d_sorted.values
+print("Done!")
+
 Ea_slow = xr.zeros_like(ds0.rho)
 Ea_fast = xr.zeros_like(ds0.rho)
 Ea_aux1 = xr.zeros_like(ds0.rho)
-for x in ds0.x_caa:
+for i, x in enumerate(ds0.x_caa):
     print(f"x: {x.item()}")
-    for y in ds0.y_aca:
-        for z in ds0.z_aac:
+    for j, y in enumerate(ds0.y_aca):
+        for k, z in enumerate(ds0.z_aac):
             #+++ Needed by every method
-            rho_sorted_profile = vertically_sorted_ds.rho_1d_sorted
-            position = dict(x_caa=x, y_aca=y, z_aac=z)
-            ρ = ds0.rho.sel(**position)
+            # rho_sorted_profile = vertically_sorted_ds.rho_1d_sorted
+            position = dict(x_caa=i, y_aca=j, z_aac=k)
+            ρ = ds0.rho.isel(**position) # sel() is much slower than isel()
 
-            density_index = threed_sorted_ds.sort_indices_3d.sel(**position) # Gets the density index from the permutation telling us where it ended up
-            z_0 = vertically_sorted_ds.sort_indices_1d.where(vertically_sorted_ds.sort_indices_1d == density_index, drop=True).z_1d_sorted.values[0]
+            density_index = threed_sorted_ds.sort_indices_3d.isel(**position).item() # Gets the density index from the permutation telling us where it ended up
+            # Fast lookup using pre-computed inverse mapping (replaces slow .where() operation)
+            sorted_position = inverse_sort_indices[density_index]
+            z_0 = z_1d_sorted_values[sorted_position]
 
             displacement = z - z_0
             if displacement > 0:
@@ -86,13 +97,13 @@ for x in ds0.x_caa:
                 Δz_flat = -vertically_sorted_ds.dz_1d_sorted.sel(z_1d_sorted=displacement_slice)
             #---
 
-            #+++ Easy but slow method (straight from Eq. (11))
-            Ea_slow.loc[dict(**position)] = summation_method_local_APE(vertically_sorted_ds, z, z_0, ρ, displacement, displacement_slice)
-            #---
+            # #+++ Easy but slow method (straight from Eq. (11))
+            # Ea_slow.loc[dict(**position)] = summation_method_local_APE(vertically_sorted_ds, z, z_0, ρ, displacement, displacement_slice)
+            # #---
 
-            #+++ Faster method (using pre-calculated cumulative integrals)
-            Ea_fast.loc[dict(**position)] = cumulative_method_local_APE(vertically_sorted_ds, z, z_0, ρ, displacement, displacement_slice)
-            #---
+            # #+++ Faster method (using pre-calculated cumulative integrals)
+            # Ea_fast.loc[dict(**position)] = cumulative_method_local_APE(vertically_sorted_ds, z, z_0, ρ, displacement, displacement_slice)
+            # #---
 
 opts = dict(vmin=-4e-4, vmax=4e-4, cmap="RdBu_r")
 # pause
