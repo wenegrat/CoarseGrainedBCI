@@ -282,6 +282,52 @@ def calculate_ape_timeseries(ds, test=False):
     return APE, TPE, RPE
 #---
 
+#+++ Calculate local APE using cumulative integral method
+def cumulative_method_local_APE(vertically_sorted_ds, z, z_0, rho, displacement, displacement_slice):
+    """
+    Calculate local APE using cumulative integrals (fast method)
+
+    Parameters
+    ----------
+    vertically_sorted_ds : xr.Dataset
+        Dataset containing cumulative integrals of sorted density and dz
+    z : float
+        Current z coordinate
+    z_0 : float
+        Reference z coordinate (sorted position)
+    rho : float
+        Density at current position
+    displacement : float
+        z - z_0 (vertical displacement)
+    displacement_slice : slice
+        Slice object for selecting the displacement range
+
+    Returns
+    -------
+    float
+        Local APE value: g * (rho * ∫dz - ∫rho_sorted dz) / rho_0
+    """
+    # Get cumulative integral of sorted density profile
+    cumulative_rho_sorted_integral = vertically_sorted_ds["rho_1d_sorted_cumulative_integral"].sel(z_1d_sorted=displacement_slice)
+    rho_sorted_integral = np.sign(displacement) * (
+        cumulative_rho_sorted_integral.sel(z_1d_sorted=z, method="nearest") -
+        cumulative_rho_sorted_integral.sel(z_1d_sorted=z_0)
+    )
+
+    # Get cumulative integral of dz
+    cumulative_dz_sorted_integral = vertically_sorted_ds["dz_1d_sorted_cumulative_integral"].sel(z_1d_sorted=displacement_slice)
+    dz_integral = np.sign(displacement) * (
+        cumulative_dz_sorted_integral.sel(z_1d_sorted=z, method="nearest") -
+        cumulative_dz_sorted_integral.sel(z_1d_sorted=z_0)
+    )
+
+    # Calculate local APE
+    rho_constant_integral = rho * dz_integral
+    local_ape = g * (rho_constant_integral - rho_sorted_integral) / rho_0
+
+    return local_ape
+#---
+
 #+++ Calculate kinetic energy
 def calculate_kinetic_energy(u, v, w):
     """

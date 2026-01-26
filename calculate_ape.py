@@ -17,6 +17,7 @@ from ape_calculations import (
     calculate_reference_potential_energy_profile,
     integrated_reference_potential_energy,
     integrated_total_potential_energy,
+    cumulative_method_local_APE,
     load_data,
     integrate,
     g,
@@ -95,23 +96,7 @@ for x in ds0.x_caa:
             E_a_slow_edges.loc[dict(**position)] = g * bl_integrated / rho_0
             #---
 
-            # +++ More correct method (using known dz)
-            summed_bl_Δz_cm = bl_integrated - (bl_Δz[0] + bl_Δz[-1]) / 2
-            E_a_slow_cm.loc[dict(**position)] = g * summed_bl_Δz_cm / rho_0
-            #---
-
-            cumulative_rho_sorted_integral = vertically_sorted_ds["rho_1d_sorted_cumulative_integral"].sel(z_1d_sorted=displacement_slice)
-            rho_sorted_integral = np.sign(displacement) * (cumulative_rho_sorted_integral.sel(z_1d_sorted=z, method="nearest") - cumulative_rho_sorted_integral.sel(z_1d_sorted=z_0))
-
-            cumulative_dz_sorted_integral = vertically_sorted_ds["dz_1d_sorted_cumulative_integral"].sel(z_1d_sorted=displacement_slice)
-            dz_integral = np.sign(displacement) * (cumulative_dz_sorted_integral.sel(z_1d_sorted=z, method="nearest") - cumulative_dz_sorted_integral.sel(z_1d_sorted=z_0))
-            rho_constant_integral = ρ * dz_integral
-            E_a_aux1.loc[dict(**position)] = g * (rho_constant_integral - rho_sorted_integral) / rho_0
-            # E_a_aux1.loc[dict(**position)] = z_0
-
-            # if bl_integrated.item() > 2e-4:
-            #     from IPython import embed; embed()
-            #     pause
+            E_a_aux1.loc[dict(**position)] = cumulative_method_local_APE(vertically_sorted_ds, z, z_0, ρ, displacement, displacement_slice)
 
 
 opts = dict(vmin=-4e-4, vmax=4e-4, cmap="RdBu_r")
