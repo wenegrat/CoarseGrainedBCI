@@ -58,11 +58,14 @@ ds0 = ds.sel(time=100)
 vertically_sorted_ds, threed_sorted_ds = vertical_sort_density(ds0.rho, ds0.dV, ds0.LxLy, test=True, z_min=ds0.z_min, Lz=ds0.Lz)
 
 vertically_sorted_ds["rho_1d_sorted_cumulative_integral"] = (vertically_sorted_ds.rho_1d_sorted * vertically_sorted_ds.dz_1d_sorted).cumsum("z_1d_sorted")
+vertically_sorted_ds["dz_1d_sorted_cumulative_integral"] = (vertically_sorted_ds.dz_1d_sorted).cumsum("z_1d_sorted")
 
 E_a_slow_edges = xr.zeros_like(ds0.rho)
 E_a_slow_cm = xr.zeros_like(ds0.rho)
-E_a_fast = xr.zeros_like(ds0.rho)
-E_a_fast2 = xr.zeros_like(ds0.rho)
+E_a_aux1 = xr.zeros_like(ds0.rho)
+E_a_aux2 = xr.zeros_like(ds0.rho)
+E_a_aux3 = xr.zeros_like(ds0.rho)
+E_a_aux4 = xr.zeros_like(ds0.rho)
 for x in ds0.x_caa:
     print(f"x: {x.item()}")
     for y in ds0.y_aca:
@@ -71,44 +74,45 @@ for x in ds0.x_caa:
             rho_sorted_profile = vertically_sorted_ds.rho_1d_sorted
             position = dict(x_caa=x, y_aca=y, z_aac=z)
             ρ = ds0.rho.sel(**position)
-            Δz_flat = vertically_sorted_ds.dz_1d_sorted
 
             density_index = threed_sorted_ds.sort_indices_3d.sel(**position) # Gets the density index from the permutation telling us where it ended up
             z_0 = vertically_sorted_ds.sort_indices_1d.where(vertically_sorted_ds.sort_indices_1d == density_index, drop=True).z_1d_sorted.values[0]
+
             displacement = z - z_0
             if displacement > 0:
                 displacement_slice = slice(z_0, z)
+                Δz_flat = +vertically_sorted_ds.dz_1d_sorted.sel(z_1d_sorted=displacement_slice)
             else:
                 displacement_slice = slice(z, z_0)
+                Δz_flat = -vertically_sorted_ds.dz_1d_sorted.sel(z_1d_sorted=displacement_slice)
             #---
 
             #+++ Easy but slow method (straight from Eq. (11))
             rho_sorted_profile_slice = rho_sorted_profile.sel(z_1d_sorted=displacement_slice)
             b_l = ρ - rho_sorted_profile_slice
             bl_Δz = b_l * Δz_flat
-            bl_integrated = np.sign(displacement) * bl_Δz.sum("z_1d_sorted")
+            bl_integrated = bl_Δz.sum("z_1d_sorted")
             E_a_slow_edges.loc[dict(**position)] = g * bl_integrated / rho_0
             #---
 
-            #+++ More correct method (using known dz)
+            # +++ More correct method (using known dz)
             summed_bl_Δz_cm = bl_integrated - (bl_Δz[0] + bl_Δz[-1]) / 2
             E_a_slow_cm.loc[dict(**position)] = g * summed_bl_Δz_cm / rho_0
             #---
 
-            constant_summand = ρ * Δz_flat.sel(z_1d_sorted=displacement_slice)
-            constant_integrated = np.sign(displacement) * constant_summand.sum("z_1d_sorted")
-            constant_integrated_cm = constant_integrated - np.sign(displacement) * (constant_summand[0] + constant_summand[-1]) / 2
+            cumulative_rho_sorted_integral = vertically_sorted_ds["rho_1d_sorted_cumulative_integral"].sel(z_1d_sorted=displacement_slice)
+            rho_sorted_integral = np.sign(displacement) * (cumulative_rho_sorted_integral.sel(z_1d_sorted=z, method="nearest") - cumulative_rho_sorted_integral.sel(z_1d_sorted=z_0))
 
-            rho_sorted_Δz = np.sign(displacement) * (rho_sorted_profile_slice * Δz_flat)
-            rho_sorted_integrated = rho_sorted_Δz.sum("z_1d_sorted")
-            E_a_fast.loc[dict(**position)] = g * (constant_integrated_cm - rho_sorted_integrated) / rho_0
+            cumulative_dz_sorted_integral = vertically_sorted_ds["dz_1d_sorted_cumulative_integral"].sel(z_1d_sorted=displacement_slice)
+            dz_integral = np.sign(displacement) * (cumulative_dz_sorted_integral.sel(z_1d_sorted=z, method="nearest") - cumulative_dz_sorted_integral.sel(z_1d_sorted=z_0))
+            rho_constant_integral = ρ * dz_integral
+            E_a_aux1.loc[dict(**position)] = g * (rho_constant_integral - rho_sorted_integral) / rho_0
+            # E_a_aux1.loc[dict(**position)] = z_0
 
-            constant_multiplied = ρ * displacement
-            E_a_fast2.loc[dict(**position)] = g * (constant_multiplied - rho_sorted_integrated) / rho_0
-
-            # if summed_bl_Δz_cm.item() > 2e-4:
+            # if bl_integrated.item() > 2e-4:
             #     from IPython import embed; embed()
             #     pause
+
 
 opts = dict(vmin=-4e-4, vmax=4e-4, cmap="RdBu_r")
 # pause
@@ -138,6 +142,7 @@ print("\nResults saved to: kelvin_helmholtz_ape.nc")
 # Create plots
 print("\nCreating plots...")
 
+pause
 from os.path import basename
 figname = f"figures/{basename(filename)}_energy_analysis.png"
 fig = plot_energy_timeseries(ds, APE, TPE, RPE, KE)
