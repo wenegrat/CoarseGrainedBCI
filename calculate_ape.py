@@ -17,6 +17,7 @@ from ape_calculations import (
     calculate_reference_potential_energy_profile,
     integrated_reference_potential_energy,
     integrated_total_potential_energy,
+    summation_method_local_APE,
     cumulative_method_local_APE,
     load_data,
     integrate,
@@ -61,12 +62,9 @@ vertically_sorted_ds, threed_sorted_ds = vertical_sort_density(ds0.rho, ds0.dV, 
 vertically_sorted_ds["rho_1d_sorted_cumulative_integral"] = (vertically_sorted_ds.rho_1d_sorted * vertically_sorted_ds.dz_1d_sorted).cumsum("z_1d_sorted")
 vertically_sorted_ds["dz_1d_sorted_cumulative_integral"] = (vertically_sorted_ds.dz_1d_sorted).cumsum("z_1d_sorted")
 
-E_a_slow_edges = xr.zeros_like(ds0.rho)
-E_a_slow_cm = xr.zeros_like(ds0.rho)
-E_a_aux1 = xr.zeros_like(ds0.rho)
-E_a_aux2 = xr.zeros_like(ds0.rho)
-E_a_aux3 = xr.zeros_like(ds0.rho)
-E_a_aux4 = xr.zeros_like(ds0.rho)
+Ea_slow = xr.zeros_like(ds0.rho)
+Ea_fast = xr.zeros_like(ds0.rho)
+Ea_aux1 = xr.zeros_like(ds0.rho)
 for x in ds0.x_caa:
     print(f"x: {x.item()}")
     for y in ds0.y_aca:
@@ -89,15 +87,12 @@ for x in ds0.x_caa:
             #---
 
             #+++ Easy but slow method (straight from Eq. (11))
-            rho_sorted_profile_slice = rho_sorted_profile.sel(z_1d_sorted=displacement_slice)
-            b_l = ρ - rho_sorted_profile_slice
-            bl_Δz = b_l * Δz_flat
-            bl_integrated = bl_Δz.sum("z_1d_sorted")
-            E_a_slow_edges.loc[dict(**position)] = g * bl_integrated / rho_0
+            Ea_slow.loc[dict(**position)] = summation_method_local_APE(vertically_sorted_ds, z, z_0, ρ, displacement, displacement_slice)
             #---
 
-            E_a_aux1.loc[dict(**position)] = cumulative_method_local_APE(vertically_sorted_ds, z, z_0, ρ, displacement, displacement_slice)
-
+            #+++ Faster method (using pre-calculated cumulative integrals)
+            Ea_fast.loc[dict(**position)] = cumulative_method_local_APE(vertically_sorted_ds, z, z_0, ρ, displacement, displacement_slice)
+            #---
 
 opts = dict(vmin=-4e-4, vmax=4e-4, cmap="RdBu_r")
 # pause

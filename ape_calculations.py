@@ -282,6 +282,48 @@ def calculate_ape_timeseries(ds, test=False):
     return APE, TPE, RPE
 #---
 
+#+++ Calculate local APE using summation method
+def summation_method_local_APE(vertically_sorted_ds, z, z_0, rho, displacement, displacement_slice):
+    """
+    Calculate local APE using direct summation (straightforward but slower method)
+
+    Parameters
+    ----------
+    vertically_sorted_ds : xr.Dataset
+        Dataset containing sorted density profile and dz
+    z : float
+        Current z coordinate
+    z_0 : float
+        Reference z coordinate (sorted position)
+    rho : float
+        Density at current position
+    displacement : float
+        z - z_0 (vertical displacement)
+    displacement_slice : slice
+        Slice object for selecting the displacement range
+
+    Returns
+    -------
+    float
+        Local APE value: g * ∫(rho - rho_sorted) dz / rho_0
+    """
+    # Get signed dz based on displacement direction
+    if displacement > 0:
+        dz_flat = +vertically_sorted_ds.dz_1d_sorted.sel(z_1d_sorted=displacement_slice)
+    else:
+        dz_flat = -vertically_sorted_ds.dz_1d_sorted.sel(z_1d_sorted=displacement_slice)
+
+    # Calculate buoyancy difference and integrate
+    rho_sorted_profile = vertically_sorted_ds.rho_1d_sorted
+    rho_sorted_profile_slice = rho_sorted_profile.sel(z_1d_sorted=displacement_slice)
+    b_l = rho - rho_sorted_profile_slice
+    bl_dz = b_l * dz_flat
+    bl_integrated = bl_dz.sum("z_1d_sorted")
+
+    local_ape = g * bl_integrated / rho_0
+    return local_ape
+#---
+
 #+++ Calculate local APE using cumulative integral method
 def cumulative_method_local_APE(vertically_sorted_ds, z, z_0, rho, displacement, displacement_slice):
     """
