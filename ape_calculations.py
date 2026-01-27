@@ -275,7 +275,7 @@ def calculate_ape_timeseries(ds, test=False):
     RPE = np.zeros(n_times)
 
     for i in range(n_times):
-        print(f"  Processing time step {i+1}/{n_times}", end='\r')
+        print(f"  Processing time step {i+1}/{n_times}", end="\r")
         APE[i], TPE[i], RPE[i] = integrated_potential_energies(ds, i, test=test)
 
     print("\nDone!")
@@ -329,7 +329,7 @@ def summation_method_local_APE(vertically_sorted_ds, threed_sorted_ds, inverse_s
     z_1d_sorted_values : np.ndarray
         Z coordinate values in sorted order
     position : dict
-        Dictionary with keys 'x_caa', 'y_aca', 'z_aac' (integer indices)
+        Dictionary with keys "x_caa", "y_aca", "z_aac" (integer indices)
     rho : float
         Density at current position
     z : float
@@ -381,7 +381,7 @@ def cumulative_method_local_APE(vertically_sorted_ds, threed_sorted_ds, inverse_
     z_1d_sorted_values : np.ndarray
         Z coordinate values in sorted order
     position : dict
-        Dictionary with keys 'x_caa', 'y_aca', 'z_aac' (integer indices)
+        Dictionary with keys "x_caa", "y_aca", "z_aac" (integer indices)
     rho : float
         Density at current position
     z : float
@@ -531,11 +531,11 @@ def vectorized_summation_method_local_APE(ds0, vertically_sorted_ds, threed_sort
         z_broadcast,
         threed_sorted_ds.sort_indices_3d,
         vectorize=True,
-        dask='allowed',
+        dask="allowed",
         kwargs={
-            'vertically_sorted_ds': vertically_sorted_ds,
-            'inverse_sort_indices': inverse_sort_indices,
-            'z_1d_sorted_values': z_1d_sorted_values,
+            "vertically_sorted_ds": vertically_sorted_ds,
+            "inverse_sort_indices": inverse_sort_indices,
+            "z_1d_sorted_values": z_1d_sorted_values,
         }
     )
 
@@ -579,11 +579,11 @@ def vectorized_cumulative_method_local_APE(ds0, vertically_sorted_ds, threed_sor
         z_broadcast,
         threed_sorted_ds.sort_indices_3d,
         vectorize=True,
-        dask='allowed',
+        dask="allowed",
         kwargs={
-            'vertically_sorted_ds': vertically_sorted_ds,
-            'inverse_sort_indices': inverse_sort_indices,
-            'z_1d_sorted_values': z_1d_sorted_values,
+            "vertically_sorted_ds": vertically_sorted_ds,
+            "inverse_sort_indices": inverse_sort_indices,
+            "z_1d_sorted_values": z_1d_sorted_values,
         }
     )
 
