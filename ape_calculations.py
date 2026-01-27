@@ -313,8 +313,8 @@ def create_inverse_sort_lookup(vertically_sorted_ds):
     return inverse_sort_indices, z_1d_sorted_values
 #---
 
-#+++ Scalar computation functions for use with apply_ufunc
-def _summation_ape_scalar(rho, z, density_index, vertically_sorted_ds, inverse_sort_indices, z_1d_sorted_values):
+#+++ Local APE calculations using summation method
+def _summation_local_ape_scalar(rho, z, density_index, vertically_sorted_ds, inverse_sort_indices, z_1d_sorted_values):
     """
     Compute APE for a single point using summation method (scalar inputs)
 
@@ -334,42 +334,12 @@ def _summation_ape_scalar(rho, z, density_index, vertically_sorted_ds, inverse_s
     # Calculate buoyancy difference and integrate
     rho_sorted_profile = vertically_sorted_ds.rho_1d_sorted
     rho_sorted_profile_slice = rho_sorted_profile.sel(z_1d_sorted=displacement_slice)
-    dz_flat = +vertically_sorted_ds.dz_1d_sorted.sel(z_1d_sorted=displacement_slice)
 
     b_l = - g * (rho - rho_sorted_profile_slice) / rho_0
+
+    dz_flat = vertically_sorted_ds.dz_1d_sorted.sel(z_1d_sorted=displacement_slice)
     return -(b_l * dz_flat).sum("z_1d_sorted")
 
-def _cumulative_ape_scalar(rho, z, density_index, vertically_sorted_ds, inverse_sort_indices, z_1d_sorted_values):
-    """
-    Compute APE for a single point using cumulative integral method (scalar inputs)
-
-    This function is designed to be called by xr.apply_ufunc with vectorize=True
-    """
-    # Get z_0 using inverse lookup
-    sorted_position = inverse_sort_indices[int(density_index)]
-    z_0 = z_1d_sorted_values[sorted_position]
-
-    # Calculate displacement
-    displacement = z - z_0
-
-    # Get cumulative integral of sorted density profile
-    cumulative_rho_sorted_integral = vertically_sorted_ds["rho_1d_sorted_cumulative_integral"]
-    rho_sorted_integral = np.sign(displacement) * (cumulative_rho_sorted_integral.sel(z_1d_sorted=z, method="nearest") -
-                                                   cumulative_rho_sorted_integral.sel(z_1d_sorted=z_0))
-
-    # Get cumulative integral of dz
-    cumulative_dz_sorted_integral = vertically_sorted_ds["dz_1d_sorted_cumulative_integral"]
-    dz_integral = np.sign(displacement) * (cumulative_dz_sorted_integral.sel(z_1d_sorted=z, method="nearest") -
-                                           cumulative_dz_sorted_integral.sel(z_1d_sorted=z_0))
-
-    # Calculate local APE
-    rho_constant_integral = rho * dz_integral
-    local_ape = g * (rho_constant_integral - rho_sorted_integral) / rho_0
-
-    return float(local_ape)
-#---
-
-#+++ Vectorized local APE calculations using xr.apply_ufunc
 def vectorized_summation_method_local_APE(ds0, vertically_sorted_ds, threed_sorted_ds, inverse_sort_indices, z_1d_sorted_values):
     """
     Vectorized calculation of local APE using summation method for all grid points
@@ -402,7 +372,7 @@ def vectorized_summation_method_local_APE(ds0, vertically_sorted_ds, threed_sort
 
     # Use apply_ufunc with vectorize=True to apply the scalar function to all points
     result = xr.apply_ufunc(
-        _summation_ape_scalar,
+        _summation_local_ape_scalar,
         ds0.rho,
         z_broadcast,
         threed_sorted_ds.sort_indices_3d,
@@ -417,6 +387,39 @@ def vectorized_summation_method_local_APE(ds0, vertically_sorted_ds, threed_sort
 
     print("Done!")
     return result
+
+
+#---
+
+#+++ local APE calculations using cumulative integral method
+def _cumulative_local_ape_scalar(rho, z, density_index, vertically_sorted_ds, inverse_sort_indices, z_1d_sorted_values):
+    """
+    Compute APE for a single point using cumulative integral method (scalar inputs)
+
+    This function is designed to be called by xr.apply_ufunc with vectorize=True
+    """
+    # Get z_0 using inverse lookup
+    sorted_position = inverse_sort_indices[int(density_index)]
+    z_0 = z_1d_sorted_values[sorted_position]
+
+    # Calculate displacement
+    displacement = z - z_0
+
+    # Get cumulative integral of sorted density profile
+    cumulative_rho_sorted_integral = vertically_sorted_ds["rho_1d_sorted_cumulative_integral"]
+    rho_sorted_integral = np.sign(displacement) * (cumulative_rho_sorted_integral.sel(z_1d_sorted=z, method="nearest") -
+                                                   cumulative_rho_sorted_integral.sel(z_1d_sorted=z_0))
+
+    # Get cumulative integral of dz
+    cumulative_dz_sorted_integral = vertically_sorted_ds["dz_1d_sorted_cumulative_integral"]
+    dz_integral = np.sign(displacement) * (cumulative_dz_sorted_integral.sel(z_1d_sorted=z, method="nearest") -
+                                           cumulative_dz_sorted_integral.sel(z_1d_sorted=z_0))
+
+    # Calculate local APE
+    rho_constant_integral = rho * dz_integral
+    local_ape = g * (rho_constant_integral - rho_sorted_integral) / rho_0
+
+    return float(local_ape)
 
 def vectorized_cumulative_method_local_APE(ds0, vertically_sorted_ds, threed_sorted_ds, inverse_sort_indices, z_1d_sorted_values):
     """
@@ -450,7 +453,7 @@ def vectorized_cumulative_method_local_APE(ds0, vertically_sorted_ds, threed_sor
 
     # Use apply_ufunc with vectorize=True to apply the scalar function to all points
     result = xr.apply_ufunc(
-        _cumulative_ape_scalar,
+        _cumulative_local_ape_scalar,
         ds0.rho,
         z_broadcast,
         threed_sorted_ds.sort_indices_3d,
