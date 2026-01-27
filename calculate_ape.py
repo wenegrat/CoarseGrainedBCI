@@ -30,7 +30,7 @@ from matplotlib import pyplot as plt
 import pynanigans as pn
 
 # File path to the simulation output
-filename = "output/kelvin_helmholtz_instability_64x1x64.nc"
+filename = "output/kelvin_helmholtz_instability_128x1x128.nc"
 ds = load_data(filename)
 
 #+++ Test that convertion between ρ and b is correct
