@@ -349,26 +349,18 @@ def _cumulative_ape_scalar(rho, z, density_index, vertically_sorted_ds, inverse_
     sorted_position = inverse_sort_indices[int(density_index)]
     z_0 = z_1d_sorted_values[sorted_position]
 
-    # Calculate displacement and slice
+    # Calculate displacement
     displacement = z - z_0
-    if displacement > 0:
-        displacement_slice = slice(z_0, z)
-    else:
-        displacement_slice = slice(z, z_0)
 
     # Get cumulative integral of sorted density profile
-    cumulative_rho_sorted_integral = vertically_sorted_ds["rho_1d_sorted_cumulative_integral"].sel(z_1d_sorted=displacement_slice)
-    rho_sorted_integral = np.sign(displacement) * (
-        cumulative_rho_sorted_integral.sel(z_1d_sorted=z, method="nearest") -
-        cumulative_rho_sorted_integral.sel(z_1d_sorted=z_0)
-    )
+    cumulative_rho_sorted_integral = vertically_sorted_ds["rho_1d_sorted_cumulative_integral"]
+    rho_sorted_integral = np.sign(displacement) * (cumulative_rho_sorted_integral.sel(z_1d_sorted=z, method="nearest") -
+                                                   cumulative_rho_sorted_integral.sel(z_1d_sorted=z_0))
 
     # Get cumulative integral of dz
-    cumulative_dz_sorted_integral = vertically_sorted_ds["dz_1d_sorted_cumulative_integral"].sel(z_1d_sorted=displacement_slice)
-    dz_integral = np.sign(displacement) * (
-        cumulative_dz_sorted_integral.sel(z_1d_sorted=z, method="nearest") -
-        cumulative_dz_sorted_integral.sel(z_1d_sorted=z_0)
-    )
+    cumulative_dz_sorted_integral = vertically_sorted_ds["dz_1d_sorted_cumulative_integral"]
+    dz_integral = np.sign(displacement) * (cumulative_dz_sorted_integral.sel(z_1d_sorted=z, method="nearest") -
+                                           cumulative_dz_sorted_integral.sel(z_1d_sorted=z_0))
 
     # Calculate local APE
     rho_constant_integral = rho * dz_integral
