@@ -340,7 +340,46 @@ def _summation_local_ape_scalar(rho, z, density_index, vertically_sorted_ds, inv
     dz_flat = vertically_sorted_ds.dz_1d_sorted.sel(z_1d_sorted=displacement_slice)
     return -(b_l * dz_flat).sum("z_1d_sorted")
 
-def vectorized_summation_method_local_APE(ds0, vertically_sorted_ds, threed_sorted_ds, inverse_sort_indices, z_1d_sorted_values):
+def _summation_local_ape_numpy(rho, z, density_index, vertically_sorted_ds, inverse_sort_indices, z_1d_sorted_values):
+    """
+    Compute APE for a single point using summation method (scalar inputs)
+
+    This function is designed to be called by xr.apply_ufunc with vectorize=True
+    Optimized to use numpy array indexing instead of slow .sel() operations
+    """
+    # Get z_0 using inverse lookup
+    sorted_position = inverse_sort_indices[int(density_index)]
+    z_0 = z_1d_sorted_values[sorted_position]
+
+    # Extract numpy arrays once (faster than repeated xarray operations)
+    rho_sorted_array = vertically_sorted_ds.rho_1d_sorted.values
+    dz_sorted_array = vertically_sorted_ds.dz_1d_sorted.values
+    z_sorted_array = vertically_sorted_ds.z_1d_sorted.values
+
+    # Find integer indices using binary search (much faster than .sel())
+    idx_z = np.searchsorted(z_sorted_array, z)
+    idx_z0 = sorted_position
+
+    # Determine slice indices based on displacement direction
+    if z > z_0:
+        idx_start, idx_end = idx_z0, idx_z
+    else:
+        idx_start, idx_end = idx_z, idx_z0
+
+    # Fast numpy array slicing (much faster than .sel())
+    if idx_end > idx_start:
+        rho_sorted_slice = rho_sorted_array[idx_start:idx_end]
+        dz_slice = dz_sorted_array[idx_start:idx_end]
+
+        # Calculate buoyancy difference and integrate
+        b_l = -g * (rho - rho_sorted_slice) / rho_0
+        integral = np.sum(b_l * dz_slice)
+        return -integral
+    else:
+        return 0.0
+
+
+def vectorized_summation_method_local_APE(ds0, vertically_sorted_ds, threed_sorted_ds, inverse_sort_indices, z_1d_sorted_values, use_numpy_version=True):
     """
     Vectorized calculation of local APE using summation method for all grid points
 
@@ -372,7 +411,7 @@ def vectorized_summation_method_local_APE(ds0, vertically_sorted_ds, threed_sort
 
     # Use apply_ufunc with vectorize=True to apply the scalar function to all points
     result = xr.apply_ufunc(
-        _summation_local_ape_scalar,
+        _summation_local_ape_numpy if use_numpy_version else _summation_local_ape_scalar,
         ds0.rho,
         z_broadcast,
         threed_sorted_ds.sort_indices_3d,
