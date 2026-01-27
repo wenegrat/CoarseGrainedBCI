@@ -282,8 +282,39 @@ def calculate_ape_timeseries(ds, test=False):
     return APE, TPE, RPE
 #---
 
+#+++ Create inverse lookup table for fast z_0 retrieval
+def create_inverse_sort_lookup(vertically_sorted_ds):
+    """
+    Create inverse lookup table for fast z_0 coordinate retrieval
+
+    This function creates a mapping from density indices to their positions in the
+    sorted array and extracts z coordinates for fast access. This avoids the slow
+    .where() operation when looking up reference z coordinates.
+
+    Parameters
+    ----------
+    vertically_sorted_ds : xr.Dataset
+        Dataset containing sort_indices_1d and z_1d_sorted
+
+    Returns
+    -------
+    inverse_sort_indices : np.ndarray
+        Array mapping density_index -> position in sorted array (O(1) lookup)
+    z_1d_sorted_values : np.ndarray
+        Z coordinate values in sorted order for fast indexing
+    """
+    print("Creating inverse lookup table for fast z_0 retrieval...")
+    inverse_sort_indices = np.empty(len(vertically_sorted_ds.sort_indices_1d), dtype=int)
+    for i, idx in enumerate(vertically_sorted_ds.sort_indices_1d.values):
+        inverse_sort_indices[int(idx)] = i
+    z_1d_sorted_values = vertically_sorted_ds.z_1d_sorted.values
+    print("Done!")
+
+    return inverse_sort_indices, z_1d_sorted_values
+#---
+
 #+++ Calculate local APE using summation method
-def summation_method_local_APE(vertically_sorted_ds, z, z_0, rho, displacement, displacement_slice):
+def summation_method_local_APE(vertically_sorted_ds, rho, displacement, displacement_slice, z, z_0):
     """
     Calculate local APE using direct summation (straightforward but slower method)
 
@@ -291,16 +322,16 @@ def summation_method_local_APE(vertically_sorted_ds, z, z_0, rho, displacement, 
     ----------
     vertically_sorted_ds : xr.Dataset
         Dataset containing sorted density profile and dz
-    z : float
-        Current z coordinate
-    z_0 : float
-        Reference z coordinate (sorted position)
     rho : float
         Density at current position
     displacement : float
         z - z_0 (vertical displacement)
     displacement_slice : slice
         Slice object for selecting the displacement range
+    z : float
+        Current z coordinate
+    z_0 : float
+        Reference z coordinate (sorted position)
 
     Returns
     -------
@@ -325,7 +356,7 @@ def summation_method_local_APE(vertically_sorted_ds, z, z_0, rho, displacement, 
 #---
 
 #+++ Calculate local APE using cumulative integral method
-def cumulative_method_local_APE(vertically_sorted_ds, z, z_0, rho, displacement, displacement_slice):
+def cumulative_method_local_APE(vertically_sorted_ds, rho, displacement, displacement_slice, z, z_0):
     """
     Calculate local APE using cumulative integrals (fast method)
 
@@ -333,16 +364,16 @@ def cumulative_method_local_APE(vertically_sorted_ds, z, z_0, rho, displacement,
     ----------
     vertically_sorted_ds : xr.Dataset
         Dataset containing cumulative integrals of sorted density and dz
-    z : float
-        Current z coordinate
-    z_0 : float
-        Reference z coordinate (sorted position)
     rho : float
         Density at current position
     displacement : float
         z - z_0 (vertical displacement)
     displacement_slice : slice
         Slice object for selecting the displacement range
+    z : float
+        Current z coordinate
+    z_0 : float
+        Reference z coordinate (sorted position)
 
     Returns
     -------

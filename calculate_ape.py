@@ -19,6 +19,7 @@ from ape_calculations import (
     integrated_total_potential_energy,
     summation_method_local_APE,
     cumulative_method_local_APE,
+    create_inverse_sort_lookup,
     load_data,
     integrate,
     g,
@@ -63,16 +64,10 @@ vertically_sorted_ds["rho_1d_sorted_cumulative_integral"] = (vertically_sorted_d
 vertically_sorted_ds["dz_1d_sorted_cumulative_integral"] = (vertically_sorted_ds.dz_1d_sorted).cumsum("z_1d_sorted")
 
 # Create inverse lookup table for fast z_0 retrieval
-# Maps from density_index -> position in sorted array -> z coordinate
-print("Creating inverse lookup table for fast z_0 retrieval...")
-inverse_sort_indices = np.empty(len(vertically_sorted_ds.sort_indices_1d), dtype=int)
-for i, idx in enumerate(vertically_sorted_ds.sort_indices_1d.values):
-    inverse_sort_indices[int(idx)] = i
-z_1d_sorted_values = vertically_sorted_ds.z_1d_sorted.values
-print("Done!")
+inverse_sort_indices, z_1d_sorted_values = create_inverse_sort_lookup(vertically_sorted_ds)
 
-Ea_slow = xr.zeros_like(ds0.rho)
-Ea_fast = xr.zeros_like(ds0.rho)
+Ea_on_the_fly = xr.zeros_like(ds0.rho)
+Ea_preintegrated = xr.zeros_like(ds0.rho)
 Ea_aux1 = xr.zeros_like(ds0.rho)
 for i, x in enumerate(ds0.x_caa):
     print(f"x: {x.item()}")
@@ -97,13 +92,13 @@ for i, x in enumerate(ds0.x_caa):
                 Δz_flat = -vertically_sorted_ds.dz_1d_sorted.sel(z_1d_sorted=displacement_slice)
             #---
 
-            # #+++ Easy but slow method (straight from Eq. (11))
-            # Ea_slow.loc[dict(**position)] = summation_method_local_APE(vertically_sorted_ds, z, z_0, ρ, displacement, displacement_slice)
-            # #---
+            #+++ Easy but slow method (straight from Eq. (11))
+            Ea_on_the_fly[dict(**position)] = summation_method_local_APE(vertically_sorted_ds, ρ, displacement, displacement_slice, z, z_0)
+            #---
 
-            # #+++ Faster method (using pre-calculated cumulative integrals)
-            # Ea_fast.loc[dict(**position)] = cumulative_method_local_APE(vertically_sorted_ds, z, z_0, ρ, displacement, displacement_slice)
-            # #---
+            #+++ Faster method (using pre-calculated cumulative integrals)
+            Ea_preintegrated[dict(**position)] = cumulative_method_local_APE(vertically_sorted_ds, ρ, displacement, displacement_slice, z, z_0)
+            #---
 
 opts = dict(vmin=-4e-4, vmax=4e-4, cmap="RdBu_r")
 # pause
