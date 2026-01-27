@@ -19,6 +19,8 @@ from ape_calculations import (
     integrated_total_potential_energy,
     summation_method_local_APE,
     cumulative_method_local_APE,
+    vectorized_summation_method_local_APE,
+    vectorized_cumulative_method_local_APE,
     create_inverse_sort_lookup,
     load_data,
     integrate,
@@ -66,29 +68,14 @@ vertically_sorted_ds["dz_1d_sorted_cumulative_integral"] = (vertically_sorted_ds
 # Create inverse lookup table for fast z_0 retrieval
 inverse_sort_indices, z_1d_sorted_values = create_inverse_sort_lookup(vertically_sorted_ds)
 
-Ea_on_the_fly = xr.zeros_like(ds0.rho)
-Ea_preintegrated = xr.zeros_like(ds0.rho)
-Ea_aux1 = xr.zeros_like(ds0.rho)
-for i, x in enumerate(ds0.x_caa):
-    print(f"x: {x.item()}")
-    for j, y in enumerate(ds0.y_aca):
-        for k, z in enumerate(ds0.z_aac):
-            position = dict(x_caa=i, y_aca=j, z_aac=k)
-            ρ = ds0.rho.isel(**position) # sel() is much slower than isel()
+# Vectorized calculation of local APE
+Ea_on_the_fly = vectorized_summation_method_local_APE(
+    ds0, vertically_sorted_ds, threed_sorted_ds, inverse_sort_indices, z_1d_sorted_values
+)
 
-            #+++ Easy but slow method (straight from Eq. (11))
-            Ea_on_the_fly[position] = summation_method_local_APE(
-                vertically_sorted_ds, threed_sorted_ds, inverse_sort_indices, 
-                z_1d_sorted_values, position, ρ, z
-            )
-            #---
-
-            #+++ Faster method (using pre-calculated cumulative integrals)
-            Ea_preintegrated[position] = cumulative_method_local_APE(
-                vertically_sorted_ds, threed_sorted_ds, inverse_sort_indices,
-                z_1d_sorted_values, position, ρ, z
-            )
-            #---
+Ea_preintegrated = vectorized_cumulative_method_local_APE(
+    ds0, vertically_sorted_ds, threed_sorted_ds, inverse_sort_indices, z_1d_sorted_values
+)
 
 opts = dict(vmin=-4e-4, vmax=4e-4, cmap="RdBu_r")
 # pause
