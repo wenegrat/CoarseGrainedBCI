@@ -314,7 +314,7 @@ def create_inverse_sort_lookup(vertically_sorted_ds):
 #---
 
 #+++ Calculate local APE using summation method
-def summation_method_local_APE(vertically_sorted_ds, rho, displacement, displacement_slice, z, z_0):
+def summation_method_local_APE(vertically_sorted_ds, threed_sorted_ds, inverse_sort_indices, z_1d_sorted_values, position, rho, z):
     """
     Calculate local APE using direct summation (straightforward but slower method)
 
@@ -322,26 +322,36 @@ def summation_method_local_APE(vertically_sorted_ds, rho, displacement, displace
     ----------
     vertically_sorted_ds : xr.Dataset
         Dataset containing sorted density profile and dz
+    threed_sorted_ds : xr.Dataset
+        Dataset containing 3D sort indices
+    inverse_sort_indices : np.ndarray
+        Inverse lookup table mapping density_index to sorted position
+    z_1d_sorted_values : np.ndarray
+        Z coordinate values in sorted order
+    position : dict
+        Dictionary with keys 'x_caa', 'y_aca', 'z_aac' (integer indices)
     rho : float
         Density at current position
-    displacement : float
-        z - z_0 (vertical displacement)
-    displacement_slice : slice
-        Slice object for selecting the displacement range
     z : float
         Current z coordinate
-    z_0 : float
-        Reference z coordinate (sorted position)
 
     Returns
     -------
     float
         Local APE value: g * ∫(rho - rho_sorted) dz / rho_0
     """
-    # Get signed dz based on displacement direction
+    # Get density index and reference z coordinate
+    density_index = threed_sorted_ds.sort_indices_3d.isel(**position).item()
+    sorted_position = inverse_sort_indices[density_index]
+    z_0 = z_1d_sorted_values[sorted_position]
+    
+    # Calculate displacement and slice
+    displacement = z - z_0
     if displacement > 0:
+        displacement_slice = slice(z_0, z)
         dz_flat = +vertically_sorted_ds.dz_1d_sorted.sel(z_1d_sorted=displacement_slice)
     else:
+        displacement_slice = slice(z, z_0)
         dz_flat = -vertically_sorted_ds.dz_1d_sorted.sel(z_1d_sorted=displacement_slice)
 
     # Calculate buoyancy difference and integrate
@@ -356,7 +366,7 @@ def summation_method_local_APE(vertically_sorted_ds, rho, displacement, displace
 #---
 
 #+++ Calculate local APE using cumulative integral method
-def cumulative_method_local_APE(vertically_sorted_ds, rho, displacement, displacement_slice, z, z_0):
+def cumulative_method_local_APE(vertically_sorted_ds, threed_sorted_ds, inverse_sort_indices, z_1d_sorted_values, position, rho, z):
     """
     Calculate local APE using cumulative integrals (fast method)
 
@@ -364,22 +374,36 @@ def cumulative_method_local_APE(vertically_sorted_ds, rho, displacement, displac
     ----------
     vertically_sorted_ds : xr.Dataset
         Dataset containing cumulative integrals of sorted density and dz
+    threed_sorted_ds : xr.Dataset
+        Dataset containing 3D sort indices
+    inverse_sort_indices : np.ndarray
+        Inverse lookup table mapping density_index to sorted position
+    z_1d_sorted_values : np.ndarray
+        Z coordinate values in sorted order
+    position : dict
+        Dictionary with keys 'x_caa', 'y_aca', 'z_aac' (integer indices)
     rho : float
         Density at current position
-    displacement : float
-        z - z_0 (vertical displacement)
-    displacement_slice : slice
-        Slice object for selecting the displacement range
     z : float
         Current z coordinate
-    z_0 : float
-        Reference z coordinate (sorted position)
 
     Returns
     -------
     float
         Local APE value: g * (rho * ∫dz - ∫rho_sorted dz) / rho_0
     """
+    # Get density index and reference z coordinate
+    density_index = threed_sorted_ds.sort_indices_3d.isel(**position).item()
+    sorted_position = inverse_sort_indices[density_index]
+    z_0 = z_1d_sorted_values[sorted_position]
+    
+    # Calculate displacement and slice
+    displacement = z - z_0
+    if displacement > 0:
+        displacement_slice = slice(z_0, z)
+    else:
+        displacement_slice = slice(z, z_0)
+    
     # Get cumulative integral of sorted density profile
     cumulative_rho_sorted_integral = vertically_sorted_ds["rho_1d_sorted_cumulative_integral"].sel(z_1d_sorted=displacement_slice)
     rho_sorted_integral = np.sign(displacement) * (

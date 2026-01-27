@@ -73,31 +73,21 @@ for i, x in enumerate(ds0.x_caa):
     print(f"x: {x.item()}")
     for j, y in enumerate(ds0.y_aca):
         for k, z in enumerate(ds0.z_aac):
-            #+++ Needed by every method
-            # rho_sorted_profile = vertically_sorted_ds.rho_1d_sorted
             position = dict(x_caa=i, y_aca=j, z_aac=k)
             ρ = ds0.rho.isel(**position) # sel() is much slower than isel()
 
-            density_index = threed_sorted_ds.sort_indices_3d.isel(**position).item() # Gets the density index from the permutation telling us where it ended up
-            # Fast lookup using pre-computed inverse mapping (replaces slow .where() operation)
-            sorted_position = inverse_sort_indices[density_index]
-            z_0 = z_1d_sorted_values[sorted_position]
-
-            displacement = z - z_0
-            if displacement > 0:
-                displacement_slice = slice(z_0, z)
-                Δz_flat = +vertically_sorted_ds.dz_1d_sorted.sel(z_1d_sorted=displacement_slice)
-            else:
-                displacement_slice = slice(z, z_0)
-                Δz_flat = -vertically_sorted_ds.dz_1d_sorted.sel(z_1d_sorted=displacement_slice)
-            #---
-
             #+++ Easy but slow method (straight from Eq. (11))
-            Ea_on_the_fly[dict(**position)] = summation_method_local_APE(vertically_sorted_ds, ρ, displacement, displacement_slice, z, z_0)
+            Ea_on_the_fly[position] = summation_method_local_APE(
+                vertically_sorted_ds, threed_sorted_ds, inverse_sort_indices, 
+                z_1d_sorted_values, position, ρ, z
+            )
             #---
 
             #+++ Faster method (using pre-calculated cumulative integrals)
-            Ea_preintegrated[dict(**position)] = cumulative_method_local_APE(vertically_sorted_ds, ρ, displacement, displacement_slice, z, z_0)
+            Ea_preintegrated[position] = cumulative_method_local_APE(
+                vertically_sorted_ds, threed_sorted_ds, inverse_sort_indices,
+                z_1d_sorted_values, position, ρ, z
+            )
             #---
 
 opts = dict(vmin=-4e-4, vmax=4e-4, cmap="RdBu_r")
