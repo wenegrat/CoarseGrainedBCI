@@ -17,8 +17,6 @@ from ape_calculations import (
     calculate_reference_potential_energy_profile,
     integrated_reference_potential_energy,
     integrated_total_potential_energy,
-    summation_method_local_APE,
-    cumulative_method_local_APE,
     vectorized_summation_method_local_APE,
     vectorized_cumulative_method_local_APE,
     create_inverse_sort_lookup,
