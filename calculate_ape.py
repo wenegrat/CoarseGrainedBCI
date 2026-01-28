@@ -21,15 +21,13 @@ from ape_calculations import (
     integrate,
     g,
 )
-
-rho_0 = 1025
-
-from ape_plots import plot_energy_timeseries
+from ape_plots import plot_energy_timeseries, plot_potential_energies
 from matplotlib import pyplot as plt
 import pynanigans as pn
 
 # File path to the simulation output
 filename = "output/kelvin_helmholtz_instability_128x1x128.nc"
+rho_0 = 1025
 ds = load_data(filename, ρ0=rho_0)
 
 #+++ Test that convertion between ρ and b is correct
@@ -99,8 +97,11 @@ print("\nCreating plots...")
 
 
 
-from os.path import basename
-figname = f"figures/{basename(filename)}_energy_analysis.png"
-fig = plot_energy_timeseries(ds, APE=APE, TPE=global_potential_energies.TPE, RPE=global_potential_energies.RPE, KE=KE)
-fig.savefig(figname, dpi=150, bbox_inches="tight")
-print(f"Saved: {figname}")
+# from os.path impInort basename
+# figname_energy = f"figures/{basename(filename)}_energy_analysis.png"
+# fig = plot_energy_timeseries(ds, APE=APE, TPE=global_potential_energies.TPE, RPE=global_potential_energies.RPE, KE=KE)
+# fig.savefig(figname_energy, dpi=150, bbox_inches="tight")
+# print(f"Saved: {figname_energy}")
+
+fig_global = plot_potential_energies(ds.time, APE=global_potential_energies.APE)
+fig_local = plot_potential_energies(ds.time, APE=integrated_local_potential_energies.ape)

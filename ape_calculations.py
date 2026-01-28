@@ -621,7 +621,7 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1):
 
         # Calculate local APE field
         local_ape = vectorized_local_APE_on_the_fly_integral(
-            ds_t, vertically_sorted_ds, threed_sorted_ds, 
+            ds_t, vertically_sorted_ds, threed_sorted_ds,
             inverse_sort_indices, z_1d_sorted_values, verbose=verbose_level > 1
         )
 
