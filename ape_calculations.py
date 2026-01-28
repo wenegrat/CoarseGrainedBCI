@@ -314,11 +314,20 @@ def create_inverse_sort_lookup(vertically_sorted_ds):
 #---
 
 #+++ Local APE calculations using summation method
-def _summation_local_ape_scalar(rho, z, density_index, vertically_sorted_ds, inverse_sort_indices, z_1d_sorted_values):
+def _summation_local_ape_xarray(rho, z, density_index, vertically_sorted_ds, inverse_sort_indices, z_1d_sorted_values):
     """
-    Compute APE for a single point using summation method (scalar inputs)
+    Compute APE for a single point using summation method (xarray inputs)
 
     This function is designed to be called by xr.apply_ufunc with vectorize=True
+
+    Parameters
+    ----------
+    rho : xr.DataArray
+        Density field
+    z : xr.DataArray
+        Z coordinate
+    density_index : int
+        Index of the density in the sorted array
     """
     # Get z_0 using inverse lookup
     sorted_position = inverse_sort_indices[int(density_index)]
@@ -335,17 +344,44 @@ def _summation_local_ape_scalar(rho, z, density_index, vertically_sorted_ds, inv
     rho_sorted_profile = vertically_sorted_ds.rho_1d_sorted
     rho_sorted_profile_slice = rho_sorted_profile.sel(z_1d_sorted=displacement_slice)
 
-    b_l = - g * (rho - rho_sorted_profile_slice) / rho_0
+    b_l = - g * (rho - rho_sorted_profile_slice)
 
     dz_flat = vertically_sorted_ds.dz_1d_sorted.sel(z_1d_sorted=displacement_slice)
     return -(b_l * dz_flat).sum("z_1d_sorted")
 
 def _summation_local_ape_numpy(rho, z, density_index, vertically_sorted_ds, inverse_sort_indices, z_1d_sorted_values):
     """
-    Compute APE for a single point using summation method (scalar inputs)
+    Compute APE for a single point using summation method (scalar inputs) according to the
+    definition:
 
+    E_a = -∫_{z_0}^{z} b_l dz = g ∫_{z_0}^{z} (ρ - ρ_ref) dz
+
+    Thus the output units are: kg m^2 s^-2 / m^3, which is the APE by unit of volume.
+
+    Parameters
+    ----------
+    rho : xr.DataArray
+        Density field
+    z : xr.DataArray
+        Z coordinate
+    density_index : int
+        Index of the density in the sorted array
+    vertically_sorted_ds : xr.Dataset
+        Dataset containing sorted density profile and dz
+    inverse_sort_indices : np.ndarray
+        Inverse lookup table mapping density_index to sorted position
+    z_1d_sorted_values : np.ndarray
+        Z coordinate values in sorted order
+
+    Returns
+    -------
+    float
+        Local APE
+
+    Notes
+    -----
     This function is designed to be called by xr.apply_ufunc with vectorize=True
-    Optimized to use numpy array indexing instead of slow .sel() operations
+    and is optimized to use numpy array indexing instead of slow .sel() operations
     """
     # Get z_0 using inverse lookup
     sorted_position = inverse_sort_indices[int(density_index)]
@@ -372,7 +408,7 @@ def _summation_local_ape_numpy(rho, z, density_index, vertically_sorted_ds, inve
         dz_slice = dz_sorted_array[idx_start:idx_end]
 
         # Calculate buoyancy difference and integrate
-        b_l = -g * (rho - rho_sorted_slice) / rho_0
+        b_l = -g * (rho - rho_sorted_slice)
         integral = np.sum(b_l * dz_slice)
         return -integral
     else:
@@ -411,7 +447,7 @@ def vectorized_summation_method_local_APE(ds0, vertically_sorted_ds, threed_sort
 
     # Use apply_ufunc with vectorize=True to apply the scalar function to all points
     result = xr.apply_ufunc(
-        _summation_local_ape_numpy if use_numpy_version else _summation_local_ape_scalar,
+        _summation_local_ape_numpy if use_numpy_version else _summation_local_ape_xarray,
         ds0.rho,
         z_broadcast,
         threed_sorted_ds.sort_indices_3d,
@@ -433,9 +469,37 @@ def vectorized_summation_method_local_APE(ds0, vertically_sorted_ds, threed_sort
 #+++ local APE calculations using cumulative integral method
 def _cumulative_local_ape_scalar(rho, z, density_index, vertically_sorted_ds, inverse_sort_indices, z_1d_sorted_values):
     """
-    Compute APE for a single point using cumulative integral method (scalar inputs)
+    Compute APE for a single point using cumulative integral method (scalar inputs) according to the
+    definition:
 
+    E_a = g ∫_{z_0}^{z} (ρ - ρ_ref) dz
+
+    Thus the output units are: kg m^2 s^-2 / m^3, which is the APE by unit of volume.
+
+    Parameters
+    ----------
+    rho : xr.DataArray
+        Density field
+    z : xr.DataArray
+        Z coordinate
+    density_index : int
+        Index of the density in the sorted array
+    vertically_sorted_ds : xr.Dataset
+        Dataset containing sorted density profile and dz
+    inverse_sort_indices : np.ndarray
+        Inverse lookup table mapping density_index to sorted position
+    z_1d_sorted_values : np.ndarray
+        Z coordinate values in sorted order
+
+    Returns
+    -------
+    float
+        Local APE
+
+    Notes
+    -----
     This function is designed to be called by xr.apply_ufunc with vectorize=True
+    and is optimized to use numpy array indexing instead of slow .sel() operations
     """
     # Get z_0 using inverse lookup
     sorted_position = inverse_sort_indices[int(density_index)]
@@ -456,7 +520,7 @@ def _cumulative_local_ape_scalar(rho, z, density_index, vertically_sorted_ds, in
 
     # Calculate local APE
     rho_constant_integral = rho * dz_integral
-    local_ape = g * (rho_constant_integral - rho_sorted_integral) / rho_0
+    local_ape = g * (rho_constant_integral - rho_sorted_integral)
 
     return float(local_ape)
 
