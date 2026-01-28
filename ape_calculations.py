@@ -12,12 +12,12 @@ import xarray as xr
 g = 9.81  # gravitational acceleration [m/s^2]
 
 #+++ Auxiliary functions
-def volume_sum(da):
-    return da.sum(("x_caa", "y_aca", "z_aac"))
+def volume_sum(da, dims=("x_caa", "y_aca", "z_aac")):
+    return da.sum(dims)
 
-def integrate(da, dV):
+def integrate(da, dV, dims=("x_caa", "y_aca", "z_aac")):
     """Integrate a DataArray over spatial dimensions"""
-    return (da * dV).sum(("x_caa", "y_aca", "z_aac"))
+    return (da * dV).sum(dims)
 #---
 
 #+++ Load data
@@ -125,7 +125,7 @@ def vertical_sort_density(rho, dV, LxLy, test=False, z_min=0, Lz=None):
 #---
 
 #+++ Calculate TPE
-def local_TPE(rho):
+def local_TPE(rho, z_name="z_aac"):
     """
     Calculate local Total Potential Energy density
 
@@ -139,9 +139,9 @@ def local_TPE(rho):
     xr.DataArray
         Local TPE density: g * rho * z
     """
-    return g * rho * rho.z_aac
+    return g * rho * rho[z_name]
 
-def integrated_total_potential_energy(rho, dV=None, ds=None):
+def integrated_total_potential_energy(rho, dV=None, ds=None, z_name="z_aac"):
     """
     Calculate volume-integrated Total Potential Energy (TPE)
 
@@ -164,7 +164,7 @@ def integrated_total_potential_energy(rho, dV=None, ds=None):
             dV = ds.dV
         else:
             raise ValueError("Either dV or ds must be provided")
-    tpe_local = local_TPE(rho)
+    tpe_local = local_TPE(rho, z_name=z_name)
     return integrate(tpe_local, dV)
 #---
 
@@ -600,7 +600,8 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1):
 
     # Initialize list to store local APE fields for each time
     local_ape_list = []
-    local_rpe_list = []
+    local_rho_sorted_list = []
+    local_dz_sorted_list = []
 
     for i in range(n_times):
         if verbose_level > 0: print(f"  Processing time step {i+1}/{n_times}", end="\r")
@@ -624,7 +625,8 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1):
 
         # Append to lists in order to concatenate later
         local_ape_list.append(local_ape)
-        local_rpe_list.append(vertically_sorted_ds.rho_1d_sorted)
+        local_rho_sorted_list.append(vertically_sorted_ds.rho_1d_sorted)
+        local_dz_sorted_list.append(vertically_sorted_ds.dz_1d_sorted)
 
     if verbose_level > 0: print("\nDone!")
 
@@ -632,16 +634,22 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1):
     local_ape_4d = xr.concat(local_ape_list, dim="time")
     local_ape_4d["time"] = ds.time
 
-    local_rpe_4d = xr.concat(local_rpe_list, dim="time")
-    local_rpe_4d["time"] = ds.time
+    local_rho_sorted_4d = xr.concat(local_rho_sorted_list, dim="time")
+    local_rho_sorted_4d["time"] = ds.time
 
-    tpe = local_TPE(ds.rho)
+    local_dz_sorted_4d = xr.concat(local_dz_sorted_list, dim="time")
+    local_dz_sorted_4d["time"] = ds.time
+
+    tpe = local_TPE(ds.rho, z_name="z_aac")
+    rpe = local_TPE(local_rho_sorted_4d, z_name="z_1d_sorted")
 
     # Combine into a Dataset
     local_potential_energies_ds = xr.Dataset(dict(
         ape = local_ape_4d,
         tpe = tpe,
-        rpe = local_rpe_4d,
+        rpe = rpe,
+        rho_sorted = local_rho_sorted_4d,
+        dz_sorted = local_dz_sorted_4d,
     ))
 
     return local_potential_energies_ds

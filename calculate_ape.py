@@ -65,14 +65,15 @@ global_potential_energies = integrated_potential_energies_timeseries(ds, test=Fa
 
 # Calculate local APE time series
 local_potential_energies = local_potential_energies_timeseries(ds, test=False, verbose_level=1)
-integrated_local_potential_energies = integrate(local_potential_energies, ds.dV)
+integrated_local_potential_energies = integrate(local_potential_energies[["ape", "tpe"]], ds.dV)
+integrated_local_potential_energies["rpe"] = (local_potential_energies.rho_sorted * local_potential_energies.dz_sorted).sum("z_1d_sorted")
+
 # local_potential_energies.ape.squeeze().sel(time=slice(None, None, 9)).plot(col="time", col_wrap=3, robust=True)
 
 # Calculate KE time series
 KE = integrated_KE_timeseries(ds, ρ0=rho_0)
-
 # Print summary statistics
-APE = global_potential_energies.ape
+APE = global_potential_energies.APE
 
 print("\n" + "="*60)
 print("APE Calculation Summary")
@@ -83,19 +84,21 @@ print(f"\nTotal Energy Conservation: {(APE[-1] + KE[-1]) / (APE[0] + KE[0]):.6f}
 print("="*60)
 
 # Save results to NetCDF
-output_ds = xr.Dataset(dict(APE=("time", APE),
-                            TPE=("time", TPE),
-                            RPE=("time", RPE),
-                            KE=("time", KE.values)))
+output_ds = xr.Dataset(dict(APE = APE,
+                            TPE = global_potential_energies.TPE,
+                            RPE = global_potential_energies.RPE,
+                            ape_int = integrated_local_potential_energies.ape,
+                            tpe_int = integrated_local_potential_energies.tpe,
+                            rpe_int = integrated_local_potential_energies.rpe,
+                            KE  = KE))
 output_ds.to_netcdf("kelvin_helmholtz_ape.nc")
 print("\nResults saved to: kelvin_helmholtz_ape.nc")
 
 # Create plots
 print("\nCreating plots...")
 
-pause
 from os.path import basename
 figname = f"figures/{basename(filename)}_energy_analysis.png"
-fig = plot_energy_timeseries(ds, APE, TPE, RPE, KE)
+fig = plot_energy_timeseries(ds, APE, global_potential_energies.TPE, global_potential_energies.RPE, KE)
 fig.savefig(figname, dpi=150, bbox_inches="tight")
 print(f"Saved: {figname}")
