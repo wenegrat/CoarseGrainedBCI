@@ -43,12 +43,12 @@ def plot_energy_timeseries(ds, APE, TPE, RPE, KE=None):
     ax3 = axes[2]
     if KE is not None:
         total_energy = APE + KE
-        total_energy_norm = total_energy / total_energy[0]
+        total_energy_norm = total_energy / abs(total_energy[0])
 
         ax3.plot(ds.time, APE / APE[0], label='APE (normalized)', linewidth=2, color='red')
         ax3.plot(ds.time, KE / KE[0], label='KE (normalized)', linewidth=2, color='blue')
         ax3.plot(ds.time, total_energy_norm, label='Total (APE + KE, normalized)',
-                linewidth=2, color='black', linestyle='--')
+                 linewidth=2, color='black', linestyle='--')
 
         ax3.set_xlabel('Time')
         ax3.set_ylabel('Normalized Energy')

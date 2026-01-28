@@ -97,8 +97,10 @@ print("\nResults saved to: kelvin_helmholtz_ape.nc")
 # Create plots
 print("\nCreating plots...")
 
+
+
 from os.path import basename
 figname = f"figures/{basename(filename)}_energy_analysis.png"
-fig = plot_energy_timeseries(ds, APE, global_potential_energies.TPE, global_potential_energies.RPE, KE)
+fig = plot_energy_timeseries(ds, APE=APE, TPE=global_potential_energies.TPE, RPE=global_potential_energies.RPE, KE=KE)
 fig.savefig(figname, dpi=150, bbox_inches="tight")
 print(f"Saved: {figname}")

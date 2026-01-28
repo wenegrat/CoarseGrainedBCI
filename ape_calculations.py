@@ -281,7 +281,9 @@ def integrated_potential_energies_timeseries(ds, test=False, verbose_level=1):
         APE[i], TPE[i], RPE[i] = integrated_potential_energies(ds, i, test=test)
 
     if verbose_level > 0: print("\nDone!")
-    potential_energies_ds = xr.Dataset(dict(APE=APE, TPE=TPE, RPE=RPE))
+
+    potential_energies_ds = xr.Dataset(dict(APE=("time", APE), TPE=("time", TPE), RPE=("time", RPE)))
+    potential_energies_ds["time"] = ds.time
     return potential_energies_ds
 #---
 
