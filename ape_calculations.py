@@ -55,7 +55,7 @@ def load_data(filename, ρ0=1025):
     return ds
 #---
 
-#+++ Vertical sort density
+#+++ Vertical sort density by flattening, sorting, and reshaping
 def vertical_sort_density(rho, dV, LxLy, test=False, z_min=0, Lz=None):
     """
     Sort the density field to obtain the reference state
@@ -122,6 +122,29 @@ def vertical_sort_density(rho, dV, LxLy, test=False, z_min=0, Lz=None):
         assert(np.all(rho == rho_3d_reshaped))
 
     return vertically_sorted_ds, threed_sorted_ds
+#---
+
+#+++ Vertical sort density by the PDF method
+def calcZ_r(rho, Lz, nbins=1000):
+    rhoflat = np.ravel(rho.values.copy())
+    eps = 1e-3
+    rhobins = np.linspace(rhoflat.min()-eps, rhoflat.max()+eps, nbins)
+    # print(rhobins[0])
+    # print(rhobins[-1])
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        P_rho, bins_count=np.histogram(rhoflat,bins=rhobins, density=True)
+    # print(ds.Rho.isel(time=ts).min().values)
+    # rhobins = 0.5*(bins_count[1:] + bins_count[:-1])
+    rhobins =  0.5*(bins_count[1:] + bins_count[:-1])
+    # print(bins_count[1:] - bins_count[:-1])
+    # mask = np.isfinite(P_rho)
+    # print(rhobins.shape)
+    # print(P_rho)
+    Z_r = Lz * integrate.cumtrapz(P_rho[::-1], x=rhobins[::-1], initial=0)
+    # Z_r = H*integrate.cumtrapz(P_rho[mask], x=rhobins[mask], initial=0)
+    Z_r = Z_r - Z_r[-1] #+ ds.z_aac[0].values
+    return Z_r, rhobins
 #---
 
 #+++ Calculate TPE
@@ -319,7 +342,7 @@ def _create_inverse_sort_lookup(vertically_sorted_ds, verbose=False):
 #---
 
 #+++ Local APE calculations using on-the-fly integral method
-def _local_APE_on_the_fly_integral_xarray(ρ, z, density_index, vertically_sorted_ds, inverse_sort_indices, z_1d_sorted_values):
+def _local_APE_on_the_fly_integral_xarray(ρ, z, density_index, vertically_sorted_ds, inverse_sort_indices, z_1d_sorted_values, ρ0=1025):
     """
     Compute APE for a single point using summation method (xarray inputs)
 
@@ -349,17 +372,17 @@ def _local_APE_on_the_fly_integral_xarray(ρ, z, density_index, vertically_sorte
     ρ_sorted_profile = vertically_sorted_ds.ρ_1d_sorted
     ρ_sorted_profile_slice = ρ_sorted_profile.sel(z_1d_sorted=displacement_slice)
 
-    b_l = - g * (ρ - ρ_sorted_profile_slice)
+    b_l = - g * (ρ - ρ_sorted_profile_slice) / ρ0
 
     dz_flat = vertically_sorted_ds.dz_1d_sorted.sel(z_1d_sorted=displacement_slice)
-    return -(b_l * dz_flat).sum("z_1d_sorted")
+    return -ρ0 * (b_l * dz_flat).sum("z_1d_sorted") # Convert to APE by unit of volume
 
-def _local_APE_on_the_fly_integral_numpy(ρ, z, density_index, vertically_sorted_ds, inverse_sort_indices, z_1d_sorted_values):
+def _local_APE_on_the_fly_integral_numpy(ρ, z, density_index, vertically_sorted_ds, inverse_sort_indices, z_1d_sorted_values, ρ0=1025):
     """
     Compute APE for a single point using summation method (scalar inputs) according to the
     definition:
 
-    E_a = -∫_{z_0}^{z} b_l dz = g ∫_{z_0}^{z} (ρ - ρ_ref) dz
+    E_a = -ρ0 ∫_{z_0}^{z} b_l dz = g ∫_{z_0}^{z} (ρ - ρ_ref) dz
 
     Thus the output units are: kg m^2 s^-2 / m^3, which is the APE by unit of volume.
 
@@ -412,9 +435,9 @@ def _local_APE_on_the_fly_integral_numpy(ρ, z, density_index, vertically_sorted
     dz_slice = dz_sorted_array[idx_start:idx_end]
 
     # Calculate buoyancy difference and integrate
-    b_l = -g * (ρ - ρ_sorted_slice)
+    b_l = -g * (ρ - ρ_sorted_slice) / ρ0
     integral = np.sum(b_l * dz_slice)
-    return -integral
+    return -ρ0 * integral # Convert to APE by unit of volume
 
 
 def vectorized_local_APE_on_the_fly_integral(ds0, vertically_sorted_ds, threed_sorted_ds, inverse_sort_indices, z_1d_sorted_values,
