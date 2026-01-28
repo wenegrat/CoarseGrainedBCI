@@ -125,26 +125,19 @@ def vertical_sort_density(rho, dV, LxLy, test=False, z_min=0, Lz=None):
 #---
 
 #+++ Vertical sort density by the PDF method
-def calcZ_r(rho, Lz, nbins=1000):
-    rhoflat = np.ravel(rho.values.copy())
-    eps = 1e-3
-    rhobins = np.linspace(rhoflat.min()-eps, rhoflat.max()+eps, nbins)
-    # print(rhobins[0])
-    # print(rhobins[-1])
+import warnings
+def vertical_sort_density_by_PDF(rho, Lz, nbins=1000):
+    ρ_1d = np.ravel(rho.values, order="C")
+    ε = 1e-3
+    bin_edges = np.linspace(ρ_1d.min()-ε, ρ_1d.max()+ε, nbins+1)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        P_rho, bins_count=np.histogram(rhoflat,bins=rhobins, density=True)
-    # print(ds.Rho.isel(time=ts).min().values)
-    # rhobins = 0.5*(bins_count[1:] + bins_count[:-1])
-    rhobins =  0.5*(bins_count[1:] + bins_count[:-1])
-    # print(bins_count[1:] - bins_count[:-1])
-    # mask = np.isfinite(P_rho)
-    # print(rhobins.shape)
-    # print(P_rho)
-    Z_r = Lz * integrate.cumtrapz(P_rho[::-1], x=rhobins[::-1], initial=0)
-    # Z_r = H*integrate.cumtrapz(P_rho[mask], x=rhobins[mask], initial=0)
+        P_rho, bins_count=np.histogram(ρ_1d, bins=bin_edges, density=True)
+    bin_centers = 0.5*(bin_edges[1:] + bin_edges[:-1])
+    Z_r = Lz * integrate.cumtrapz(P_rho[::-1], x=bin_centers[::-1], initial=0) - Lz/2
+    from IPython import embed; embed()
     Z_r = Z_r - Z_r[-1] #+ ds.z_aac[0].values
-    return Z_r, rhobins
+    return Z_r, bin_centers
 #---
 
 #+++ Calculate TPE
@@ -192,7 +185,7 @@ def integrated_total_potential_energy(rho, dV=None, ds=None, z_name="z_aac"):
 #---
 
 #+++ Calculate reference state using sorting method
-def calculate_reference_potential_energy_profile(rho, dV, LxLy, test=False, z_min=0, Lz=None):
+def calculate_reference_potential_energy_profile(rho, dV, LxLy, test=False, z_min=0, Lz=None, method="sorting"):
     """
     Calculate local Reference Potential Energy density using sorted density
 
@@ -217,13 +210,19 @@ def calculate_reference_potential_energy_profile(rho, dV, LxLy, test=False, z_mi
         Dataset containing sorted 1D density and coordinate
     """
     # Sort the density field to get reference state
-    vertically_sorted_ds, threed_sorted_ds = vertical_sort_density(rho, dV, LxLy, test=test, z_min=z_min, Lz=Lz)
+    if method == "sorting":
+        vertically_sorted_ds = vertical_sort_density(rho, dV, LxLy, test=test, z_min=z_min, Lz=Lz)[0]
 
-    if test:
-        assert(all(np.diff(vertically_sorted_ds.rho_1d_sorted) <= 0))
-        assert(all(np.diff(vertically_sorted_ds.z_1d_sorted) > 0))
-        if Lz is not None:
-            assert(np.sum(vertically_sorted_ds.dz_1d_sorted).values == Lz)
+        if test:
+            assert(all(np.diff(vertically_sorted_ds.rho_1d_sorted) <= 0))
+            assert(all(np.diff(vertically_sorted_ds.z_1d_sorted) > 0))
+            if Lz is not None:
+                assert(np.sum(vertically_sorted_ds.dz_1d_sorted).values == Lz)
+
+    elif method == "PDF":
+        vertically_sorted_ds = vertical_sort_density_by_PDF(rho, Lz, nbins=1000)[0]
+    else:
+        raise ValueError(f"Invalid method: {method}")
 
     return vertically_sorted_ds
 
@@ -246,7 +245,7 @@ def integrated_reference_potential_energy(vertically_sorted_ds, LxLy):
     dV_flat_1d_sorted = vertically_sorted_ds.dz_1d_sorted * LxLy
     return g * np.sum(vertically_sorted_ds.rho_1d_sorted * vertically_sorted_ds.z_1d_sorted * dV_flat_1d_sorted)
 
-def integrated_potential_energies(ds, time_idx, test=False):
+def integrated_potential_energies(ds, time_idx, test=False, sorting_method="sorting"):
     """
     Calculate volume-integrated potential energies (APE, TPE, RPE)
 
@@ -266,14 +265,14 @@ def integrated_potential_energies(ds, time_idx, test=False):
     """
     rho = ds.rho.isel(time=time_idx)
     TPE = integrated_total_potential_energy(rho, ds=ds)
-    vertically_sorted_ds = calculate_reference_potential_energy_profile(rho, ds.dV, ds.LxLy, test=test, z_min=ds.z_min, Lz=ds.Lz)
+    vertically_sorted_ds = calculate_reference_potential_energy_profile(rho, ds.dV, ds.LxLy, test=test, z_min=ds.z_min, Lz=ds.Lz, method=sorting_method)
     RPE = integrated_reference_potential_energy(vertically_sorted_ds, ds.LxLy.values)
     APE = TPE - RPE
     return APE, TPE, RPE
 #---
 
 #+++ Integrated APE, TPE, RPE time series calculations
-def integrated_potential_energies_timeseries(ds, test=False, verbose_level=1):
+def integrated_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting_method="sorting"):
     """
     Calculate volume-integrated potential energies for all time steps
 
@@ -301,7 +300,7 @@ def integrated_potential_energies_timeseries(ds, test=False, verbose_level=1):
 
     for i in range(n_times):
         if verbose_level > 0: print(f"  Processing time step {i+1}/{n_times}", end="\r")
-        APE[i], TPE[i], RPE[i] = integrated_potential_energies(ds, i, test=test)
+        APE[i], TPE[i], RPE[i] = integrated_potential_energies(ds, i, test=test, sorting_method=sorting_method)
 
     if verbose_level > 0: print("\nDone!")
 
@@ -598,7 +597,7 @@ def vectorized_local_APE_precomputed_integral(ds0, vertically_sorted_ds, threed_
 #---
 
 #+++ Local APE and TPE time series calculations
-def local_potential_energies_timeseries(ds, test=False, verbose_level=1):
+def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting_method="sorting"):
     """
     Calculate local APE and TPE fields for all time steps
 
@@ -635,9 +634,8 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1):
         ds_t = ds.isel(time=i)
 
         # Perform vertical sorting
-        vertically_sorted_ds, threed_sorted_ds = vertical_sort_density(
-            ds_t.rho, ds_t.dV, ds.LxLy, test=test, z_min=ds.z_min, Lz=ds.Lz
-        )
+        vertically_sorted_ds, threed_sorted_ds = vertical_sort_density(ds_t.rho, ds_t.dV, ds.LxLy,
+            test=test, z_min=ds.z_min, Lz=ds.Lz, method=sorting_method)
 
         # Create inverse lookup table
         inverse_sort_indices, z_1d_sorted_values = _create_inverse_sort_lookup(vertically_sorted_ds, verbose=verbose_level > 1)
