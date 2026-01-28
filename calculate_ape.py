@@ -53,10 +53,12 @@ if False:
     assert np.isclose(val3, val4, rtol=1e-1), f"Mismatch: reference PE={val3}, total PE={val4}"
 #---
 
-step = 2
-ds0 = ds.sel(time=[100])
-local_potential_energies = local_potential_energies_timeseries(ds0, test=True, verbose_level=0)
-potential_energies = integrated_potential_energies_timeseries(ds0, test=True, verbose_level=0)
+#+++ Test local calculations
+if False:
+    ds0 = ds.sel(time=[100])
+    local_potential_energies = local_potential_energies_timeseries(ds0, test=True, verbose_level=0)
+    potential_energies = integrated_potential_energies_timeseries(ds0, test=True, verbose_level=0)
+#---
 
 # Calculate PE time series
 global_potential_energies = integrated_potential_energies_timeseries(ds, test=False, verbose_level=1)
