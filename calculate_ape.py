@@ -26,7 +26,7 @@ from matplotlib import pyplot as plt
 import pynanigans as pn
 
 # File path to the simulation output
-filename = "output/kelvin_helmholtz_instability_128x1x128.nc"
+filename = "output/kelvin_helmholtz_instability_64x1x64.nc"
 rho_0 = 1025
 ds = load_data(filename, ρ0=rho_0)
 
@@ -54,9 +54,10 @@ if False:
 #---
 
 #+++ Test local calculations
-if False:
-    ds0 = ds.sel(time=[100])
-    local_potential_energies = local_potential_energies_timeseries(ds0, test=True, verbose_level=0)
+if True:
+    ds0 = ds.sel(time=[70], method="nearest")
+    local_potential_energies = local_potential_energies_timeseries(ds0, test=True, verbose_level=0, use_numpy_version=False)
+    pause
     potential_energies = integrated_potential_energies_timeseries(ds0, test=True, verbose_level=0)
 #---
 

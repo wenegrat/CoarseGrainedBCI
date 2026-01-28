@@ -360,21 +360,24 @@ def _local_APE_on_the_fly_integral_xarray(ρ, z, density_index, vertically_sorte
     sorted_position = inverse_sort_indices[int(density_index)]
     z_0 = z_1d_sorted_values[sorted_position]
 
+    ρ_sorted_profile = vertically_sorted_ds.rho_1d_sorted
+    z_possibilities = ρ_sorted_profile.where(ρ_sorted_profile == ρ, drop=True).z_1d_sorted
+    z_0 = z_possibilities[abs(z_possibilities - z).argmin()]
+
     # Calculate displacement and slice
-    displacement = z - z_0
-    if displacement > 0:
+    if z > z_0:
         displacement_slice = slice(z_0, z)
+        signed_dz_flat = +vertically_sorted_ds.dz_1d_sorted.sel(z_1d_sorted=displacement_slice)
     else:
         displacement_slice = slice(z, z_0)
+        signed_dz_flat = -vertically_sorted_ds.dz_1d_sorted.sel(z_1d_sorted=displacement_slice)
 
     # Calculate buoyancy difference and integrate
-    ρ_sorted_profile = vertically_sorted_ds.ρ_1d_sorted
     ρ_sorted_profile_slice = ρ_sorted_profile.sel(z_1d_sorted=displacement_slice)
 
     b_l = - g * (ρ - ρ_sorted_profile_slice) / ρ0
 
-    dz_flat = vertically_sorted_ds.dz_1d_sorted.sel(z_1d_sorted=displacement_slice)
-    return -ρ0 * (b_l * dz_flat).sum("z_1d_sorted") # Convert to APE by unit of volume
+    return -ρ0 * (b_l * signed_dz_flat).sum("z_1d_sorted") # Convert to APE by unit of volume
 
 def _local_APE_on_the_fly_integral_numpy(ρ, z, density_index, vertically_sorted_ds, inverse_sort_indices, z_1d_sorted_values, ρ0=1025):
     """
@@ -597,7 +600,7 @@ def vectorized_local_APE_precomputed_integral(ds0, vertically_sorted_ds, threed_
 #---
 
 #+++ Local APE and TPE time series calculations
-def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting_method="sorting"):
+def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting_method="sorting", use_numpy_version=False):
     """
     Calculate local APE and TPE fields for all time steps
 
@@ -648,7 +651,8 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting
         # Calculate local APE field
         local_ape = vectorized_local_APE_on_the_fly_integral(
             ds_t, vertically_sorted_ds, threed_sorted_ds,
-            inverse_sort_indices, z_1d_sorted_values, verbose=verbose_level > 1
+            inverse_sort_indices, z_1d_sorted_values, verbose=verbose_level > 1,
+            use_numpy_version=use_numpy_version,
         )
 
         # Append to lists in order to concatenate later
