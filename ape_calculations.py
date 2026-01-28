@@ -666,7 +666,7 @@ def local_KE(u, v, w, ρ0=1025):
     """
     return ρ0 * (u**2 + v**2 + w**2) / 2
 
-def integrated_KE(ds):
+def integrated_KE(ds, ρ0=1025):
     """
     Calculate volume-integrated kinetic energy
 
@@ -685,11 +685,11 @@ def integrated_KE(ds):
     w = ds.w
     dV = ds.dV
 
-    ke = local_KE(u, v, w)
+    ke = local_KE(u, v, w, ρ0=ρ0)
     KE = (ke * dV).sum(("x_caa", "y_aca", "z_aac"))
     return KE
 
-def integrated_KE_timeseries(ds, verbose=False):
+def integrated_KE_timeseries(ds, ρ0=1025, verbose=False):
     """
     Calculate volume-integrated KE for all time steps
 
@@ -704,7 +704,7 @@ def integrated_KE_timeseries(ds, verbose=False):
         Time series of volume-integrated KE
     """
     if verbose: print("Calculating KE time series...")
-    KE = integrated_KE(ds)
+    KE = integrated_KE(ds, ρ0=ρ0)
     if verbose: print("\nDone!")
     return KE
 #---

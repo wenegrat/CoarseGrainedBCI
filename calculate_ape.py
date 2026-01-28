@@ -61,16 +61,19 @@ local_potential_energies = local_potential_energies_timeseries(ds0, test=True, v
 potential_energies = integrated_potential_energies_timeseries(ds0, test=True, verbose_level=0)
 
 # Calculate PE time series
-potential_energies = integrated_potential_energies_timeseries(ds, test=False, verbose_level=1)
+global_potential_energies = integrated_potential_energies_timeseries(ds, test=False, verbose_level=1)
 
 # Calculate local APE time series
 local_potential_energies = local_potential_energies_timeseries(ds, test=False, verbose_level=1)
-pause
+integrated_local_potential_energies = integrate(local_potential_energies, ds.dV)
+# local_potential_energies.ape.squeeze().sel(time=slice(None, None, 9)).plot(col="time", col_wrap=3, robust=True)
 
 # Calculate KE time series
 KE = integrated_KE_timeseries(ds, ρ0=rho_0)
 
 # Print summary statistics
+APE = global_potential_energies.ape
+
 print("\n" + "="*60)
 print("APE Calculation Summary")
 print("="*60)
