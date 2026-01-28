@@ -68,6 +68,7 @@ inverse_sort_indices, z_1d_sorted_values = create_inverse_sort_lookup(vertically
 
 # Vectorized calculation of local APE
 Ea_on_the_fly = vectorized_summation_method_local_APE(ds0, vertically_sorted_ds, threed_sorted_ds, inverse_sort_indices, z_1d_sorted_values)
+Ea_integrated = integrate(Ea_on_the_fly, ds0.Δx_caa * ds0.Δy_aca * ds0.Δz_aac)
 APE0, TPE0, RPE0 = calculate_ape_timeseries(ds0, test=False)
 
 opts = dict(vmin=-4e-4, vmax=4e-4, cmap="RdBu_r")
