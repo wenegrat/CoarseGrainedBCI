@@ -11,15 +11,12 @@ import numpy as np
 import xarray as xr
 import scipy.integrate as integrate
 from ape_calculations import (
-    vertical_sort_density,
-    calculate_ape_timeseries,
+    calculate_energies_timeseries,
     calculate_ke_timeseries,
+    calculate_local_energies_timeseries,
     calculate_reference_potential_energy_profile,
     integrated_reference_potential_energy,
     integrated_total_potential_energy,
-    vectorized_summation_method_local_APE,
-    vectorized_cumulative_method_local_APE,
-    create_inverse_sort_lookup,
     load_data,
     integrate,
     g,
@@ -58,20 +55,16 @@ if False:
 
 step = 2
 ds0 = ds.sel(time=[100])
-vertically_sorted_ds, threed_sorted_ds = vertical_sort_density(ds0.rho, ds0.dV, ds0.LxLy, test=True, z_min=ds0.z_min, Lz=ds0.Lz)
 
-# Create inverse lookup table for fast z_0 retrieval
-inverse_sort_indices, z_1d_sorted_values = create_inverse_sort_lookup(vertically_sorted_ds)
+local_energies = calculate_local_energies_timeseries(ds0, test=True)
+APE0, TPE0, RPE0 = calculate_energies_timeseries(ds0, test=True)
 
-# Vectorized calculation of local APE
-Ea_on_the_fly = vectorized_summation_method_local_APE(ds0, vertically_sorted_ds, threed_sorted_ds, inverse_sort_indices, z_1d_sorted_values)
-Ea_integrated = integrate(Ea_on_the_fly, ds0.Δx_caa * ds0.Δy_aca * ds0.Δz_aac)
-APE0, TPE0, RPE0 = calculate_ape_timeseries(ds0, test=False)
-
-opts = dict(vmin=-4e-4, vmax=4e-4, cmap="RdBu_r")
 pause
 # Calculate PE time series
-APE, TPE, RPE = calculate_ape_timeseries(ds, test=False)
+APE, TPE, RPE = calculate_energies_timeseries(ds, test=False)
+
+# Calculate local APE time series
+local_energies = calculate_local_energies_timeseries(ds, test=False)
 
 # Calculate KE time series
 KE = calculate_ke_timeseries(ds)
