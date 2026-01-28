@@ -7,6 +7,8 @@ following Winters et al. (1995).
 
 import numpy as np
 import xarray as xr
+from scipy.integrate import cumulative_trapezoid
+import warnings
 
 # Physical constants
 g = 9.81  # gravitational acceleration [m/s^2]
@@ -56,7 +58,7 @@ def load_data(filename, ρ0=1025):
 #---
 
 #+++ Vertical sort density by flattening, sorting, and reshaping
-def vertical_sort_density(rho, dV, LxLy, test=False, z_min=0, Lz=None):
+def vertical_sort_density_by_flattening(rho, dV, LxLy, test=False, z_min=0, Lz=None):
     """
     Sort the density field to obtain the reference state
 
@@ -125,19 +127,17 @@ def vertical_sort_density(rho, dV, LxLy, test=False, z_min=0, Lz=None):
 #---
 
 #+++ Vertical sort density by the PDF method
-import warnings
 def vertical_sort_density_by_PDF(rho, Lz, nbins=1000):
     ρ_1d = np.ravel(rho.values, order="C")
     ε = 1e-3
     bin_edges = np.linspace(ρ_1d.min()-ε, ρ_1d.max()+ε, nbins+1)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        P_rho, bins_count=np.histogram(ρ_1d, bins=bin_edges, density=True)
+        P_rho, bins_count = np.histogram(ρ_1d, bins=bin_edges, density=True)
     bin_centers = 0.5*(bin_edges[1:] + bin_edges[:-1])
-    Z_r = Lz * integrate.cumtrapz(P_rho[::-1], x=bin_centers[::-1], initial=0) - Lz/2
-    from IPython import embed; embed()
-    Z_r = Z_r - Z_r[-1] #+ ds.z_aac[0].values
-    return Z_r, bin_centers
+    Z_r = Lz * cumulative_trapezoid(P_rho[::-1], x=bin_centers[::-1], initial=0)
+    Z_r = Z_r - Z_r.mean()
+    return xr.DataArray(Z_r, dims="z_1d_sorted", coords=dict(z_1d_sorted=bin_centers))
 #---
 
 #+++ Calculate TPE
@@ -185,7 +185,7 @@ def integrated_total_potential_energy(rho, dV=None, ds=None, z_name="z_aac"):
 #---
 
 #+++ Calculate reference state using sorting method
-def calculate_reference_potential_energy_profile(rho, dV, LxLy, test=False, z_min=0, Lz=None, method="sorting"):
+def calculate_reference_potential_energy_profile(rho, dV, LxLy, test=False, z_min=0, Lz=None, sorting_method="sorting"):
     """
     Calculate local Reference Potential Energy density using sorted density
 
@@ -210,8 +210,8 @@ def calculate_reference_potential_energy_profile(rho, dV, LxLy, test=False, z_mi
         Dataset containing sorted 1D density and coordinate
     """
     # Sort the density field to get reference state
-    if method == "sorting":
-        vertically_sorted_ds = vertical_sort_density(rho, dV, LxLy, test=test, z_min=z_min, Lz=Lz)[0]
+    if sorting_method == "sorting":
+        vertically_sorted_ds = vertical_sort_density_by_flattening(rho, dV, LxLy, test=test, z_min=z_min, Lz=Lz)[0]
 
         if test:
             assert(all(np.diff(vertically_sorted_ds.rho_1d_sorted) <= 0))
@@ -219,10 +219,10 @@ def calculate_reference_potential_energy_profile(rho, dV, LxLy, test=False, z_mi
             if Lz is not None:
                 assert(np.sum(vertically_sorted_ds.dz_1d_sorted).values == Lz)
 
-    elif method == "PDF":
+    elif sorting_method == "PDF":
         vertically_sorted_ds = vertical_sort_density_by_PDF(rho, Lz, nbins=1000)[0]
     else:
-        raise ValueError(f"Invalid method: {method}")
+        raise ValueError(f"Invalid sorting method: {sorting_method}")
 
     return vertically_sorted_ds
 
@@ -265,7 +265,7 @@ def integrated_potential_energies(ds, time_idx, test=False, sorting_method="sort
     """
     rho = ds.rho.isel(time=time_idx)
     TPE = integrated_total_potential_energy(rho, ds=ds)
-    vertically_sorted_ds = calculate_reference_potential_energy_profile(rho, ds.dV, ds.LxLy, test=test, z_min=ds.z_min, Lz=ds.Lz, method=sorting_method)
+    vertically_sorted_ds = calculate_reference_potential_energy_profile(rho, ds.dV, ds.LxLy, test=test, z_min=ds.z_min, Lz=ds.Lz, sorting_method=sorting_method)
     RPE = integrated_reference_potential_energy(vertically_sorted_ds, ds.LxLy.values)
     APE = TPE - RPE
     return APE, TPE, RPE
@@ -634,8 +634,13 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting
         ds_t = ds.isel(time=i)
 
         # Perform vertical sorting
-        vertically_sorted_ds, threed_sorted_ds = vertical_sort_density(ds_t.rho, ds_t.dV, ds.LxLy,
-            test=test, z_min=ds.z_min, Lz=ds.Lz, method=sorting_method)
+        if sorting_method == "sorting":
+            vertically_sorted_ds, threed_sorted_ds = vertical_sort_density_by_flattening(ds_t.rho, ds_t.dV, ds.LxLy,
+                test=test, z_min=ds.z_min, Lz=ds.Lz)
+        elif sorting_method == "PDF":
+            vertically_sorted_ds = vertical_sort_density_by_PDF(ds_t.rho, ds.Lz, nbins=1000)
+        else:
+            raise ValueError(f"Invalid sorting method: {sorting_method}")
 
         # Create inverse lookup table
         inverse_sort_indices, z_1d_sorted_values = _create_inverse_sort_lookup(vertically_sorted_ds, verbose=verbose_level > 1)
