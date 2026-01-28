@@ -317,7 +317,7 @@ def _create_inverse_sort_lookup(vertically_sorted_ds, verbose=False):
 #---
 
 #+++ Local APE calculations using on-the-fly integral method
-def _local_APE_on_the_fly_integral_xarray(rho, z, density_index, vertically_sorted_ds, inverse_sort_indices, z_1d_sorted_values):
+def _local_APE_on_the_fly_integral_xarray(ρ, z, density_index, vertically_sorted_ds, inverse_sort_indices, z_1d_sorted_values):
     """
     Compute APE for a single point using summation method (xarray inputs)
 
@@ -325,7 +325,7 @@ def _local_APE_on_the_fly_integral_xarray(rho, z, density_index, vertically_sort
 
     Parameters
     ----------
-    rho : xr.DataArray
+    ρ : xr.DataArray
         Density field
     z : xr.DataArray
         Z coordinate
@@ -344,15 +344,15 @@ def _local_APE_on_the_fly_integral_xarray(rho, z, density_index, vertically_sort
         displacement_slice = slice(z, z_0)
 
     # Calculate buoyancy difference and integrate
-    rho_sorted_profile = vertically_sorted_ds.rho_1d_sorted
-    rho_sorted_profile_slice = rho_sorted_profile.sel(z_1d_sorted=displacement_slice)
+    ρ_sorted_profile = vertically_sorted_ds.ρ_1d_sorted
+    ρ_sorted_profile_slice = ρ_sorted_profile.sel(z_1d_sorted=displacement_slice)
 
-    b_l = - g * (rho - rho_sorted_profile_slice)
+    b_l = - g * (ρ - ρ_sorted_profile_slice)
 
     dz_flat = vertically_sorted_ds.dz_1d_sorted.sel(z_1d_sorted=displacement_slice)
     return -(b_l * dz_flat).sum("z_1d_sorted")
 
-def _local_APE_on_the_fly_integral_numpy(rho, z, density_index, vertically_sorted_ds, inverse_sort_indices, z_1d_sorted_values):
+def _local_APE_on_the_fly_integral_numpy(ρ, z, density_index, vertically_sorted_ds, inverse_sort_indices, z_1d_sorted_values):
     """
     Compute APE for a single point using summation method (scalar inputs) according to the
     definition:
@@ -363,7 +363,7 @@ def _local_APE_on_the_fly_integral_numpy(rho, z, density_index, vertically_sorte
 
     Parameters
     ----------
-    rho : xr.DataArray
+    ρ : xr.DataArray
         Density field
     z : xr.DataArray
         Z coordinate
@@ -391,7 +391,7 @@ def _local_APE_on_the_fly_integral_numpy(rho, z, density_index, vertically_sorte
     z_0 = z_1d_sorted_values[sorted_position]
 
     # Extract numpy arrays once (faster than repeated xarray operations)
-    rho_sorted_array = vertically_sorted_ds.rho_1d_sorted.values
+    ρ_sorted_array = vertically_sorted_ds.rho_1d_sorted.values
     dz_sorted_array = vertically_sorted_ds.dz_1d_sorted.values
     z_sorted_array = vertically_sorted_ds.z_1d_sorted.values
 
@@ -406,11 +406,11 @@ def _local_APE_on_the_fly_integral_numpy(rho, z, density_index, vertically_sorte
         idx_start, idx_end = idx_z, idx_z0
 
     # Fast numpy array slicing (much faster than .sel())
-    rho_sorted_slice = rho_sorted_array[idx_start:idx_end]
+    ρ_sorted_slice = ρ_sorted_array[idx_start:idx_end]
     dz_slice = dz_sorted_array[idx_start:idx_end]
 
     # Calculate buoyancy difference and integrate
-    b_l = -g * (rho - rho_sorted_slice)
+    b_l = -g * (ρ - ρ_sorted_slice)
     integral = np.sum(b_l * dz_slice)
     return -integral
 
@@ -466,7 +466,7 @@ def vectorized_local_APE_on_the_fly_integral(ds0, vertically_sorted_ds, threed_s
 #---
 
 #+++ Local APE calculations using precomputed integral method
-def _local_APE_precomputed_integral_scalar(rho, z, density_index, vertically_sorted_ds, inverse_sort_indices, z_1d_sorted_values):
+def _local_APE_precomputed_integral_scalar(ρ, z, density_index, vertically_sorted_ds, inverse_sort_indices, z_1d_sorted_values):
     """
     Compute APE for a single point using cumulative integral method (scalar inputs) according to the
     definition:
@@ -477,7 +477,7 @@ def _local_APE_precomputed_integral_scalar(rho, z, density_index, vertically_sor
 
     Parameters
     ----------
-    rho : xr.DataArray
+    ρ : xr.DataArray
         Density field
     z : xr.DataArray
         Z coordinate
@@ -508,9 +508,9 @@ def _local_APE_precomputed_integral_scalar(rho, z, density_index, vertically_sor
     displacement = z - z_0
 
     # Get cumulative integral of sorted density profile
-    cumulative_rho_sorted_integral = vertically_sorted_ds["rho_1d_sorted_cumulative_integral"]
-    rho_sorted_integral = np.sign(displacement) * (cumulative_rho_sorted_integral.sel(z_1d_sorted=z, method="nearest") -
-                                                   cumulative_rho_sorted_integral.sel(z_1d_sorted=z_0))
+    cumulative_ρ_sorted_integral = vertically_sorted_ds["rho_1d_sorted_cumulative_integral"]
+    ρ_sorted_integral = np.sign(displacement) * (cumulative_ρ_sorted_integral.sel(z_1d_sorted=z, method="nearest") -
+                                                 cumulative_ρ_sorted_integral.sel(z_1d_sorted=z_0))
 
     # Get cumulative integral of dz
     cumulative_dz_sorted_integral = vertically_sorted_ds["dz_1d_sorted_cumulative_integral"]
@@ -518,8 +518,8 @@ def _local_APE_precomputed_integral_scalar(rho, z, density_index, vertically_sor
                                            cumulative_dz_sorted_integral.sel(z_1d_sorted=z_0))
 
     # Calculate local APE
-    rho_constant_integral = rho * dz_integral
-    local_ape = g * (rho_constant_integral - rho_sorted_integral)
+    ρ_constant_integral = ρ * dz_integral
+    local_ape = g * (ρ_constant_integral - ρ_sorted_integral)
 
     return float(local_ape)
 
@@ -601,7 +601,6 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1):
     # Initialize list to store local APE fields for each time
     local_ape_list = []
     local_rpe_list = []
-    TPE_array = np.zeros(n_times)
 
     for i in range(n_times):
         if verbose_level > 0: print(f"  Processing time step {i+1}/{n_times}", end="\r")
