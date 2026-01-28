@@ -51,7 +51,7 @@ rho0 = ds.rho.isel(time=0)
 vertically_sorted_ds = calculate_reference_potential_energy_profile(rho0, ds.dV, ds.LxLy, test=True, z_min=ds.z_min, Lz=ds.Lz)
 if False:
     val3 = integrated_reference_potential_energy(vertically_sorted_ds, ds.LxLy.values)
-    val4 = integrated_total_potential_energy(ds0.rho, ds=ds)
+    val4 = integrated_total_potential_energy(ds0.rho, ds=ds, ρ0=rho_0)
     assert np.isclose(val3, val4, rtol=1e-1), f"Mismatch: reference PE={val3}, total PE={val4}"
 #---
 

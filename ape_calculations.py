@@ -600,6 +600,7 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1):
 
     # Initialize list to store local APE fields for each time
     local_ape_list = []
+    local_rpe_list = []
     TPE_array = np.zeros(n_times)
 
     for i in range(n_times):
@@ -621,22 +622,27 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1):
             ds_t, vertically_sorted_ds, threed_sorted_ds, 
             inverse_sort_indices, z_1d_sorted_values, verbose=verbose_level > 1
         )
-        local_ape_list.append(local_ape)
 
-        # Calculate TPE
+        # Append to lists in order to concatenate later
+        local_ape_list.append(local_ape)
+        local_rpe_list.append(vertically_sorted_ds.rho_1d_sorted)
 
     if verbose_level > 0: print("\nDone!")
 
     # Concatenate local APE fields along time dimension
     local_ape_4d = xr.concat(local_ape_list, dim="time")
     local_ape_4d["time"] = ds.time
+
+    local_rpe_4d = xr.concat(local_rpe_list, dim="time")
+    local_rpe_4d["time"] = ds.time
+
     tpe = local_TPE(ds.rho)
 
     # Combine into a Dataset
     local_potential_energies_ds = xr.Dataset(dict(
         ape = local_ape_4d,
         tpe = tpe,
-        rpe = vertically_sorted_ds.rho_1d_sorted,
+        rpe = local_rpe_4d,
     ))
 
     return local_potential_energies_ds
