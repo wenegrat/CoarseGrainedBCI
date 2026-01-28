@@ -11,9 +11,9 @@ import numpy as np
 import xarray as xr
 import scipy.integrate as integrate
 from ape_calculations import (
-    calculate_energies_timeseries,
-    calculate_ke_timeseries,
-    calculate_local_energies_timeseries,
+    calculate_potential_energies_timeseries,
+    calculate_KE_timeseries,
+    calculate_local_potential_energies_timeseries,
     calculate_reference_potential_energy_profile,
     integrated_reference_potential_energy,
     integrated_total_potential_energy,
@@ -55,19 +55,18 @@ if False:
 
 step = 2
 ds0 = ds.sel(time=[100])
+local_potential_energies = calculate_local_potential_energies_timeseries(ds0, test=True, verbose_level=0)
+potential_energies = calculate_potential_energies_timeseries(ds0, test=True, verbose_level=0)
 
-local_energies = calculate_local_energies_timeseries(ds0, test=True)
-APE0, TPE0, RPE0 = calculate_energies_timeseries(ds0, test=True)
-
-pause
 # Calculate PE time series
-APE, TPE, RPE = calculate_energies_timeseries(ds, test=False)
+potential_energies = calculate_potential_energies_timeseries(ds, test=False, verbose_level=1)
 
 # Calculate local APE time series
-local_energies = calculate_local_energies_timeseries(ds, test=False)
+local_potential_energies = calculate_local_potential_energies_timeseries(ds, test=False, verbose_level=1)
+pause
 
 # Calculate KE time series
-KE = calculate_ke_timeseries(ds)
+KE = calculate_KE_timeseries(ds)
 
 # Print summary statistics
 print("\n" + "="*60)

@@ -251,7 +251,7 @@ def integrated_potential_energies(ds, time_idx, test=False):
 #---
 
 #+++ Calculate local APE and TPE time series
-def calculate_local_energies_timeseries(ds, test=False):
+def calculate_local_potential_energies_timeseries(ds, test=False, verbose_level=1):
     """
     Calculate local APE and TPE fields for all time steps
 
@@ -272,7 +272,7 @@ def calculate_local_energies_timeseries(ds, test=False):
         - local_ape: 4D DataArray (time, x, y, z) with local APE values
         - TPE: 1D DataArray (time) with total potential energy
     """
-    print("Calculating local APE and TPE time series...")
+    if verbose_level > 0: print("Calculating local APE and TPE time series...")
 
     n_times = len(ds.time)
 
@@ -281,7 +281,7 @@ def calculate_local_energies_timeseries(ds, test=False):
     TPE_array = np.zeros(n_times)
 
     for i in range(n_times):
-        print(f"  Processing time step {i+1}/{n_times}", end="\r")
+        if verbose_level > 0: print(f"  Processing time step {i+1}/{n_times}", end="\r")
 
         # Get data for this time step
         ds_t = ds.isel(time=i)
@@ -292,19 +292,19 @@ def calculate_local_energies_timeseries(ds, test=False):
         )
 
         # Create inverse lookup table
-        inverse_sort_indices, z_1d_sorted_values = create_inverse_sort_lookup(vertically_sorted_ds)
+        inverse_sort_indices, z_1d_sorted_values = create_inverse_sort_lookup(vertically_sorted_ds, verbose=verbose_level > 1)
 
         # Calculate local APE field
         local_ape = vectorized_summation_method_local_APE(
-            ds_t, vertically_sorted_ds, threed_sorted_ds,
-            inverse_sort_indices, z_1d_sorted_values
+            ds_t, vertically_sorted_ds, threed_sorted_ds, 
+            inverse_sort_indices, z_1d_sorted_values, verbose=verbose_level > 1
         )
         local_ape_list.append(local_ape)
 
         # Calculate TPE
         TPE_array[i] = integrated_total_potential_energy(ds_t.rho, ds=ds_t)
 
-    print("\nDone!")
+    if verbose_level > 0: print("\nDone!")
 
     # Concatenate local APE fields along time dimension
     local_ape_4d = xr.concat(local_ape_list, dim="time")
@@ -314,18 +314,18 @@ def calculate_local_energies_timeseries(ds, test=False):
     TPE = xr.DataArray(TPE_array, dims="time", coords=dict(time=ds.time))
 
     # Combine into a Dataset
-    result = xr.Dataset({
-        "local_ape": local_ape_4d,
-        "TPE": TPE
-    })
+    local_potential_energies_ds = xr.Dataset(dict(
+        ape=local_ape_4d,
+        tpe=TPE,
+    ))
 
-    return result
+    return local_potential_energies_ds
 #---
 
 #+++ Calculate APE time series
-def calculate_energies_timeseries(ds, test=False):
+def calculate_potential_energies_timeseries(ds, test=False, verbose_level=1):
     """
-    Calculate volume-integrated APE for all time steps
+    Calculate volume-integrated potential energies for all time steps
 
     Parameters
     ----------
@@ -336,10 +336,13 @@ def calculate_energies_timeseries(ds, test=False):
 
     Returns
     -------
-    tuple
-        (APE, TPE, RPE) - time series of volume-integrated energies
+    potential_energies_ds : xr.Dataset
+        Dataset containing:
+        - APE: 1D DataArray (time) with APE values
+        - TPE: 1D DataArray (time) with TPE values
+        - RPE: 1D DataArray (time) with RPE values
     """
-    print("Calculating energies time series...")
+    if verbose_level > 0: print("Calculating potential energies time series...")
 
     n_times = len(ds.time)
     APE = np.zeros(n_times)
@@ -347,15 +350,16 @@ def calculate_energies_timeseries(ds, test=False):
     RPE = np.zeros(n_times)
 
     for i in range(n_times):
-        print(f"  Processing time step {i+1}/{n_times}", end="\r")
+        if verbose_level > 0: print(f"  Processing time step {i+1}/{n_times}", end="\r")
         APE[i], TPE[i], RPE[i] = integrated_potential_energies(ds, i, test=test)
 
-    print("\nDone!")
-    return APE, TPE, RPE
+    if verbose_level > 0: print("\nDone!")
+    potential_energies_ds = xr.Dataset(dict(APE=APE, TPE=TPE, RPE=RPE))
+    return potential_energies_ds
 #---
 
 #+++ Create inverse lookup table for fast z_0 retrieval
-def create_inverse_sort_lookup(vertically_sorted_ds):
+def create_inverse_sort_lookup(vertically_sorted_ds, verbose=False):
     """
     Create inverse lookup table for fast z_0 coordinate retrieval
 
@@ -375,12 +379,12 @@ def create_inverse_sort_lookup(vertically_sorted_ds):
     z_1d_sorted_values : np.ndarray
         Z coordinate values in sorted order for fast indexing
     """
-    print("Creating inverse lookup table for fast z_0 retrieval...")
+    if verbose: print("Creating inverse lookup table for fast z_0 retrieval...", end="")
     inverse_sort_indices = np.empty(len(vertically_sorted_ds.sort_indices_1d), dtype=int)
     for i, idx in enumerate(vertically_sorted_ds.sort_indices_1d.values):
         inverse_sort_indices[int(idx)] = i
     z_1d_sorted_values = vertically_sorted_ds.z_1d_sorted.values
-    print("Done!")
+    if verbose: print("Done!")
 
     return inverse_sort_indices, z_1d_sorted_values
 #---
@@ -487,7 +491,8 @@ def _summation_local_APE_numpy(rho, z, density_index, vertically_sorted_ds, inve
         return 0.0
 
 
-def vectorized_summation_method_local_APE(ds0, vertically_sorted_ds, threed_sorted_ds, inverse_sort_indices, z_1d_sorted_values, use_numpy_version=True):
+def vectorized_summation_method_local_APE(ds0, vertically_sorted_ds, threed_sorted_ds, inverse_sort_indices, z_1d_sorted_values,
+                                          use_numpy_version=True, verbose=True):
     """
     Vectorized calculation of local APE using summation method for all grid points
 
@@ -512,7 +517,7 @@ def vectorized_summation_method_local_APE(ds0, vertically_sorted_ds, threed_sort
     xr.DataArray
         Local APE values with same dimensions as ds0.rho
     """
-    print("Computing local APE using vectorized summation method (xr.apply_ufunc)...")
+    if verbose: print("Computing local APE using vectorized summation method (xr.apply_ufunc)...")
 
     # Broadcast z coordinates to match rho shape
     z_broadcast = xr.zeros_like(ds0.rho) + ds0.z_aac
@@ -532,7 +537,7 @@ def vectorized_summation_method_local_APE(ds0, vertically_sorted_ds, threed_sort
         )
     )
 
-    print("Done!")
+    if verbose: print("Done!")
     return result
 #---
 
@@ -594,7 +599,7 @@ def _cumulative_local_APE_scalar(rho, z, density_index, vertically_sorted_ds, in
 
     return float(local_ape)
 
-def vectorized_cumulative_method_local_APE(ds0, vertically_sorted_ds, threed_sorted_ds, inverse_sort_indices, z_1d_sorted_values):
+def vectorized_cumulative_method_local_APE(ds0, vertically_sorted_ds, threed_sorted_ds, inverse_sort_indices, z_1d_sorted_values, verbose=False):
     """
     Vectorized calculation of local APE using cumulative integral method for all grid points
 
@@ -619,14 +624,14 @@ def vectorized_cumulative_method_local_APE(ds0, vertically_sorted_ds, threed_sor
     xr.DataArray
         Local APE values with same dimensions as ds0.rho
     """
-    print("Computing local APE using vectorized cumulative method (xr.apply_ufunc)...")
+    if verbose: print("Computing local APE using vectorized cumulative method (xr.apply_ufunc)...")
 
     # Broadcast z coordinates to match rho shape
     z_broadcast = xr.zeros_like(ds0.rho) + ds0.z_aac
 
     # Use apply_ufunc with vectorize=True to apply the scalar function to all points
     result = xr.apply_ufunc(
-        _cumulative_local_ape_scalar,
+        _cumulative_local_APE_scalar,
         ds0.rho,
         z_broadcast,
         threed_sorted_ds.sort_indices_3d,
@@ -639,12 +644,12 @@ def vectorized_cumulative_method_local_APE(ds0, vertically_sorted_ds, threed_sor
         }
     )
 
-    print("Done!")
+    if verbose: print("Done!")
     return result
 #---
 
 #+++ Calculate kinetic energy
-def calculate_kinetic_energy(u, v, w):
+def calculate_local_KE(u, v, w, rho_0=rho_0):
     """
     Calculate local kinetic energy density
 
@@ -657,10 +662,12 @@ def calculate_kinetic_energy(u, v, w):
     -------
     xr.DataArray
         Local KE density: 0.5 * rho_0 * (u^2 + v^2 + w^2)
+    rho_0 : float
+        Reference density
     """
-    return 0.5 * rho_0 * (u**2 + v**2 + w**2)
+    return rho_0 * (u**2 + v**2 + w**2) / 2
 
-def integrated_kinetic_energy(ds, time_idx=None):
+def calculate_KE(ds):
     """
     Calculate volume-integrated kinetic energy
 
@@ -668,29 +675,22 @@ def integrated_kinetic_energy(ds, time_idx=None):
     ----------
     ds : xr.Dataset
         Dataset containing velocity fields (u, v, w)
-    time_idx : int, optional
-        Time index to select. If None, integrates over all times.
 
     Returns
     -------
-    float or xr.DataArray
-        Integrated KE (scalar if time_idx given, time series otherwise)
+    xr.DataArray
+        Integrated KE
     """
-    if time_idx is not None:
-        u = ds.u.isel(time=time_idx)
-        v = ds.v.isel(time=time_idx)
-        w = ds.w.isel(time=time_idx)
-        dV = ds.dV
-    else:
-        u = ds.u
-        v = ds.v
-        w = ds.w
-        dV = ds.dV
+    u = ds.u
+    v = ds.v
+    w = ds.w
+    dV = ds.dV
 
-    ke_local = calculate_kinetic_energy(u, v, w)
-    return (ke_local * dV).sum(("x_caa", "y_aca", "z_aac"))
+    ke_local = calculate_local_KE(u, v, w)
+    KE = (ke_local * dV).sum(("x_caa", "y_aca", "z_aac"))
+    return KE
 
-def calculate_ke_timeseries(ds):
+def calculate_KE_timeseries(ds, verbose=False):
     """
     Calculate volume-integrated KE for all time steps
 
@@ -704,8 +704,8 @@ def calculate_ke_timeseries(ds):
     xr.DataArray
         Time series of volume-integrated KE
     """
-    print("Calculating KE time series...")
-    KE = integrated_kinetic_energy(ds)
-    print("\nDone!")
+    if verbose: print("Calculating KE time series...")
+    KE = calculate_KE(ds)
+    if verbose: print("\nDone!")
     return KE
 #---
