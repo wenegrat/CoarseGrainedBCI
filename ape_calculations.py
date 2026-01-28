@@ -451,19 +451,17 @@ def vectorized_summation_method_local_APE(ds0, vertically_sorted_ds, threed_sort
         ds0.rho,
         z_broadcast,
         threed_sorted_ds.sort_indices_3d,
-        vectorize=True,
-        dask="allowed",
-        kwargs={
-            "vertically_sorted_ds": vertically_sorted_ds,
-            "inverse_sort_indices": inverse_sort_indices,
-            "z_1d_sorted_values": z_1d_sorted_values,
-        }
+        vectorize = True,
+        dask = "allowed",
+        kwargs = dict(
+            vertically_sorted_ds = vertically_sorted_ds,
+            inverse_sort_indices = inverse_sort_indices,
+            z_1d_sorted_values = z_1d_sorted_values,
+        )
     )
 
     print("Done!")
     return result
-
-
 #---
 
 #+++ local APE calculations using cumulative integral method

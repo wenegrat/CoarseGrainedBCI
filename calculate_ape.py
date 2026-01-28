@@ -60,9 +60,6 @@ step = 2
 ds0 = ds.sel(time=[100])
 vertically_sorted_ds, threed_sorted_ds = vertical_sort_density(ds0.rho, ds0.dV, ds0.LxLy, test=True, z_min=ds0.z_min, Lz=ds0.Lz)
 
-vertically_sorted_ds["rho_1d_sorted_cumulative_integral"] = (vertically_sorted_ds.rho_1d_sorted * vertically_sorted_ds.dz_1d_sorted).cumsum("z_1d_sorted")
-vertically_sorted_ds["dz_1d_sorted_cumulative_integral"] = (vertically_sorted_ds.dz_1d_sorted).cumsum("z_1d_sorted")
-
 # Create inverse lookup table for fast z_0 retrieval
 inverse_sort_indices, z_1d_sorted_values = create_inverse_sort_lookup(vertically_sorted_ds)
 
