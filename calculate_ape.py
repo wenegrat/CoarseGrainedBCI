@@ -11,24 +11,26 @@ import numpy as np
 import xarray as xr
 import scipy.integrate as integrate
 from ape_calculations import (
-    calculate_potential_energies_timeseries,
-    calculate_KE_timeseries,
-    calculate_local_potential_energies_timeseries,
+    integrated_potential_energies_timeseries,
+    integrated_KE_timeseries,
+    local_potential_energies_timeseries,
     calculate_reference_potential_energy_profile,
     integrated_reference_potential_energy,
     integrated_total_potential_energy,
     load_data,
     integrate,
     g,
-    rho_0,
 )
+
+rho_0 = 1025
+
 from ape_plots import plot_energy_timeseries
 from matplotlib import pyplot as plt
 import pynanigans as pn
 
 # File path to the simulation output
 filename = "output/kelvin_helmholtz_instability_128x1x128.nc"
-ds = load_data(filename)
+ds = load_data(filename, ρ0=rho_0)
 
 #+++ Test that convertion between ρ and b is correct
 ds0 = ds.sel(time=[100])
@@ -55,18 +57,18 @@ if False:
 
 step = 2
 ds0 = ds.sel(time=[100])
-local_potential_energies = calculate_local_potential_energies_timeseries(ds0, test=True, verbose_level=0)
-potential_energies = calculate_potential_energies_timeseries(ds0, test=True, verbose_level=0)
+local_potential_energies = local_potential_energies_timeseries(ds0, test=True, verbose_level=0)
+potential_energies = integrated_potential_energies_timeseries(ds0, test=True, verbose_level=0)
 
 # Calculate PE time series
-potential_energies = calculate_potential_energies_timeseries(ds, test=False, verbose_level=1)
+potential_energies = integrated_potential_energies_timeseries(ds, test=False, verbose_level=1)
 
 # Calculate local APE time series
-local_potential_energies = calculate_local_potential_energies_timeseries(ds, test=False, verbose_level=1)
+local_potential_energies = local_potential_energies_timeseries(ds, test=False, verbose_level=1)
 pause
 
 # Calculate KE time series
-KE = calculate_KE_timeseries(ds)
+KE = integrated_KE_timeseries(ds, ρ0=rho_0)
 
 # Print summary statistics
 print("\n" + "="*60)
