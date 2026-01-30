@@ -65,7 +65,7 @@ if False:
 global_potential_energies = integrated_potential_energies_timeseries(ds, test=False, verbose_level=1)
 
 # Calculate local APE time series
-local_potential_energies = local_potential_energies_timeseries(ds, test=False, verbose_level=1)
+local_potential_energies = local_potential_energies_timeseries(ds, test=False, verbose_level=1, use_numpy_version=True)
 integrated_local_potential_energies = integrate(local_potential_energies[["ape", "tpe"]], ds.dV)
 integrated_local_potential_energies["rpe"] = (local_potential_energies.rho_sorted * local_potential_energies.dz_sorted).sum("z_1d_sorted")
 

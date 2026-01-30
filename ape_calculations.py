@@ -407,7 +407,7 @@ def _local_APE_on_the_fly_integral_numpy(ρ, z, vertically_sorted_ds, ρ0=1025):
     -----
     This function is designed to be called by xr.apply_ufunc with vectorize=True
     and is optimized to use numpy array indexing instead of slow .sel() operations.
-    
+
     z_0 is calculated by finding all z values where the sorted density equals ρ,
     then selecting the one closest to the current z coordinate.
     """
@@ -487,7 +487,7 @@ def vectorized_local_APE_on_the_fly_integral(ds0, vertically_sorted_ds, use_nump
 #---
 
 #+++ Local APE calculations using precomputed integral method
-def _local_APE_precomputed_integral_scalar(ρ, z, density_index, vertically_sorted_ds, inverse_sort_indices, z_1d_sorted_values):
+def _local_APE_precomputed_integral_scalar(ρ, z, vertically_sorted_ds):
     """
     Compute APE for a single point using cumulative integral method (scalar inputs) according to the
     definition:
@@ -502,14 +502,8 @@ def _local_APE_precomputed_integral_scalar(ρ, z, density_index, vertically_sort
         Density field
     z : xr.DataArray
         Z coordinate
-    density_index : int
-        Index of the density in the sorted array
     vertically_sorted_ds : xr.Dataset
         Dataset containing sorted density profile and dz
-    inverse_sort_indices : np.ndarray
-        Inverse lookup table mapping density_index to sorted position
-    z_1d_sorted_values : np.ndarray
-        Z coordinate values in sorted order
 
     Returns
     -------
@@ -518,25 +512,28 @@ def _local_APE_precomputed_integral_scalar(ρ, z, density_index, vertically_sort
 
     Notes
     -----
-    This function is designed to be called by xr.apply_ufunc with vectorize=True
-    and is optimized to use numpy array indexing instead of slow .sel() operations
+    This function is designed to be called by xr.apply_ufunc with vectorize=True.
+
+    z_0 is calculated by finding all z values where the sorted density equals ρ,
+    then selecting the one closest to the current z coordinate.
     """
-    # Get z_0 using inverse lookup
-    sorted_position = inverse_sort_indices[int(density_index)]
-    z_0 = z_1d_sorted_values[sorted_position]
+    # Get z_0: find all z values where sorted density equals ρ, then pick closest to z
+    ρ_sorted_profile = vertically_sorted_ds.rho_1d_sorted
+    z_possibilities = ρ_sorted_profile.where(ρ_sorted_profile == ρ, drop=True).z_1d_sorted
+    z_0 = z_possibilities[abs(z_possibilities - z).argmin()]
 
     # Calculate displacement
     displacement = z - z_0
 
     # Get cumulative integral of sorted density profile
     cumulative_ρ_sorted_integral = vertically_sorted_ds["rho_1d_sorted_cumulative_integral"]
-    ρ_sorted_integral = np.sign(displacement) * (cumulative_ρ_sorted_integral.sel(z_1d_sorted=z, method="nearest") -
-                                                 cumulative_ρ_sorted_integral.sel(z_1d_sorted=z_0))
+    ρ_sorted_integral = (cumulative_ρ_sorted_integral.sel(z_1d_sorted=z, method="nearest") -
+                         cumulative_ρ_sorted_integral.sel(z_1d_sorted=z_0))
 
     # Get cumulative integral of dz
     cumulative_dz_sorted_integral = vertically_sorted_ds["dz_1d_sorted_cumulative_integral"]
-    dz_integral = np.sign(displacement) * (cumulative_dz_sorted_integral.sel(z_1d_sorted=z, method="nearest") -
-                                           cumulative_dz_sorted_integral.sel(z_1d_sorted=z_0))
+    dz_integral = (cumulative_dz_sorted_integral.sel(z_1d_sorted=z, method="nearest") -
+                   cumulative_dz_sorted_integral.sel(z_1d_sorted=z_0))
 
     # Calculate local APE
     ρ_constant_integral = ρ * dz_integral
@@ -544,7 +541,7 @@ def _local_APE_precomputed_integral_scalar(ρ, z, density_index, vertically_sort
 
     return float(local_ape)
 
-def vectorized_local_APE_precomputed_integral(ds0, vertically_sorted_ds, threed_sorted_ds, inverse_sort_indices, z_1d_sorted_values, verbose=False):
+def vectorized_local_APE_precomputed_integral(ds0, vertically_sorted_ds, verbose=False):
     """
     Vectorized calculation of local APE using cumulative integral method for all grid points
 
@@ -557,12 +554,8 @@ def vectorized_local_APE_precomputed_integral(ds0, vertically_sorted_ds, threed_
         Dataset at a single time containing rho field
     vertically_sorted_ds : xr.Dataset
         Dataset containing cumulative integrals of sorted density and dz
-    threed_sorted_ds : xr.Dataset
-        Dataset containing 3D sort indices
-    inverse_sort_indices : np.ndarray
-        Inverse lookup table mapping density_index to sorted position
-    z_1d_sorted_values : np.ndarray
-        Z coordinate values in sorted order
+    verbose : bool
+        Whether to print progress messages
 
     Returns
     -------
@@ -579,13 +572,10 @@ def vectorized_local_APE_precomputed_integral(ds0, vertically_sorted_ds, threed_
         _local_APE_precomputed_integral_scalar,
         ds0.rho,
         z_broadcast,
-        threed_sorted_ds.sort_indices_3d,
         vectorize=True,
         dask="allowed",
         kwargs={
             "vertically_sorted_ds": vertically_sorted_ds,
-            "inverse_sort_indices": inverse_sort_indices,
-            "z_1d_sorted_values": z_1d_sorted_values,
         }
     )
 
@@ -594,7 +584,8 @@ def vectorized_local_APE_precomputed_integral(ds0, vertically_sorted_ds, threed_
 #---
 
 #+++ Local APE and TPE time series calculations
-def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting_method="sorting", use_numpy_version=False):
+def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting_method="sorting",
+                                        ape_method="on_the_fly", use_numpy_version=False):
     """
     Calculate local APE and TPE fields for all time steps
 
@@ -607,6 +598,14 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting
         Dataset containing simulation data with time dimension
     test : bool
         Whether to run tests on the sorting
+    verbose_level : int
+        Verbosity level (0=quiet, 1=progress, 2=detailed)
+    sorting_method : str
+        Method for sorting density ("sorting" or "PDF")
+    ape_method : str
+        Method for computing local APE ("on_the_fly" or "precomputed_integral")
+    use_numpy_version : bool
+        Whether to use numpy-optimized version (only for on_the_fly method)
 
     Returns
     -------
@@ -639,12 +638,30 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting
         else:
             raise ValueError(f"Invalid sorting method: {sorting_method}")
 
-        # Calculate local APE field
-        local_ape = vectorized_local_APE_on_the_fly_integral(
-            ds_t, vertically_sorted_ds,
-            use_numpy_version=use_numpy_version,
-            verbose=verbose_level > 1,
-        )
+        # Calculate local APE field using selected method
+        if ape_method == "on_the_fly":
+            local_ape = vectorized_local_APE_on_the_fly_integral(
+                ds_t, vertically_sorted_ds,
+                use_numpy_version=use_numpy_version,
+                verbose=verbose_level > 1,
+            )
+        elif ape_method == "precomputed_integral":
+            # Compute cumulative integrals for precomputed method
+            # ∫_0^z ρ(z') dz' = cumsum(ρ * dz)
+            vertically_sorted_ds["rho_1d_sorted_cumulative_integral"] = (
+                vertically_sorted_ds.rho_1d_sorted * vertically_sorted_ds.dz_1d_sorted
+            ).cumsum("z_1d_sorted")
+            # ∫_0^z dz' = cumsum(dz)
+            vertically_sorted_ds["dz_1d_sorted_cumulative_integral"] = (
+                vertically_sorted_ds.dz_1d_sorted.cumsum("z_1d_sorted")
+            )
+
+            local_ape = vectorized_local_APE_precomputed_integral(
+                ds_t, vertically_sorted_ds,
+                verbose=verbose_level > 1,
+            )
+        else:
+            raise ValueError(f"Invalid ape_method: {ape_method}. Must be 'on_the_fly' or 'precomputed_integral'")
 
         # Append to lists in order to concatenate later
         local_ape_list.append(local_ape)
