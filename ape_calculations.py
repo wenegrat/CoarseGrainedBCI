@@ -309,7 +309,7 @@ def integrated_potential_energies_timeseries(ds, test=False, verbose_level=1, so
     return potential_energies_ds
 #---
 
-#+++ Create inverse lookup table for fast z_0 retrieval
+#+++ Create inverse lookup table for fast z_0 retrieval (if needed)
 def _create_inverse_sort_lookup(vertically_sorted_ds, verbose=False):
     """
     Create inverse lookup table for fast z_0 coordinate retrieval
@@ -341,7 +341,7 @@ def _create_inverse_sort_lookup(vertically_sorted_ds, verbose=False):
 #---
 
 #+++ Local APE calculations using on-the-fly integral method
-def _local_APE_on_the_fly_integral_xarray(ρ, z, density_index, vertically_sorted_ds, inverse_sort_indices, z_1d_sorted_values, ρ0=1025):
+def _local_APE_on_the_fly_integral_xarray(ρ, z, vertically_sorted_ds, ρ0=1025):
     """
     Compute APE for a single point using summation method (xarray inputs)
 
@@ -353,8 +353,10 @@ def _local_APE_on_the_fly_integral_xarray(ρ, z, density_index, vertically_sorte
         Density field
     z : xr.DataArray
         Z coordinate
-    density_index : int
-        Index of the density in the sorted array
+    vertically_sorted_ds : xr.Dataset
+        Dataset containing sorted density profile and dz
+    ρ0 : float
+        Reference density
     """
     # Get z_0
     ρ_sorted_profile = vertically_sorted_ds.rho_1d_sorted
@@ -376,7 +378,7 @@ def _local_APE_on_the_fly_integral_xarray(ρ, z, density_index, vertically_sorte
 
     return -ρ0 * (b_l * signed_dz_flat).sum("z_1d_sorted") # Convert to APE by unit of volume
 
-def _local_APE_on_the_fly_integral_numpy(ρ, z, density_index, vertically_sorted_ds, inverse_sort_indices, z_1d_sorted_values, ρ0=1025):
+def _local_APE_on_the_fly_integral_numpy(ρ, z, vertically_sorted_ds, ρ0=1025):
     """
     Compute APE for a single point using summation method (scalar inputs) according to the
     definition:
@@ -391,14 +393,10 @@ def _local_APE_on_the_fly_integral_numpy(ρ, z, density_index, vertically_sorted
         Density at the point
     z : float
         Z coordinate at the point
-    density_index : int
-        Index of the density in the sorted array (unused, kept for compatibility)
     vertically_sorted_ds : xr.Dataset
         Dataset containing sorted density profile and dz
-    inverse_sort_indices : np.ndarray
-        Inverse lookup table (unused, kept for compatibility)
-    z_1d_sorted_values : np.ndarray
-        Z coordinate values in sorted order (unused, kept for compatibility)
+    ρ0 : float
+        Reference density
 
     Returns
     -------
@@ -444,8 +442,7 @@ def _local_APE_on_the_fly_integral_numpy(ρ, z, density_index, vertically_sorted
     return -ρ0 * integral # Convert to APE by unit of volume
 
 
-def vectorized_local_APE_on_the_fly_integral(ds0, vertically_sorted_ds, threed_sorted_ds, inverse_sort_indices, z_1d_sorted_values,
-                                             use_numpy_version=True, verbose=True):
+def vectorized_local_APE_on_the_fly_integral(ds0, vertically_sorted_ds, use_numpy_version=True, verbose=True):
     """
     Vectorized calculation of local APE using summation method for all grid points
 
@@ -458,12 +455,10 @@ def vectorized_local_APE_on_the_fly_integral(ds0, vertically_sorted_ds, threed_s
         Dataset at a single time containing rho field
     vertically_sorted_ds : xr.Dataset
         Dataset containing sorted density profile and dz
-    threed_sorted_ds : xr.Dataset
-        Dataset containing 3D sort indices
-    inverse_sort_indices : np.ndarray
-        Inverse lookup table mapping density_index to sorted position
-    z_1d_sorted_values : np.ndarray
-        Z coordinate values in sorted order
+    use_numpy_version : bool
+        Whether to use the numpy optimized version
+    verbose : bool
+        Whether to print progress messages
 
     Returns
     -------
@@ -480,13 +475,10 @@ def vectorized_local_APE_on_the_fly_integral(ds0, vertically_sorted_ds, threed_s
         _local_APE_on_the_fly_integral_numpy if use_numpy_version else _local_APE_on_the_fly_integral_xarray,
         ds0.rho,
         z_broadcast,
-        threed_sorted_ds.sort_indices_3d,
         vectorize = True,
         dask = "allowed",
         kwargs = dict(
             vertically_sorted_ds = vertically_sorted_ds,
-            inverse_sort_indices = inverse_sort_indices,
-            z_1d_sorted_values = z_1d_sorted_values,
         )
     )
 
@@ -647,14 +639,11 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting
         else:
             raise ValueError(f"Invalid sorting method: {sorting_method}")
 
-        # Create inverse lookup table
-        inverse_sort_indices, z_1d_sorted_values = _create_inverse_sort_lookup(vertically_sorted_ds, verbose=verbose_level > 1)
-
         # Calculate local APE field
         local_ape = vectorized_local_APE_on_the_fly_integral(
-            ds_t, vertically_sorted_ds, threed_sorted_ds,
-            inverse_sort_indices, z_1d_sorted_values, verbose=verbose_level > 1,
+            ds_t, vertically_sorted_ds,
             use_numpy_version=use_numpy_version,
+            verbose=verbose_level > 1,
         )
 
         # Append to lists in order to concatenate later
