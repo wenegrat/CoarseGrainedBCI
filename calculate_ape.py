@@ -54,11 +54,11 @@ if False:
 #---
 
 #+++ Test local calculations
-if True:
+if False:
     ds0 = ds.sel(time=[70], method="nearest")
-    local_potential_energies = local_potential_energies_timeseries(ds0, test=True, verbose_level=0, use_numpy_version=False)
+    local_potential_energies = local_potential_energies_timeseries(ds0, test=True, verbose_level=0, use_numpy_version=True)
+    global_potential_energies = integrated_potential_energies_timeseries(ds0, test=True, verbose_level=0)
     pause
-    potential_energies = integrated_potential_energies_timeseries(ds0, test=True, verbose_level=0)
 #---
 
 # Calculate PE time series
@@ -97,8 +97,6 @@ print("\nResults saved to: kelvin_helmholtz_ape.nc")
 
 # Create plots
 print("\nCreating plots...")
-
-
 
 # from os.path impInort basename
 # figname_energy = f"figures/{basename(filename)}_energy_analysis.png"

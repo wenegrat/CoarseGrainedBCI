@@ -356,10 +356,7 @@ def _local_APE_on_the_fly_integral_xarray(ρ, z, density_index, vertically_sorte
     density_index : int
         Index of the density in the sorted array
     """
-    # Get z_0 using inverse lookup
-    sorted_position = inverse_sort_indices[int(density_index)]
-    z_0 = z_1d_sorted_values[sorted_position]
-
+    # Get z_0
     ρ_sorted_profile = vertically_sorted_ds.rho_1d_sorted
     z_possibilities = ρ_sorted_profile.where(ρ_sorted_profile == ρ, drop=True).z_1d_sorted
     z_0 = z_possibilities[abs(z_possibilities - z).argmin()]
@@ -390,18 +387,18 @@ def _local_APE_on_the_fly_integral_numpy(ρ, z, density_index, vertically_sorted
 
     Parameters
     ----------
-    ρ : xr.DataArray
-        Density field
-    z : xr.DataArray
-        Z coordinate
+    ρ : float
+        Density at the point
+    z : float
+        Z coordinate at the point
     density_index : int
-        Index of the density in the sorted array
+        Index of the density in the sorted array (unused, kept for compatibility)
     vertically_sorted_ds : xr.Dataset
         Dataset containing sorted density profile and dz
     inverse_sort_indices : np.ndarray
-        Inverse lookup table mapping density_index to sorted position
+        Inverse lookup table (unused, kept for compatibility)
     z_1d_sorted_values : np.ndarray
-        Z coordinate values in sorted order
+        Z coordinate values in sorted order (unused, kept for compatibility)
 
     Returns
     -------
@@ -411,34 +408,39 @@ def _local_APE_on_the_fly_integral_numpy(ρ, z, density_index, vertically_sorted
     Notes
     -----
     This function is designed to be called by xr.apply_ufunc with vectorize=True
-    and is optimized to use numpy array indexing instead of slow .sel() operations
+    and is optimized to use numpy array indexing instead of slow .sel() operations.
+    
+    z_0 is calculated by finding all z values where the sorted density equals ρ,
+    then selecting the one closest to the current z coordinate.
     """
-    # Get z_0 using inverse lookup
-    sorted_position = inverse_sort_indices[int(density_index)]
-    z_0 = z_1d_sorted_values[sorted_position]
-
     # Extract numpy arrays once (faster than repeated xarray operations)
     ρ_sorted_array = vertically_sorted_ds.rho_1d_sorted.values
     dz_sorted_array = vertically_sorted_ds.dz_1d_sorted.values
     z_sorted_array = vertically_sorted_ds.z_1d_sorted.values
 
+    # Get z_0: find all z values where sorted density equals ρ, then pick closest to z
+    mask = ρ_sorted_array == ρ
+    z_possibilities = z_sorted_array[mask]
+    z_0 = z_possibilities[np.abs(z_possibilities - z).argmin()]
+
     # Find integer indices using binary search (much faster than .sel())
     idx_z = np.searchsorted(z_sorted_array, z)
-    idx_z0 = sorted_position
+    idx_z0 = np.searchsorted(z_sorted_array, z_0)
 
     # Determine slice indices based on displacement direction
     if z > z_0:
         idx_start, idx_end = idx_z0, idx_z
+        signed_dz_slice = +dz_sorted_array[idx_start:idx_end]
     else:
         idx_start, idx_end = idx_z, idx_z0
+        signed_dz_slice = -dz_sorted_array[idx_start:idx_end]
 
     # Fast numpy array slicing (much faster than .sel())
     ρ_sorted_slice = ρ_sorted_array[idx_start:idx_end]
-    dz_slice = dz_sorted_array[idx_start:idx_end]
 
     # Calculate buoyancy difference and integrate
     b_l = -g * (ρ - ρ_sorted_slice) / ρ0
-    integral = np.sum(b_l * dz_slice)
+    integral = np.sum(b_l * signed_dz_slice)
     return -ρ0 * integral # Convert to APE by unit of volume
 
 
