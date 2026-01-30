@@ -8,53 +8,140 @@ import matplotlib.pyplot as plt
 
 
 #+++ Plot energy timeseries
-def plot_energy_timeseries(ds, APE, TPE, RPE, KE=None):
-    """Plot APE and energy components over time"""
+def plot_energy_timeseries(ds, APE=None, TPE=None, RPE=None, KE=None):
+    """
+    Plot energy components over time
+
+    Only plots quantities that are provided (not None).
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        Dataset containing time coordinate
+    APE : array-like, optional
+        Available Potential Energy time series
+    TPE : array-like, optional
+        Total Potential Energy time series
+    RPE : array-like, optional
+        Reference Potential Energy time series
+    KE : array-like, optional
+        Kinetic Energy time series
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+        Figure object containing the plots
+    """
     fig, axes = plt.subplots(3, 1, figsize=(10, 12))
 
     # Plot 1: TPE and RPE
     ax1 = axes[0]
-    ax1.plot(ds.time, TPE, label='Total PE', linewidth=2)
-    ax1.plot(ds.time, RPE, label='Reference PE', linewidth=2)
-    ax1.set_xlabel('Time')
-    ax1.set_ylabel('Potential Energy')
-    ax1.legend()
-    ax1.grid(True, alpha=0.3)
-    ax1.set_title('Potential Energy Components')
+    if TPE is not None:
+        ax1.plot(ds.time, TPE, label="Total PE", linewidth=2)
+    if RPE is not None:
+        ax1.plot(ds.time, RPE, label="Reference PE", linewidth=2)
+    if TPE is not None or RPE is not None:
+        ax1.set_xlabel("Time")
+        ax1.set_ylabel("Potential Energy")
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+        ax1.set_title("Potential Energy Components")
 
     # Plot 2: APE and KE
     ax2 = axes[1]
-    ax2.plot(ds.time, APE, label='APE', linewidth=2, color='red')
+    if APE is not None:
+        ax2.plot(ds.time, APE, label="APE", linewidth=2, color="red")
+        ax2.set_ylabel("Available Potential Energy", color="red")
+        ax2.tick_params(axis="y", labelcolor="red")
+        ax2.legend(loc="upper left")
     if KE is not None:
         ax2_twin = ax2.twinx()
-        ax2_twin.plot(ds.time, KE, label='KE', linewidth=2, color='blue', alpha=0.7)
-        ax2_twin.set_ylabel('Kinetic Energy', color='blue')
-        ax2_twin.tick_params(axis='y', labelcolor='blue')
-        ax2_twin.legend(loc='upper right')
-
-    ax2.set_xlabel('Time')
-    ax2.set_ylabel('Available Potential Energy', color='red')
-    ax2.tick_params(axis='y', labelcolor='red')
-    ax2.legend(loc='upper left')
-    ax2.grid(True, alpha=0.3)
-    ax2.set_title('Available Potential Energy and Kinetic Energy')
+        ax2_twin.plot(ds.time, KE, label="KE", linewidth=2, color="blue", alpha=0.7)
+        ax2_twin.set_ylabel("Kinetic Energy", color="blue")
+        ax2_twin.tick_params(axis="y", labelcolor="blue")
+        ax2_twin.legend(loc="upper right")
+    if APE is not None or KE is not None:
+        ax2.set_xlabel("Time")
+        ax2.grid(True, alpha=0.3)
+        ax2.set_title("Available Potential Energy and Kinetic Energy")
 
     # Plot 3: Normalized energy budget
     ax3 = axes[2]
-    if KE is not None:
+    if APE is not None and KE is not None:
         total_energy = APE + KE
-        total_energy_norm = total_energy / total_energy[0]
+        total_energy_norm = total_energy / abs(total_energy[0])
 
-        ax3.plot(ds.time, APE / APE[0], label='APE (normalized)', linewidth=2, color='red')
-        ax3.plot(ds.time, KE / KE[0], label='KE (normalized)', linewidth=2, color='blue')
-        ax3.plot(ds.time, total_energy_norm, label='Total (APE + KE, normalized)',
-                linewidth=2, color='black', linestyle='--')
+        ax3.plot(ds.time, APE / APE[0], label="APE (normalized)", linewidth=2, color="red")
+        ax3.plot(ds.time, KE / KE[0], label="KE (normalized)", linewidth=2, color="blue")
+        ax3.plot(ds.time, total_energy_norm, label="Total (APE + KE, normalized)",
+                 linewidth=2, color="black", linestyle="--")
 
-        ax3.set_xlabel('Time')
-        ax3.set_ylabel('Normalized Energy')
+        ax3.set_xlabel("Time")
+        ax3.set_ylabel("Normalized Energy")
         ax3.legend()
         ax3.grid(True, alpha=0.3)
-        ax3.set_title('Energy Budget: APE to KE Conversion')
+        ax3.set_title("Energy Budget: APE to KE Conversion")
+
+    plt.tight_layout()
+    return fig
+#---
+
+#+++ Plot potential energies
+def plot_potential_energies(time, TPE=None, RPE=None, APE=None):
+    """
+    Plot potential energy components
+
+    Only plots quantities that are provided (not None).
+
+    Creates two panels:
+    - Panel 1: TPE, RPE, and APE on the same axes (if provided)
+    - Panel 2: TPE and (TPE+RPE) for comparison (if both provided)
+
+    Parameters
+    ----------
+    time : array-like
+        Time coordinate
+    TPE : array-like, optional
+        Total Potential Energy time series
+    RPE : array-like, optional
+        Reference Potential Energy time series
+    APE : array-like, optional
+        Available Potential Energy time series
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+        Figure object containing the plots
+    """
+    fig, axes = plt.subplots(2, 1, figsize=(10, 8))
+
+    # Panel 1: All potential energy components
+    ax1 = axes[0]
+    if TPE is not None:
+        ax1.plot(time, TPE, label="TPE (Total PE)", linewidth=2, color="blue")
+    if RPE is not None:
+        ax1.plot(time, RPE, label="RPE (Reference PE)", linewidth=2, color="green")
+    if APE is not None:
+        ax1.plot(time, APE, label="APE (Available PE)", linewidth=2, color="red")
+    if TPE is not None or RPE is not None or APE is not None:
+        ax1.set_xlabel("Time")
+        ax1.set_ylabel("Potential Energy")
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+        ax1.set_title("Potential Energy Components")
+
+    # Panel 2: TPE and (TPE+RPE) comparison
+    ax2 = axes[1]
+    if TPE is not None:
+        ax2.plot(time, TPE, label="TPE", linewidth=2, color="blue")
+    if TPE is not None and RPE is not None:
+        ax2.plot(time, TPE + RPE, label="TPE + RPE", linewidth=2, color="purple", linestyle="--")
+    if TPE is not None or RPE is not None:
+        ax2.set_xlabel("Time")
+        ax2.set_ylabel("Potential Energy")
+        ax2.legend()
+        ax2.grid(True, alpha=0.3)
+        ax2.set_title("TPE vs TPE+RPE")
 
     plt.tight_layout()
     return fig

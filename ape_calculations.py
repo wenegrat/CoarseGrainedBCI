@@ -7,23 +7,23 @@ following Winters et al. (1995).
 
 import numpy as np
 import xarray as xr
+from scipy.integrate import cumulative_trapezoid
+import warnings
 
 # Physical constants
 g = 9.81  # gravitational acceleration [m/s^2]
-rho_0 = 1025  # reference density [kg/m^3]
-
 
 #+++ Auxiliary functions
-def volume_sum(da):
-    return da.sum(("x_caa", "y_aca", "z_aac"))
+def volume_sum(da, dims=("x_caa", "y_aca", "z_aac")):
+    return da.sum(dims)
 
-def integrate(da, dV):
+def integrate(da, dV, dims=("x_caa", "y_aca", "z_aac")):
     """Integrate a DataArray over spatial dimensions"""
-    return (da * dV).sum(("x_caa", "y_aca", "z_aac"))
+    return (da * dV).sum(dims)
 #---
 
 #+++ Load data
-def load_data(filename):
+def load_data(filename, ρ0=1025):
     """Load the simulation output"""
     print(f"Loading data from {filename}...")
     ds = xr.open_dataset(filename, decode_times=False)
@@ -44,9 +44,9 @@ def load_data(filename):
     ds["LxLy"] = ds.Lx * ds.Ly
 
     # Convert buoyancy to density
-    # b = g * (rho_0 - rho) / rho_0  =>  rho = rho_0 * (1 - b/g)
-    ds["rho"] = rho_0 * (1 - ds.b / g)
-    ds["rho_z"] = (rho_0 * ds.z_aac + ds.pe / g) # pe  = -b*z
+    # b = g * (ρ0 - rho) / ρ0  =>  rho = ρ0 * (1 - b/g)
+    ds["rho"] = ρ0 * (1 - ds.b / g)
+    ds["rho_z"] = (ρ0 * ds.z_aac + ds.pe / g) # pe  = -b*z
 
     # Add coordinate arrays
     if "z_aac" in ds.coords:
@@ -57,9 +57,8 @@ def load_data(filename):
     return ds
 #---
 
-
-#+++ Vertical sort density
-def vertical_sort_density(rho, dV, LxLy, test=False, z_min=0, Lz=None):
+#+++ Vertical sort density by flattening, sorting, and reshaping
+def vertical_sort_density_by_flattening(rho, dV, LxLy, test=False, z_min=0, Lz=None):
     """
     Sort the density field to obtain the reference state
 
@@ -91,7 +90,7 @@ def vertical_sort_density(rho, dV, LxLy, test=False, z_min=0, Lz=None):
     rho_1d = np.ravel(rho.copy(), order="C")
 
     dz_flat = dV / LxLy # 3D DataArray with the same shape as rho
-    dz_flat_1d = np.ravel(dz_flat.values, order='C')
+    dz_flat_1d = np.ravel(dz_flat.values, order="C")
     if test and Lz is not None:
         assert(dz_flat.sum().values == Lz)
 
@@ -103,21 +102,22 @@ def vertical_sort_density(rho, dV, LxLy, test=False, z_min=0, Lz=None):
     rho_1d_sorted = rho_1d[sort_indices]
     z_1d_sorted = np.cumsum(dz_flat_1d_sorted) + z_min + dz_flat_1d_sorted[0]/2
 
-    # Reshape z_1d_sorted back into the original shape used by rho
+    # Reshape z_1d_sorted and rho_1d_sorted back into the original shape used by rho
     z_3d_sorted = z_1d_sorted.reshape(rho.shape, order="C")
-
-    # Reshape rho_1d_sorted back into the original shape used by rho
     rho_3d_sorted = rho_1d_sorted.reshape(rho.shape, order="C")
+    sort_indices_3d = sort_indices.reshape(rho.shape, order="C")
 
-    # Put verticall sorted data into a Dataset
+    # Put vertically sorted data into a Dataset
+    sort_indices_1d = xr.DataArray(sort_indices, dims="z_1d_sorted", coords=dict(z_1d_sorted=z_1d_sorted))
     rho_1d_sorted = xr.DataArray(rho_1d_sorted, dims="z_1d_sorted", coords=dict(z_1d_sorted=z_1d_sorted))
     dz_1d_sorted = xr.DataArray(dz_flat_1d_sorted, dims="z_1d_sorted", coords=dict(z_1d_sorted=z_1d_sorted))
-    vertically_sorted_ds = xr.Dataset(dict(rho_1d_sorted=rho_1d_sorted, dz_1d_sorted=dz_1d_sorted))
+    vertically_sorted_ds = xr.Dataset(dict(rho_1d_sorted=rho_1d_sorted, dz_1d_sorted=dz_1d_sorted, sort_indices_1d=sort_indices_1d))
 
     # Put 3D sorted data into a Dataset
+    sort_indices_3d = xr.DataArray(sort_indices_3d, dims=rho.dims, coords=rho.coords)
     z_3d_sorted = xr.DataArray(z_3d_sorted, dims=rho.dims, coords=rho.coords)
     rho_3d_sorted = xr.DataArray(rho_3d_sorted, dims=rho.dims, coords=rho.coords)
-    threed_sorted_ds = xr.Dataset(dict(rho_3d_sorted=rho_3d_sorted, z_3d_sorted=z_3d_sorted))
+    threed_sorted_ds = xr.Dataset(dict(rho_3d_sorted=rho_3d_sorted, z_3d_sorted=z_3d_sorted, sort_indices_3d=sort_indices_3d))
 
     if test:
         rho_3d_reshaped = rho_1d.reshape(rho.shape, order="C")
@@ -126,8 +126,22 @@ def vertical_sort_density(rho, dV, LxLy, test=False, z_min=0, Lz=None):
     return vertically_sorted_ds, threed_sorted_ds
 #---
 
+#+++ Vertical sort density by the PDF method
+def vertical_sort_density_by_PDF(rho, Lz, nbins=1000):
+    ρ_1d = np.ravel(rho.values, order="C")
+    ε = 1e-3
+    bin_edges = np.linspace(ρ_1d.min()-ε, ρ_1d.max()+ε, nbins+1)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        P_rho, bins_count = np.histogram(ρ_1d, bins=bin_edges, density=True)
+    bin_centers = 0.5*(bin_edges[1:] + bin_edges[:-1])
+    Z_r = Lz * cumulative_trapezoid(P_rho[::-1], x=bin_centers[::-1], initial=0)
+    Z_r = Z_r - Z_r.mean()
+    return xr.DataArray(Z_r, dims="z_1d_sorted", coords=dict(z_1d_sorted=bin_centers))
+#---
+
 #+++ Calculate TPE
-def calculate_total_potential_energy(rho):
+def local_TPE(rho, z_name="z_aac"):
     """
     Calculate local Total Potential Energy density
 
@@ -141,9 +155,9 @@ def calculate_total_potential_energy(rho):
     xr.DataArray
         Local TPE density: g * rho * z
     """
-    return g * rho * rho.z_aac
+    return g * rho * rho[z_name]
 
-def integrated_total_potential_energy(rho, dV=None, ds=None):
+def integrated_total_potential_energy(rho, dV=None, ds=None, z_name="z_aac"):
     """
     Calculate volume-integrated Total Potential Energy (TPE)
 
@@ -166,12 +180,12 @@ def integrated_total_potential_energy(rho, dV=None, ds=None):
             dV = ds.dV
         else:
             raise ValueError("Either dV or ds must be provided")
-    tpe_local = calculate_total_potential_energy(rho)
+    tpe_local = local_TPE(rho, z_name=z_name)
     return integrate(tpe_local, dV)
 #---
 
 #+++ Calculate reference state using sorting method
-def calculate_reference_potential_energy(rho, dV, LxLy, test=False, z_min=0, Lz=None):
+def calculate_reference_potential_energy_profile(rho, dV, LxLy, test=False, z_min=0, Lz=None, sorting_method="sorting"):
     """
     Calculate local Reference Potential Energy density using sorted density
 
@@ -196,13 +210,19 @@ def calculate_reference_potential_energy(rho, dV, LxLy, test=False, z_min=0, Lz=
         Dataset containing sorted 1D density and coordinate
     """
     # Sort the density field to get reference state
-    vertically_sorted_ds, threed_sorted_ds = vertical_sort_density(rho, dV, LxLy, test=test, z_min=z_min, Lz=Lz)
+    if sorting_method == "sorting":
+        vertically_sorted_ds = vertical_sort_density_by_flattening(rho, dV, LxLy, test=test, z_min=z_min, Lz=Lz)[0]
 
-    if test:
-        assert(all(np.diff(vertically_sorted_ds.rho_1d_sorted) <= 0))
-        assert(all(np.diff(vertically_sorted_ds.z_1d_sorted) > 0))
-        if Lz is not None:
-            assert(np.sum(vertically_sorted_ds.dz_1d_sorted).values == Lz)
+        if test:
+            assert(all(np.diff(vertically_sorted_ds.rho_1d_sorted) <= 0))
+            assert(all(np.diff(vertically_sorted_ds.z_1d_sorted) > 0))
+            if Lz is not None:
+                assert(np.sum(vertically_sorted_ds.dz_1d_sorted).values == Lz)
+
+    elif sorting_method == "PDF":
+        vertically_sorted_ds = vertical_sort_density_by_PDF(rho, Lz, nbins=1000)[0]
+    else:
+        raise ValueError(f"Invalid sorting method: {sorting_method}")
 
     return vertically_sorted_ds
 
@@ -213,7 +233,7 @@ def integrated_reference_potential_energy(vertically_sorted_ds, LxLy):
     Parameters
     ----------
     vertically_sorted_ds : xr.Dataset
-        Sorted density dataset from calculate_reference_potential_energy
+        Sorted density dataset from calculate_reference_potential_energy_profile
     LxLy : float
         Horizontal area
 
@@ -225,7 +245,7 @@ def integrated_reference_potential_energy(vertically_sorted_ds, LxLy):
     dV_flat_1d_sorted = vertically_sorted_ds.dz_1d_sorted * LxLy
     return g * np.sum(vertically_sorted_ds.rho_1d_sorted * vertically_sorted_ds.z_1d_sorted * dV_flat_1d_sorted)
 
-def integrated_potential_energies(ds, time_idx, test=False):
+def integrated_potential_energies(ds, time_idx, test=False, sorting_method="sorting"):
     """
     Calculate volume-integrated potential energies (APE, TPE, RPE)
 
@@ -245,16 +265,16 @@ def integrated_potential_energies(ds, time_idx, test=False):
     """
     rho = ds.rho.isel(time=time_idx)
     TPE = integrated_total_potential_energy(rho, ds=ds)
-    vertically_sorted_ds = calculate_reference_potential_energy(rho, ds.dV, ds.LxLy, test=test, z_min=ds.z_min, Lz=ds.Lz)
+    vertically_sorted_ds = calculate_reference_potential_energy_profile(rho, ds.dV, ds.LxLy, test=test, z_min=ds.z_min, Lz=ds.Lz, sorting_method=sorting_method)
     RPE = integrated_reference_potential_energy(vertically_sorted_ds, ds.LxLy.values)
     APE = TPE - RPE
     return APE, TPE, RPE
 #---
 
-#+++ Calculate APE time series
-def calculate_ape_timeseries(ds, test=False):
+#+++ Integrated APE, TPE, RPE time series calculations
+def integrated_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting_method="sorting"):
     """
-    Calculate volume-integrated APE for all time steps
+    Calculate volume-integrated potential energies for all time steps
 
     Parameters
     ----------
@@ -265,10 +285,13 @@ def calculate_ape_timeseries(ds, test=False):
 
     Returns
     -------
-    tuple
-        (APE, TPE, RPE) - time series of volume-integrated energies
+    potential_energies_ds : xr.Dataset
+        Dataset containing:
+        - APE: 1D DataArray (time) with APE values
+        - TPE: 1D DataArray (time) with TPE values
+        - RPE: 1D DataArray (time) with RPE values
     """
-    print("Calculating APE time series...")
+    if verbose_level > 0: print("Calculating potential energies time series...")
 
     n_times = len(ds.time)
     APE = np.zeros(n_times)
@@ -276,15 +299,404 @@ def calculate_ape_timeseries(ds, test=False):
     RPE = np.zeros(n_times)
 
     for i in range(n_times):
-        print(f"  Processing time step {i+1}/{n_times}", end='\r')
-        APE[i], TPE[i], RPE[i] = integrated_potential_energies(ds, i, test=test)
+        if verbose_level > 0: print(f"  Processing time step {i+1}/{n_times}", end="\r")
+        APE[i], TPE[i], RPE[i] = integrated_potential_energies(ds, i, test=test, sorting_method=sorting_method)
 
-    print("\nDone!")
-    return APE, TPE, RPE
+    if verbose_level > 0: print("\nDone!")
+
+    potential_energies_ds = xr.Dataset(dict(APE=("time", APE), TPE=("time", TPE), RPE=("time", RPE)))
+    potential_energies_ds["time"] = ds.time
+    return potential_energies_ds
+#---
+
+#+++ Create inverse lookup table for fast z_0 retrieval (if needed)
+def _create_inverse_sort_lookup(vertically_sorted_ds, verbose=False):
+    """
+    Create inverse lookup table for fast z_0 coordinate retrieval
+
+    This function creates a mapping from density indices to their positions in the
+    sorted array and extracts z coordinates for fast access. This avoids the slow
+    .where() operation when looking up reference z coordinates.
+
+    Parameters
+    ----------
+    vertically_sorted_ds : xr.Dataset
+        Dataset containing sort_indices_1d and z_1d_sorted
+
+    Returns
+    -------
+    inverse_sort_indices : np.ndarray
+        Array mapping density_index -> position in sorted array (O(1) lookup)
+    z_1d_sorted_values : np.ndarray
+        Z coordinate values in sorted order for fast indexing
+    """
+    if verbose: print("Creating inverse lookup table for fast z_0 retrieval...", end="")
+    inverse_sort_indices = np.empty(len(vertically_sorted_ds.sort_indices_1d), dtype=int)
+    for i, idx in enumerate(vertically_sorted_ds.sort_indices_1d.values):
+        inverse_sort_indices[int(idx)] = i
+    z_1d_sorted_values = vertically_sorted_ds.z_1d_sorted.values
+    if verbose: print("Done!")
+
+    return inverse_sort_indices, z_1d_sorted_values
+#---
+
+#+++ Local APE calculations using on-the-fly integral method
+def _local_APE_on_the_fly_integral_xarray(ρ, z, vertically_sorted_ds, ρ0=1025):
+    """
+    Compute APE for a single point using summation method (xarray inputs)
+
+    This function is designed to be called by xr.apply_ufunc with vectorize=True
+
+    Parameters
+    ----------
+    ρ : xr.DataArray
+        Density field
+    z : xr.DataArray
+        Z coordinate
+    vertically_sorted_ds : xr.Dataset
+        Dataset containing sorted density profile and dz
+    ρ0 : float
+        Reference density
+    """
+    # Get z_0
+    ρ_sorted_profile = vertically_sorted_ds.rho_1d_sorted
+    z_possibilities = ρ_sorted_profile.where(ρ_sorted_profile == ρ, drop=True).z_1d_sorted
+    z_0 = z_possibilities[abs(z_possibilities - z).argmin()]
+
+    # Calculate displacement and slice
+    if z > z_0:
+        displacement_slice = slice(z_0, z)
+        signed_dz_flat = +vertically_sorted_ds.dz_1d_sorted.sel(z_1d_sorted=displacement_slice)
+    else:
+        displacement_slice = slice(z, z_0)
+        signed_dz_flat = -vertically_sorted_ds.dz_1d_sorted.sel(z_1d_sorted=displacement_slice)
+
+    # Calculate buoyancy difference and integrate
+    ρ_sorted_profile_slice = ρ_sorted_profile.sel(z_1d_sorted=displacement_slice)
+
+    b_l = - g * (ρ - ρ_sorted_profile_slice) / ρ0
+
+    return -ρ0 * (b_l * signed_dz_flat).sum("z_1d_sorted") # Convert to APE by unit of volume
+
+def _local_APE_on_the_fly_integral_numpy(ρ, z, vertically_sorted_ds, ρ0=1025):
+    """
+    Compute APE for a single point using summation method (scalar inputs) according to the
+    definition:
+
+    E_a = -ρ0 ∫_{z_0}^{z} b_l dz = g ∫_{z_0}^{z} (ρ - ρ_ref) dz
+
+    Thus the output units are: kg m^2 s^-2 / m^3, which is the APE by unit of volume.
+
+    Parameters
+    ----------
+    ρ : float
+        Density at the point
+    z : float
+        Z coordinate at the point
+    vertically_sorted_ds : xr.Dataset
+        Dataset containing sorted density profile and dz
+    ρ0 : float
+        Reference density
+
+    Returns
+    -------
+    float
+        Local APE
+
+    Notes
+    -----
+    This function is designed to be called by xr.apply_ufunc with vectorize=True
+    and is optimized to use numpy array indexing instead of slow .sel() operations.
+
+    z_0 is calculated by finding all z values where the sorted density equals ρ,
+    then selecting the one closest to the current z coordinate.
+    """
+    # Extract numpy arrays once (faster than repeated xarray operations)
+    ρ_sorted_array = vertically_sorted_ds.rho_1d_sorted.values
+    dz_sorted_array = vertically_sorted_ds.dz_1d_sorted.values
+    z_sorted_array = vertically_sorted_ds.z_1d_sorted.values
+
+    # Get z_0: find all z values where sorted density equals ρ, then pick closest to z
+    mask = ρ_sorted_array == ρ
+    z_possibilities = z_sorted_array[mask]
+    z_0 = z_possibilities[np.abs(z_possibilities - z).argmin()]
+
+    # Find integer indices using binary search (much faster than .sel())
+    idx_z = np.searchsorted(z_sorted_array, z)
+    idx_z0 = np.searchsorted(z_sorted_array, z_0)
+
+    # Determine slice indices based on displacement direction
+    if z > z_0:
+        idx_start, idx_end = idx_z0, idx_z
+        signed_dz_slice = +dz_sorted_array[idx_start:idx_end]
+    else:
+        idx_start, idx_end = idx_z, idx_z0
+        signed_dz_slice = -dz_sorted_array[idx_start:idx_end]
+
+    # Fast numpy array slicing (much faster than .sel())
+    ρ_sorted_slice = ρ_sorted_array[idx_start:idx_end]
+
+    # Calculate buoyancy difference and integrate
+    b_l = -g * (ρ - ρ_sorted_slice) / ρ0
+    integral = np.sum(b_l * signed_dz_slice)
+    return -ρ0 * integral # Convert to APE by unit of volume
+
+
+def vectorized_local_APE_on_the_fly_integral(ds0, vertically_sorted_ds, use_numpy_version=True, verbose=True):
+    """
+    Vectorized calculation of local APE using summation method for all grid points
+
+    Uses xr.apply_ufunc with vectorize=True to apply the calculation to all points
+    without explicit loops.
+
+    Parameters
+    ----------
+    ds0 : xr.Dataset
+        Dataset at a single time containing rho field
+    vertically_sorted_ds : xr.Dataset
+        Dataset containing sorted density profile and dz
+    use_numpy_version : bool
+        Whether to use the numpy optimized version
+    verbose : bool
+        Whether to print progress messages
+
+    Returns
+    -------
+    xr.DataArray
+        Local APE values with same dimensions as ds0.rho
+    """
+    if verbose: print("Computing local APE using vectorized summation method (xr.apply_ufunc)...")
+
+    # Broadcast z coordinates to match rho shape
+    z_broadcast = xr.zeros_like(ds0.rho) + ds0.z_aac
+
+    # Use apply_ufunc with vectorize=True to apply the scalar function to all points
+    result = xr.apply_ufunc(
+        _local_APE_on_the_fly_integral_numpy if use_numpy_version else _local_APE_on_the_fly_integral_xarray,
+        ds0.rho,
+        z_broadcast,
+        vectorize = True,
+        dask = "allowed",
+        kwargs = dict(
+            vertically_sorted_ds = vertically_sorted_ds,
+        )
+    )
+
+    if verbose: print("Done!")
+    return result
+#---
+
+#+++ Local APE calculations using precomputed integral method
+def _local_APE_precomputed_integral_scalar(ρ, z, vertically_sorted_ds):
+    """
+    Compute APE for a single point using cumulative integral method (scalar inputs) according to the
+    definition:
+
+    E_a = g ∫_{z_0}^{z} (ρ - ρ_ref) dz
+
+    Thus the output units are: kg m^2 s^-2 / m^3, which is the APE by unit of volume.
+
+    Parameters
+    ----------
+    ρ : xr.DataArray
+        Density field
+    z : xr.DataArray
+        Z coordinate
+    vertically_sorted_ds : xr.Dataset
+        Dataset containing sorted density profile and dz
+
+    Returns
+    -------
+    float
+        Local APE
+
+    Notes
+    -----
+    This function is designed to be called by xr.apply_ufunc with vectorize=True.
+
+    z_0 is calculated by finding all z values where the sorted density equals ρ,
+    then selecting the one closest to the current z coordinate.
+    """
+    # Get z_0: find all z values where sorted density equals ρ, then pick closest to z
+    ρ_sorted_profile = vertically_sorted_ds.rho_1d_sorted
+    z_possibilities = ρ_sorted_profile.where(ρ_sorted_profile == ρ, drop=True).z_1d_sorted
+    z_0 = z_possibilities[abs(z_possibilities - z).argmin()]
+
+    # Calculate displacement
+    displacement = z - z_0
+
+    # Get cumulative integral of sorted density profile
+    cumulative_ρ_sorted_integral = vertically_sorted_ds["rho_1d_sorted_cumulative_integral"]
+    ρ_sorted_integral = (cumulative_ρ_sorted_integral.sel(z_1d_sorted=z, method="nearest") -
+                         cumulative_ρ_sorted_integral.sel(z_1d_sorted=z_0))
+
+    # Get cumulative integral of dz
+    cumulative_dz_sorted_integral = vertically_sorted_ds["dz_1d_sorted_cumulative_integral"]
+    dz_integral = (cumulative_dz_sorted_integral.sel(z_1d_sorted=z, method="nearest") -
+                   cumulative_dz_sorted_integral.sel(z_1d_sorted=z_0))
+
+    # Calculate local APE
+    ρ_constant_integral = ρ * dz_integral
+    local_ape = g * (ρ_constant_integral - ρ_sorted_integral)
+
+    return float(local_ape)
+
+def vectorized_local_APE_precomputed_integral(ds0, vertically_sorted_ds, verbose=False):
+    """
+    Vectorized calculation of local APE using cumulative integral method for all grid points
+
+    Uses xr.apply_ufunc with vectorize=True to apply the calculation to all points
+    without explicit loops.
+
+    Parameters
+    ----------
+    ds0 : xr.Dataset
+        Dataset at a single time containing rho field
+    vertically_sorted_ds : xr.Dataset
+        Dataset containing cumulative integrals of sorted density and dz
+    verbose : bool
+        Whether to print progress messages
+
+    Returns
+    -------
+    xr.DataArray
+        Local APE values with same dimensions as ds0.rho
+    """
+    if verbose: print("Computing local APE using vectorized cumulative method (xr.apply_ufunc)...")
+
+    # Broadcast z coordinates to match rho shape
+    z_broadcast = xr.zeros_like(ds0.rho) + ds0.z_aac
+
+    # Use apply_ufunc with vectorize=True to apply the scalar function to all points
+    result = xr.apply_ufunc(
+        _local_APE_precomputed_integral_scalar,
+        ds0.rho,
+        z_broadcast,
+        vectorize=True,
+        dask="allowed",
+        kwargs={
+            "vertically_sorted_ds": vertically_sorted_ds,
+        }
+    )
+
+    if verbose: print("Done!")
+    return result
+#---
+
+#+++ Local APE and TPE time series calculations
+def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting_method="sorting",
+                                        ape_method="on_the_fly", use_numpy_version=False):
+    """
+    Calculate local APE and TPE fields for all time steps
+
+    This function computes the 3D local APE field and scalar TPE value
+    for each time step in the dataset.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        Dataset containing simulation data with time dimension
+    test : bool
+        Whether to run tests on the sorting
+    verbose_level : int
+        Verbosity level (0=quiet, 1=progress, 2=detailed)
+    sorting_method : str
+        Method for sorting density ("sorting" or "PDF")
+    ape_method : str
+        Method for computing local APE ("on_the_fly" or "precomputed_integral")
+    use_numpy_version : bool
+        Whether to use numpy-optimized version (only for on_the_fly method)
+
+    Returns
+    -------
+    xr.Dataset
+        Dataset containing:
+        - local_ape: 4D DataArray (time, x, y, z) with local APE values
+        - TPE: 1D DataArray (time) with total potential energy
+    """
+    if verbose_level > 0: print("Calculating local APE and TPE time series...")
+
+    n_times = len(ds.time)
+
+    # Initialize list to store local APE fields for each time
+    local_ape_list = []
+    local_rho_sorted_list = []
+    local_dz_sorted_list = []
+
+    for i in range(n_times):
+        if verbose_level > 0: print(f"  Processing time step {i+1}/{n_times}", end="\r")
+
+        # Get data for this time step
+        ds_t = ds.isel(time=i)
+
+        # Perform vertical sorting
+        if sorting_method == "sorting":
+            vertically_sorted_ds, threed_sorted_ds = vertical_sort_density_by_flattening(ds_t.rho, ds_t.dV, ds.LxLy,
+                test=test, z_min=ds.z_min, Lz=ds.Lz)
+        elif sorting_method == "PDF":
+            vertically_sorted_ds = vertical_sort_density_by_PDF(ds_t.rho, ds.Lz, nbins=1000)
+        else:
+            raise ValueError(f"Invalid sorting method: {sorting_method}")
+
+        # Calculate local APE field using selected method
+        if ape_method == "on_the_fly":
+            local_ape = vectorized_local_APE_on_the_fly_integral(
+                ds_t, vertically_sorted_ds,
+                use_numpy_version=use_numpy_version,
+                verbose=verbose_level > 1,
+            )
+        elif ape_method == "precomputed_integral":
+            # Compute cumulative integrals for precomputed method
+            # ∫_0^z ρ(z') dz' = cumsum(ρ * dz)
+            vertically_sorted_ds["rho_1d_sorted_cumulative_integral"] = (
+                vertically_sorted_ds.rho_1d_sorted * vertically_sorted_ds.dz_1d_sorted
+            ).cumsum("z_1d_sorted")
+            # ∫_0^z dz' = cumsum(dz)
+            vertically_sorted_ds["dz_1d_sorted_cumulative_integral"] = (
+                vertically_sorted_ds.dz_1d_sorted.cumsum("z_1d_sorted")
+            )
+
+            local_ape = vectorized_local_APE_precomputed_integral(
+                ds_t, vertically_sorted_ds,
+                verbose=verbose_level > 1,
+            )
+        else:
+            raise ValueError(f"Invalid ape_method: {ape_method}. Must be 'on_the_fly' or 'precomputed_integral'")
+
+        # Append to lists in order to concatenate later
+        local_ape_list.append(local_ape)
+        local_rho_sorted_list.append(vertically_sorted_ds.rho_1d_sorted)
+        local_dz_sorted_list.append(vertically_sorted_ds.dz_1d_sorted)
+
+    if verbose_level > 0: print("\nDone!")
+
+    # Concatenate local APE fields along time dimension
+    local_ape_4d = xr.concat(local_ape_list, dim="time")
+    local_ape_4d["time"] = ds.time
+
+    local_rho_sorted_4d = xr.concat(local_rho_sorted_list, dim="time")
+    local_rho_sorted_4d["time"] = ds.time
+
+    local_dz_sorted_4d = xr.concat(local_dz_sorted_list, dim="time")
+    local_dz_sorted_4d["time"] = ds.time
+
+    tpe = local_TPE(ds.rho, z_name="z_aac")
+    rpe = local_TPE(local_rho_sorted_4d, z_name="z_1d_sorted")
+
+    # Combine into a Dataset
+    local_potential_energies_ds = xr.Dataset(dict(
+        ape = local_ape_4d,
+        tpe = tpe,
+        rpe = rpe,
+        rho_sorted = local_rho_sorted_4d,
+        dz_sorted = local_dz_sorted_4d,
+    ))
+
+    return local_potential_energies_ds
 #---
 
 #+++ Calculate kinetic energy
-def calculate_kinetic_energy(u, v, w):
+def local_KE(u, v, w, ρ0=1025):
     """
     Calculate local kinetic energy density
 
@@ -296,11 +708,13 @@ def calculate_kinetic_energy(u, v, w):
     Returns
     -------
     xr.DataArray
-        Local KE density: 0.5 * rho_0 * (u^2 + v^2 + w^2)
+        Local KE density: ρ0 * (u^2 + v^2 + w^2) / 2
+    ρ0 : float
+        Reference density
     """
-    return 0.5 * rho_0 * (u**2 + v**2 + w**2)
+    return ρ0 * (u**2 + v**2 + w**2) / 2
 
-def integrated_kinetic_energy(ds, time_idx=None):
+def integrated_KE(ds, ρ0=1025):
     """
     Calculate volume-integrated kinetic energy
 
@@ -308,29 +722,22 @@ def integrated_kinetic_energy(ds, time_idx=None):
     ----------
     ds : xr.Dataset
         Dataset containing velocity fields (u, v, w)
-    time_idx : int, optional
-        Time index to select. If None, integrates over all times.
 
     Returns
     -------
-    float or xr.DataArray
-        Integrated KE (scalar if time_idx given, time series otherwise)
+    xr.DataArray
+        Integrated KE
     """
-    if time_idx is not None:
-        u = ds.u.isel(time=time_idx)
-        v = ds.v.isel(time=time_idx)
-        w = ds.w.isel(time=time_idx)
-        dV = ds.dV
-    else:
-        u = ds.u
-        v = ds.v
-        w = ds.w
-        dV = ds.dV
+    u = ds.u
+    v = ds.v
+    w = ds.w
+    dV = ds.dV
 
-    ke_local = calculate_kinetic_energy(u, v, w)
-    return (ke_local * dV).sum(("x_caa", "y_aca", "z_aac"))
+    ke = local_KE(u, v, w, ρ0=ρ0)
+    KE = (ke * dV).sum(("x_caa", "y_aca", "z_aac"))
+    return KE
 
-def calculate_ke_timeseries(ds):
+def integrated_KE_timeseries(ds, ρ0=1025, verbose=False):
     """
     Calculate volume-integrated KE for all time steps
 
@@ -344,8 +751,8 @@ def calculate_ke_timeseries(ds):
     xr.DataArray
         Time series of volume-integrated KE
     """
-    print("Calculating KE time series...")
-    KE = integrated_kinetic_energy(ds)
-    print("\nDone!")
+    if verbose: print("Calculating KE time series...")
+    KE = integrated_KE(ds, ρ0=ρ0)
+    if verbose: print("\nDone!")
     return KE
 #---

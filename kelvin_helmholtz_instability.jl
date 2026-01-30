@@ -11,13 +11,15 @@ Lx = Lz = 10
 Ly = 5
 if has_cuda_gpu()
     arch = GPU()
-    Nx = Nz = 256
+    Nx = 256
     Ny = Nx÷2
+    Nz = 512
     @info "CUDA GPU detected! Running 3D simulation with $(Nx)×$(Ny)×$(Nz) grid on GPU"
 else
     arch = CPU()
-    Nx = Nz = 128
+    Nx = 64
     Ny = 1
+    Nz = 256
     @info "No CUDA GPU detected. Running 2D simulation with $(Nx)×$(Ny)×$(Nz) grid on CPU"
 end
 
@@ -33,7 +35,6 @@ model = NonhydrostaticModel(grid;
                             closure = ScalarDiffusivity(ν=ν, κ=ν),
                             buoyancy = BuoyancyTracer(),
                             tracers = :b)
-
 u, v, w = model.velocities
 b = model.tracers.b
 #---
@@ -43,14 +44,9 @@ Ri = 0.1
 h = 1/4
 perturbation_amplitude = 0.01
 
-# Base shear flow
-shear_flow(x, z) = tanh(z)
-
-# Base stratification
-stratification(x, z) = h * Ri * tanh(z / h)
-
-# Small perturbation to trigger instability
-perturbation(x, z) = perturbation_amplitude * sin(2π * x / 10) * exp(-z^2 / 2)
+shear_flow(x, z) = tanh(z) # Base shear flow
+stratification(x, z) = h * Ri * tanh(z / h) # Base stratification
+perturbation(x, z) = perturbation_amplitude * sin(2π * x / 10) * exp(-z^2 / 2) # Small perturbation to trigger instability
 
 # Set initial conditions
 uᵢ(x, y, z) = shear_flow(x, z)
@@ -109,6 +105,7 @@ simulation.output_writers[:fields] =
     NetCDFWriter(model, (; ω=vorticity, b, pe, PE, u=u_center, v=v_center, w=w_center),
                  schedule = TimeInterval(4),
                  filename = output_filename,
+                 array_type = Array{Float64},
                  overwrite_existing = true)
 
 output_filename_2d = "output/kelvin_helmholtz_instability_$(Nx)x$(Ny)x$(Nz)_2d.nc"
@@ -116,6 +113,7 @@ simulation.output_writers[:twod_fields] =
 NetCDFWriter(model, (; ω=vorticity, b),
             schedule = TimeInterval(2),
             filename = output_filename_2d,
+            array_type = Array{Float32},
             indices = (:, 1, :),
             overwrite_existing = true)
 
