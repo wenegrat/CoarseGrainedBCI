@@ -11,6 +11,7 @@ import numpy as np
 import xarray as xr
 import scipy.integrate as integrate
 import time
+from functools import wraps
 from ape_calculations import (
     integrated_potential_energies_timeseries,
     integrated_KE_timeseries,
@@ -26,6 +27,19 @@ from ape_calculations import (
 from ape_plots import plot_energy_timeseries, plot_potential_energies
 from matplotlib import pyplot as plt
 import pynanigans as pn
+
+# Timing decorator
+def timeit(func):
+    """Decorator that prints the elapsed time of a function call"""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        print(f"\n{func.__name__}...")
+        start_time = time.time()
+        result = func(*args, **kwargs)
+        elapsed_time = time.time() - start_time
+        print(f"Elapsed wall time: {elapsed_time:.2f} seconds ({elapsed_time/60:.2f} minutes)")
+        return result
+    return wrapper
 
 # File path to the simulation output
 filename = "output/kelvin_helmholtz_instability_64x1x64.nc"
@@ -66,11 +80,14 @@ if False:
 global_potential_energies = integrated_potential_energies_timeseries(ds, test=False, verbose_level=1)
 
 # Calculate local APE time series
-print("\nCalculating local APE time series...")
-start_time = time.time()
-local_potential_energies = local_potential_energies_timeseries(ds, test=False, verbose_level=1, use_numpy_version=True)
-elapsed_time = time.time() - start_time
-print(f"Elapsed wall time: {elapsed_time:.2f} seconds ({elapsed_time/60:.2f} minutes)")
+@timeit
+def calculate_local_ape(func, *args, **kwargs):
+    return func(*args, **kwargs)
+
+local_potential_energies = calculate_local_ape(local_potential_energies_timeseries, ds, test=False, verbose_level=1, use_numpy_version=True, ape_method="on_the_fly")
+local_potential_energies = calculate_local_ape(local_potential_energies_timeseries, ds, test=False, verbose_level=1, use_numpy_version=True, ape_method="precomputed_integral")
+local_potential_energies = calculate_local_ape(local_potential_energies_timeseries, ds, test=False, verbose_level=1, use_numpy_version=False, ape_method="on_the_fly")
+local_potential_energies = calculate_local_ape(local_potential_energies_timeseries, ds, test=False, verbose_level=1, use_numpy_version=False, ape_method="precomputed_integral")
 pause
 
 integrated_local_potential_energies = integrate(local_potential_energies[["ape", "tpe"]], ds.dV)
