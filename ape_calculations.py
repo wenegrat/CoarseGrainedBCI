@@ -186,7 +186,7 @@ def integrated_total_potential_energy(rho, dV=None, ds=None, z_name="z_aac"):
 #---
 
 #+++ Calculate reference state using sorting method
-def calculate_reference_potential_energy_profile(rho, dV, LxLy, test=False, z_min=0, Lz=None, sorting_method="sorting"):
+def calculate_reference_potential_energy_profile(rho, dV, LxLy, test=False, z_min=0, Lz=None, sorting_method="vertically_flattened"):
     """
     Calculate local Reference Potential Energy density using sorted density
 
@@ -211,7 +211,7 @@ def calculate_reference_potential_energy_profile(rho, dV, LxLy, test=False, z_mi
         Dataset containing sorted 1D density and coordinate
     """
     # Sort the density field to get reference state
-    if sorting_method == "sorting":
+    if sorting_method == "vertically_flattened":
         vertically_sorted_ds = vertical_sort_density_by_flattening(rho, dV, LxLy, test=test, z_min=z_min, Lz=Lz)[0]
 
         if test:
@@ -246,7 +246,7 @@ def integrated_reference_potential_energy(vertically_sorted_ds, LxLy):
     dV_flat_1d_sorted = vertically_sorted_ds.dz_1d_sorted * LxLy
     return g * np.sum(vertically_sorted_ds.rho_1d_sorted * vertically_sorted_ds.z_1d_sorted * dV_flat_1d_sorted)
 
-def integrated_potential_energies(ds, time_idx, test=False, sorting_method="sorting"):
+def integrated_potential_energies(ds, time_idx, test=False, sorting_method="vertically_flattened"):
     """
     Calculate volume-integrated potential energies (APE, TPE, RPE)
 
@@ -273,7 +273,7 @@ def integrated_potential_energies(ds, time_idx, test=False, sorting_method="sort
 #---
 
 #+++ Integrated APE, TPE, RPE time series calculations
-def integrated_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting_method="sorting"):
+def integrated_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting_method="vertically_flattened"):
     """
     Calculate volume-integrated potential energies for all time steps
 
@@ -696,7 +696,7 @@ def vectorized_local_APE_precomputed_integral(ds0, vertically_sorted_ds, use_num
 #---
 
 #+++ Local APE and TPE time series calculations
-def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting_method="sorting",
+def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting_method="vertically_flattened",
                                         ape_method="on_the_fly", use_numpy_version=True):
     """
     Calculate local APE and TPE fields for all time steps
@@ -744,7 +744,7 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting
         ds_t = ds.isel(time=i)
 
         # Perform vertical sorting
-        if sorting_method == "sorting":
+        if sorting_method == "vertically_flattened":
             vertically_sorted_ds, threed_sorted_ds = vertical_sort_density_by_flattening(ds_t.rho, ds_t.dV, ds.LxLy,
                 test=test, z_min=ds.z_min, Lz=ds.Lz)
         elif sorting_method == "PDF":
