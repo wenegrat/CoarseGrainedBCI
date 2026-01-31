@@ -662,7 +662,7 @@ def vectorized_local_APE_precomputed_integral(ds0, vertically_sorted_ds, use_num
         ρ_sorted_array = vertically_sorted_ds.rho_1d_sorted.values
         dz_sorted_array = vertically_sorted_ds.dz_1d_sorted.values
         z_sorted_array = vertically_sorted_ds.z_1d_sorted.values
-        
+
         # Call numpy function directly with 3D arrays
         ape_values = _local_APE_precomputed_integral_numpy(
             ds0.rho.values,
@@ -671,7 +671,7 @@ def vectorized_local_APE_precomputed_integral(ds0, vertically_sorted_ds, use_num
             dz_sorted_array,
             z_sorted_array
         )
-        
+
         # Wrap result in xarray
         result = xr.DataArray(
             ape_values,

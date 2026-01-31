@@ -86,8 +86,6 @@ def calculate_local_ape(func, *args, **kwargs):
 
 local_potential_energies = calculate_local_ape(local_potential_energies_timeseries, ds, test=False, verbose_level=1, use_numpy_version=True, ape_method="on_the_fly")
 local_potential_energies = calculate_local_ape(local_potential_energies_timeseries, ds, test=False, verbose_level=1, use_numpy_version=True, ape_method="precomputed_integral")
-local_potential_energies = calculate_local_ape(local_potential_energies_timeseries, ds, test=False, verbose_level=1, use_numpy_version=False, ape_method="on_the_fly")
-local_potential_energies = calculate_local_ape(local_potential_energies_timeseries, ds, test=False, verbose_level=1, use_numpy_version=False, ape_method="precomputed_integral")
 pause
 
 integrated_local_potential_energies = integrate(local_potential_energies[["ape", "tpe"]], ds.dV)
