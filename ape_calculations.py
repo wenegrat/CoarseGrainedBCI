@@ -658,15 +658,26 @@ def vectorized_local_APE_precomputed_integral(ds0, vertically_sorted_ds, use_num
 
     # Use apply_ufunc with vectorize=True to apply the scalar function to all points
     if use_numpy_version:
-        result = xr.apply_ufunc(
-            _local_APE_precomputed_integral_numpy,
+        # Extract sorted arrays for direct call to numpy function
+        ρ_sorted_array = vertically_sorted_ds.rho_1d_sorted.values
+        dz_sorted_array = vertically_sorted_ds.dz_1d_sorted.values
+        z_sorted_array = vertically_sorted_ds.z_1d_sorted.values
+        
+        # Call numpy function directly with 3D arrays
+        ape_values = _local_APE_precomputed_integral_numpy(
             ds0.rho.values,
             z_broadcast.values,
-            vectorize=True,
-            dask="allowed",
-            kwargs={
-                "vertically_sorted_ds": vertically_sorted_ds,
-            }
+            ρ_sorted_array,
+            dz_sorted_array,
+            z_sorted_array
+        )
+        
+        # Wrap result in xarray
+        result = xr.DataArray(
+            ape_values,
+            dims=ds0.rho.dims,
+            coords=ds0.rho.coords,
+            name='local_ape'
         )
     else:
         result = xr.apply_ufunc(
