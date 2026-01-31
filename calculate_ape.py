@@ -10,6 +10,7 @@ and the approaches used in CrossScaleAPE notebooks.
 import numpy as np
 import xarray as xr
 import scipy.integrate as integrate
+import time
 from ape_calculations import (
     integrated_potential_energies_timeseries,
     integrated_KE_timeseries,
@@ -65,7 +66,12 @@ if False:
 global_potential_energies = integrated_potential_energies_timeseries(ds, test=False, verbose_level=1)
 
 # Calculate local APE time series
+print("\nCalculating local APE time series...")
+start_time = time.time()
 local_potential_energies = local_potential_energies_timeseries(ds, test=False, verbose_level=1, use_numpy_version=True)
+elapsed_time = time.time() - start_time
+print(f"Elapsed wall time: {elapsed_time:.2f} seconds ({elapsed_time/60:.2f} minutes)")
+
 integrated_local_potential_energies = integrate(local_potential_energies[["ape", "tpe"]], ds.dV)
 integrated_local_potential_energies["rpe"] = (local_potential_energies.rho_sorted * local_potential_energies.dz_sorted).sum("z_1d_sorted")
 
