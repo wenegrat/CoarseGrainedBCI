@@ -507,18 +507,22 @@ def vectorized_local_APE_on_the_fly_integral(ds0, vertically_sorted_ds, use_nump
 #---
 
 #+++ Local APE calculations using precomputed integral method
-def _local_APE_precomputed_integral_numpy(ρ_3d, z_3d, ρ_sorted_array, dz_sorted_array, z_sorted_array):
+def _local_APE_precomputed_integral_numpy(ρ_3d, z_3d, ρ_sorted_array, z_sorted_array, cumulative_rho_dz, cumulative_dz):
     """
     Compute APE for all points using cumulative integrals - fully vectorized, no loops!
 
-    This is the fastest method - precomputes cumulative integrals so each point
+    This is the fastest method - uses precomputed cumulative integrals so each point
     calculation becomes just array lookups and arithmetic operations.
 
     Strategy: Use broadcasting and vectorized operations to compute all points at once.
+
+    Parameters
+    ----------
+    cumulative_rho_dz : np.ndarray
+        Precomputed cumulative integral of ρ * dz, with leading 0
+    cumulative_dz : np.ndarray
+        Precomputed cumulative integral of dz, with leading 0
     """
-    # Precompute cumulative integrals once
-    cumulative_rho_dz = np.concatenate([[0], np.cumsum(ρ_sorted_array * dz_sorted_array)])
-    cumulative_dz = np.concatenate([[0], np.cumsum(dz_sorted_array)])
 
     # Flatten inputs
     z_flat = z_3d.ravel()
@@ -663,13 +667,18 @@ def vectorized_local_APE_precomputed_integral(ds0, vertically_sorted_ds, use_num
         dz_sorted_array = vertically_sorted_ds.dz_1d_sorted.values
         z_sorted_array = vertically_sorted_ds.z_1d_sorted.values
 
+        # Precompute cumulative integrals once (with leading 0)
+        cumulative_rho_dz = np.concatenate([[0], np.cumsum(ρ_sorted_array * dz_sorted_array)])
+        cumulative_dz = np.concatenate([[0], np.cumsum(dz_sorted_array)])
+
         # Call numpy function directly with 3D arrays
         ape_values = _local_APE_precomputed_integral_numpy(
             ds0.rho.values,
             z_broadcast.values,
             ρ_sorted_array,
-            dz_sorted_array,
-            z_sorted_array
+            z_sorted_array,
+            cumulative_rho_dz,
+            cumulative_dz
         )
 
         # Wrap result in xarray
