@@ -21,6 +21,7 @@ from ape_calculations import (
     load_data,
     integrate,
     g,
+    ρ0,
 )
 from ape_plots import plot_energy_timeseries, plot_potential_energies
 from matplotlib import pyplot as plt
@@ -28,8 +29,7 @@ import pynanigans as pn
 
 # File path to the simulation output
 filename = "output/kelvin_helmholtz_instability_64x1x64.nc"
-rho_0 = 1025
-ds = load_data(filename, ρ0=rho_0)
+ds = load_data(filename)
 
 #+++ Test that convertion between ρ and b is correct
 ds0 = ds.sel(time=[100])
@@ -37,7 +37,7 @@ TPE_online_from_ρ = g * integrate(ds0.rho_z, ds0.dV) # g ∭ ρz dV
 TPE_online_from_b = integrate(ds0.pe, ds0.dV) # ∭ (-ρ₀ bz) dV
 
 TPE_offline_from_ρ = integrated_total_potential_energy(ds0.rho, ds=ds0) # g ∭ ρz dV
-TPE_offline_from_b = - rho_0 * integrate(ds0.b * ds0.z_aac, ds0.dV)
+TPE_offline_from_b = - ρ0 * integrate(ds0.b * ds0.z_aac, ds0.dV)
 
 assert np.isclose(TPE_online_from_ρ, TPE_online_from_b, rtol=1e-3), f"Mismatch: rho_z integral={TPE_online_from_ρ}, -pe integral={TPE_online_from_b}"
 assert np.isclose(TPE_online_from_ρ, TPE_offline_from_ρ, rtol=1e-3), f"Mismatch: rho_z integral={TPE_online_from_ρ}, offline integral={TPE_offline_from_ρ}"
@@ -50,7 +50,7 @@ rho0 = ds.rho.isel(time=0)
 vertically_sorted_ds = calculate_reference_potential_energy_profile(rho0, ds.dV, ds.LxLy, test=True, z_min=ds.z_min, Lz=ds.Lz)
 if False:
     val3 = integrated_reference_potential_energy(vertically_sorted_ds, ds.LxLy.values)
-    val4 = integrated_total_potential_energy(ds0.rho, ds=ds, ρ0=rho_0)
+    val4 = integrated_total_potential_energy(ds0.rho, ds=ds)
     assert np.isclose(val3, val4, rtol=1e-1), f"Mismatch: reference PE={val3}, total PE={val4}"
 #---
 
@@ -71,6 +71,7 @@ start_time = time.time()
 local_potential_energies = local_potential_energies_timeseries(ds, test=False, verbose_level=1, use_numpy_version=True)
 elapsed_time = time.time() - start_time
 print(f"Elapsed wall time: {elapsed_time:.2f} seconds ({elapsed_time/60:.2f} minutes)")
+pause
 
 integrated_local_potential_energies = integrate(local_potential_energies[["ape", "tpe"]], ds.dV)
 integrated_local_potential_energies["rpe"] = (local_potential_energies.rho_sorted * local_potential_energies.dz_sorted).sum("z_1d_sorted")
@@ -78,7 +79,7 @@ integrated_local_potential_energies["rpe"] = (local_potential_energies.rho_sorte
 # local_potential_energies.ape.squeeze().sel(time=slice(None, None, 9)).plot(col="time", col_wrap=3, robust=True)
 
 # Calculate KE time series
-KE = integrated_KE_timeseries(ds, ρ0=rho_0)
+KE = integrated_KE_timeseries(ds)
 # Print summary statistics
 APE = global_potential_energies.APE
 

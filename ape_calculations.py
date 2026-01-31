@@ -12,6 +12,7 @@ import warnings
 
 # Physical constants
 g = 9.81  # gravitational acceleration [m/s^2]
+ρ0 = 1025  # reference density [kg/m^3]
 
 #+++ Auxiliary functions
 def volume_sum(da, dims=("x_caa", "y_aca", "z_aac")):
@@ -23,7 +24,7 @@ def integrate(da, dV, dims=("x_caa", "y_aca", "z_aac")):
 #---
 
 #+++ Load data
-def load_data(filename, ρ0=1025):
+def load_data(filename):
     """Load the simulation output"""
     print(f"Loading data from {filename}...")
     ds = xr.open_dataset(filename, decode_times=False)
@@ -341,7 +342,7 @@ def _create_inverse_sort_lookup(vertically_sorted_ds, verbose=False):
 #---
 
 #+++ Local APE calculations using on-the-fly integral method
-def _local_APE_on_the_fly_integral_xarray(ρ, z, vertically_sorted_ds, ρ0=1025):
+def _local_APE_on_the_fly_integral_xarray(ρ, z, vertically_sorted_ds):
     """
     Compute APE for a single point using summation method (xarray inputs)
 
@@ -378,95 +379,8 @@ def _local_APE_on_the_fly_integral_xarray(ρ, z, vertically_sorted_ds, ρ0=1025)
 
     return -ρ0 * (b_l * signed_dz_flat).sum("z_1d_sorted") # Convert to APE by unit of volume
 
-def _local_APE_on_the_fly_integral_numpy_vectorized_fast(ρ_3d, z_3d, ρ_sorted_array, dz_sorted_array, z_sorted_array, ρ0=1025):
-    """
-    Compute APE for all points using cumulative integrals - fully vectorized, no loops!
 
-    This is the fastest method - precomputes cumulative integrals so each point
-    calculation becomes just array lookups and arithmetic operations.
-
-    Strategy: Use broadcasting and vectorized operations to compute all points at once.
-    """
-    # Precompute cumulative integrals once
-    cumulative_rho_dz = np.concatenate([[0], np.cumsum(ρ_sorted_array * dz_sorted_array)])
-    cumulative_dz = np.concatenate([[0], np.cumsum(dz_sorted_array)])
-
-    # Flatten inputs
-    z_flat = z_3d.ravel()
-    ρ_flat = ρ_3d.ravel()
-    n_points = len(z_flat)
-
-    # Find z indices for all points at once
-    z_indices = np.searchsorted(z_sorted_array, z_flat)
-
-    # Find z_0 for each point - this is the bottleneck
-    # We need to find, for each point's density, the closest z in sorted profile
-    z_0_indices = np.zeros(n_points, dtype=np.int32)
-
-    # Get unique densities to process in batches
-    unique_densities = np.unique(ρ_flat)
-
-    for ρ_val in unique_densities:
-        # All points with this density
-        point_mask = (ρ_flat == ρ_val)
-        n_points_with_density = np.sum(point_mask)
-
-        if n_points_with_density == 0:
-            continue
-
-        # All sorted z positions with this density
-        density_mask = (ρ_sorted_array == ρ_val)
-        z_possibilities_idx = np.where(density_mask)[0]
-
-        if len(z_possibilities_idx) == 0:
-            z_0_indices[point_mask] = 0  # Fallback
-            continue
-
-        z_possibilities = z_sorted_array[z_possibilities_idx]
-
-        # For all points with this density, find closest z_0 (vectorized)
-        z_points = z_flat[point_mask]
-
-        # Broadcasting: (n_points_with_density, n_possibilities)
-        distances = np.abs(z_points[:, np.newaxis] - z_possibilities[np.newaxis, :])
-        closest_possibility_idx = np.argmin(distances, axis=1)
-        z_0_indices[point_mask] = z_possibilities_idx[closest_possibility_idx]
-
-    # Now compute APE for all points at once (fully vectorized!)
-    # Get cumulative integrals at z and z_0 for all points
-    rho_integral_at_z = cumulative_rho_dz[z_indices]
-    rho_integral_at_z0 = cumulative_rho_dz[z_0_indices]
-    dz_integral_at_z = cumulative_dz[z_indices]
-    dz_integral_at_z0 = cumulative_dz[z_0_indices]
-
-    # Simpler approach: just compute absolute difference, then apply sign
-    rho_integral = np.abs(rho_integral_at_z - rho_integral_at_z0)
-    dz_integral = np.abs(dz_integral_at_z - dz_integral_at_z0)
-
-    # Sign convention: positive if z > z_0, negative if z < z_0
-    sign = np.where(z_indices > z_0_indices, 1.0, -1.0)
-    # Compute integrals from z_0 to z (always in that direction)
-    # The sign of the integral depends on whether z > z_0 or z < z_0
-    # When z > z_0: integral from z_0 to z is positive direction
-    # When z < z_0: integral from z_0 to z is negative direction (we integrate backwards)
-
-    # For z > z_0: ∫_{z_0}^{z} = cumulative[z] - cumulative[z_0]
-    # For z < z_0: ∫_{z_0}^{z} = -(∫_{z}^{z_0}) = -(cumulative[z_0] - cumulative[z])
-
-    # But the xarray version uses signed_dz based on direction:
-    # if z > z_0: signed_dz = +dz (integrate forward)
-    # if z < z_0: signed_dz = -dz (integrate backward)
-
-    # So the integral is always computed as if going from z_0 to z:
-    # ∫_{z_0}^{z} ρ_sorted dz = sign * (cumulative[z_end] - cumulative[z_start])
-    # where z_start = min(z, z_0), z_end = max(z, z_0)
-    # and sign = +1 if z > z_0, -1 if z < z_0
-    ape_flat = sign * g * (ρ_flat * dz_integral - rho_integral)
-
-    return ape_flat.reshape(ρ_3d.shape)
-
-
-def _local_APE_on_the_fly_integral_numpy(ρ, z, vertically_sorted_ds, ρ0=1025):
+def _local_APE_on_the_fly_integral_numpy(ρ, z, vertically_sorted_ds):
     """
     Compute APE for a single point using summation method (scalar inputs) according to the
     definition:
@@ -546,6 +460,8 @@ def vectorized_local_APE_on_the_fly_integral(ds0, vertically_sorted_ds, use_nump
         Whether to use the numpy optimized version
     verbose : bool
         Whether to print progress messages
+    ρ0 : float
+        Reference density
 
     Returns
     -------
@@ -560,34 +476,12 @@ def vectorized_local_APE_on_the_fly_integral(ds0, vertically_sorted_ds, use_nump
             print("Computing local APE using xarray method...")
 
     if use_numpy_version:
-        # Extract numpy arrays once (not per point!)
-        ρ_sorted_array = vertically_sorted_ds.rho_1d_sorted.values
-        dz_sorted_array = vertically_sorted_ds.dz_1d_sorted.values
-        z_sorted_array = vertically_sorted_ds.z_1d_sorted.values
-
-        # Broadcast z coordinates to match rho shape
-        z_broadcast = (xr.zeros_like(ds0.rho) + ds0.z_aac).values
-        ρ_3d = ds0.rho.values
-
-        # Call fast vectorized function with cumulative integrals
-        ape_values = _local_APE_on_the_fly_integral_numpy_vectorized_fast(
-            ρ_3d, z_broadcast, ρ_sorted_array, dz_sorted_array, z_sorted_array
-        )
-
-        # Wrap result in xarray with proper coordinates
-        result = xr.DataArray(
-            ape_values,
-            dims=ds0.rho.dims,
-            coords=ds0.rho.coords,
-            name='local_ape'
-        )
-    else:
         # Broadcast z coordinates to match rho shape
         z_broadcast = xr.zeros_like(ds0.rho) + ds0.z_aac
 
         # Use apply_ufunc with vectorize=True to apply the scalar function to all points
         result = xr.apply_ufunc(
-            _local_APE_on_the_fly_integral_xarray,
+            _local_APE_on_the_fly_integral_numpy,
             ds0.rho,
             z_broadcast,
             vectorize = True,
@@ -596,13 +490,96 @@ def vectorized_local_APE_on_the_fly_integral(ds0, vertically_sorted_ds, use_nump
                 vertically_sorted_ds = vertically_sorted_ds,
             )
         )
+    else:
+        # Broadcast z coordinates to match rho shape
+        z_broadcast = xr.zeros_like(ds0.rho) + ds0.z_aac
+
+        # Use apply_ufunc with vectorize=True to apply the scalar function to all points
+        result = xr.apply_ufunc(_local_APE_on_the_fly_integral_xarray,
+                                ds0.rho,
+                                z_broadcast,
+                                vectorize = True,
+                                dask = "allowed",
+                                kwargs = dict(vertically_sorted_ds = vertically_sorted_ds))
 
     if verbose: print("Done!")
     return result
 #---
 
 #+++ Local APE calculations using precomputed integral method
-def _local_APE_precomputed_integral_scalar(ρ, z, vertically_sorted_ds):
+def _local_APE_precomputed_integral_numpy(ρ_3d, z_3d, ρ_sorted_array, dz_sorted_array, z_sorted_array):
+    """
+    Compute APE for all points using cumulative integrals - fully vectorized, no loops!
+
+    This is the fastest method - precomputes cumulative integrals so each point
+    calculation becomes just array lookups and arithmetic operations.
+
+    Strategy: Use broadcasting and vectorized operations to compute all points at once.
+    """
+    # Precompute cumulative integrals once
+    cumulative_rho_dz = np.concatenate([[0], np.cumsum(ρ_sorted_array * dz_sorted_array)])
+    cumulative_dz = np.concatenate([[0], np.cumsum(dz_sorted_array)])
+
+    # Flatten inputs
+    z_flat = z_3d.ravel()
+    ρ_flat = ρ_3d.ravel()
+    n_points = len(z_flat)
+
+    # Find z indices for all points at once
+    z_indices = np.searchsorted(z_sorted_array, z_flat)
+
+    # Find z_0 for each point - this is the bottleneck
+    # We need to find, for each point's density, the closest z in sorted profile
+    z_0_indices = np.zeros(n_points, dtype=np.int32)
+
+    # Get unique densities to process in batches
+    unique_densities = np.unique(ρ_flat)
+
+    for ρ_val in unique_densities:
+        # All points with this density
+        point_mask = (ρ_flat == ρ_val)
+        n_points_with_density = np.sum(point_mask)
+
+        if n_points_with_density == 0:
+            continue
+
+        # All sorted z positions with this density
+        density_mask = (ρ_sorted_array == ρ_val)
+        z_possibilities_idx = np.where(density_mask)[0]
+
+        if len(z_possibilities_idx) == 0:
+            z_0_indices[point_mask] = 0  # Fallback
+            continue
+
+        z_possibilities = z_sorted_array[z_possibilities_idx]
+
+        # For all points with this density, find closest z_0 (vectorized)
+        z_points = z_flat[point_mask]
+
+        # Broadcasting: (n_points_with_density, n_possibilities)
+        distances = np.abs(z_points[:, np.newaxis] - z_possibilities[np.newaxis, :])
+        closest_possibility_idx = np.argmin(distances, axis=1)
+        z_0_indices[point_mask] = z_possibilities_idx[closest_possibility_idx]
+
+    # Now compute APE for all points at once (fully vectorized!)
+    # Get cumulative integrals at z and z_0 for all points
+    rho_integral_at_z = cumulative_rho_dz[z_indices]
+    rho_integral_at_z0 = cumulative_rho_dz[z_0_indices]
+    dz_integral_at_z = cumulative_dz[z_indices]
+    dz_integral_at_z0 = cumulative_dz[z_0_indices]
+
+    # Simpler approach: just compute absolute difference, then apply sign
+    rho_integral = np.abs(rho_integral_at_z - rho_integral_at_z0)
+    dz_integral = np.abs(dz_integral_at_z - dz_integral_at_z0)
+
+    # Sign convention: positive if z > z_0, negative if z < z_0
+    sign = np.where(z_indices > z_0_indices, 1.0, -1.0)
+    ape_flat = sign * g * (ρ_flat * dz_integral - rho_integral)
+
+    return ape_flat.reshape(ρ_3d.shape)
+
+
+def _local_APE_precomputed_integral_xarray(ρ, z, vertically_sorted_ds):
     """
     Compute APE for a single point using cumulative integral method (scalar inputs) according to the
     definition:
@@ -637,9 +614,6 @@ def _local_APE_precomputed_integral_scalar(ρ, z, vertically_sorted_ds):
     z_possibilities = ρ_sorted_profile.where(ρ_sorted_profile == ρ, drop=True).z_1d_sorted
     z_0 = z_possibilities[abs(z_possibilities - z).argmin()]
 
-    # Calculate displacement
-    displacement = z - z_0
-
     # Get cumulative integral of sorted density profile
     cumulative_ρ_sorted_integral = vertically_sorted_ds["rho_1d_sorted_cumulative_integral"]
     ρ_sorted_integral = (cumulative_ρ_sorted_integral.sel(z_1d_sorted=z, method="nearest") -
@@ -656,7 +630,7 @@ def _local_APE_precomputed_integral_scalar(ρ, z, vertically_sorted_ds):
 
     return float(local_ape)
 
-def vectorized_local_APE_precomputed_integral(ds0, vertically_sorted_ds, verbose=False):
+def vectorized_local_APE_precomputed_integral(ds0, vertically_sorted_ds, use_numpy_version=True, verbose=False):
     """
     Vectorized calculation of local APE using cumulative integral method for all grid points
 
@@ -683,16 +657,28 @@ def vectorized_local_APE_precomputed_integral(ds0, vertically_sorted_ds, verbose
     z_broadcast = xr.zeros_like(ds0.rho) + ds0.z_aac
 
     # Use apply_ufunc with vectorize=True to apply the scalar function to all points
-    result = xr.apply_ufunc(
-        _local_APE_precomputed_integral_scalar,
-        ds0.rho,
-        z_broadcast,
-        vectorize=True,
-        dask="allowed",
-        kwargs={
-            "vertically_sorted_ds": vertically_sorted_ds,
-        }
-    )
+    if use_numpy_version:
+        result = xr.apply_ufunc(
+            _local_APE_precomputed_integral_numpy,
+            ds0.rho.values,
+            z_broadcast.values,
+            vectorize=True,
+            dask="allowed",
+            kwargs={
+                "vertically_sorted_ds": vertically_sorted_ds,
+            }
+        )
+    else:
+        result = xr.apply_ufunc(
+            _local_APE_precomputed_integral_xarray,
+            ds0.rho,
+            z_broadcast,
+            vectorize=True,
+            dask="allowed",
+            kwargs={
+                "vertically_sorted_ds": vertically_sorted_ds,
+            }
+        )
 
     if verbose: print("Done!")
     return result
@@ -700,7 +686,7 @@ def vectorized_local_APE_precomputed_integral(ds0, vertically_sorted_ds, verbose
 
 #+++ Local APE and TPE time series calculations
 def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting_method="sorting",
-                                        ape_method="on_the_fly", use_numpy_version=False):
+                                        ape_method="on_the_fly", use_numpy_version=True):
     """
     Calculate local APE and TPE fields for all time steps
 
@@ -721,6 +707,8 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting
         Method for computing local APE ("on_the_fly" or "precomputed_integral")
     use_numpy_version : bool
         Whether to use numpy-optimized version (only for on_the_fly method)
+    ρ0 : float
+        Reference density
 
     Returns
     -------
@@ -774,6 +762,7 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting
             local_ape = vectorized_local_APE_precomputed_integral(
                 ds_t, vertically_sorted_ds,
                 verbose=verbose_level > 1,
+                use_numpy_version=use_numpy_version,
             )
         else:
             raise ValueError(f"Invalid ape_method: {ape_method}. Must be 'on_the_fly' or 'precomputed_integral'")
@@ -811,7 +800,7 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting
 #---
 
 #+++ Calculate kinetic energy
-def local_KE(u, v, w, ρ0=1025):
+def local_KE(u, v, w):
     """
     Calculate local kinetic energy density
 
@@ -824,12 +813,10 @@ def local_KE(u, v, w, ρ0=1025):
     -------
     xr.DataArray
         Local KE density: ρ0 * (u^2 + v^2 + w^2) / 2
-    ρ0 : float
-        Reference density
     """
     return ρ0 * (u**2 + v**2 + w**2) / 2
 
-def integrated_KE(ds, ρ0=1025):
+def integrated_KE(ds):
     """
     Calculate volume-integrated kinetic energy
 
@@ -848,11 +835,11 @@ def integrated_KE(ds, ρ0=1025):
     w = ds.w
     dV = ds.dV
 
-    ke = local_KE(u, v, w, ρ0=ρ0)
+    ke = local_KE(u, v, w)
     KE = (ke * dV).sum(("x_caa", "y_aca", "z_aac"))
     return KE
 
-def integrated_KE_timeseries(ds, ρ0=1025, verbose=False):
+def integrated_KE_timeseries(ds, verbose=False):
     """
     Calculate volume-integrated KE for all time steps
 
@@ -867,7 +854,7 @@ def integrated_KE_timeseries(ds, ρ0=1025, verbose=False):
         Time series of volume-integrated KE
     """
     if verbose: print("Calculating KE time series...")
-    KE = integrated_KE(ds, ρ0=ρ0)
+    KE = integrated_KE(ds)
     if verbose: print("\nDone!")
     return KE
 #---
