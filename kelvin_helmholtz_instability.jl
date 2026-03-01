@@ -15,7 +15,7 @@ Ly = 5
 if has_cuda_gpu()
     arch = GPU()
     Nz = 1024
-    x_aspect_ratio = 4  # Δx / Δz ratio
+    x_aspect_ratio = 2  # Δx / Δz ratio
     y_aspect_ratio = 8  # Δy / Δz ratio
 else
     arch = CPU()
