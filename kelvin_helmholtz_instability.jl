@@ -6,22 +6,33 @@ using Printf
 using CUDA: has_cuda_gpu
 using Oceananigans.Architectures: on_architecture
 
+include("utils.jl")
+
 #+++ Create grid
 Lx = Lz = 10
 Ly = 5
+
 if has_cuda_gpu()
     arch = GPU()
-    Nx = 256
-    Ny = Nx÷2
-    Nz = 512
-    @info "CUDA GPU detected! Running 3D simulation with $(Nx)×$(Ny)×$(Nz) grid on GPU"
+    Nz = 1024
+    x_aspect_ratio = 2  # Δx / Δz ratio
+    y_aspect_ratio = 8  # Δy / Δz ratio
 else
     arch = CPU()
-    Nx = 64
-    Ny = 1
     Nz = 256
-    @info "No CUDA GPU detected. Running 2D simulation with $(Nx)×$(Ny)×$(Nz) grid on CPU"
+    x_aspect_ratio = 4   # Δx / Δz ratio
+    y_aspect_ratio = Inf # Δy / Δz ratio
+    @info "No CUDA GPU detected"
+    @info "Cell aspect ratio: Δx/Δz = $(x_aspect_ratio)"
 end
+
+# Calculate horizontal resolutions based on aspect ratios
+Nx = round(Int, Nz * (Lx / Lz) / x_aspect_ratio)
+Ny = isinf(y_aspect_ratio) ? 1 : round(Int, Nz * (Ly / Lz) / y_aspect_ratio)
+
+# Adjust grid sizes to be factorizable by 2, 3, and 5 (for FFT performance)
+Nx = closest_factor_number((2, 3, 5), Nx)
+Ny = closest_factor_number((2, 3, 5), Ny)
 
 grid = RectilinearGrid(arch; size=(Nx, Ny, Nz),
                        x=(-Lx/2, Lx/2), y=(-Ly/2, Ly/2), z=(-Lz/2, Lz/2),
@@ -29,10 +40,9 @@ grid = RectilinearGrid(arch; size=(Nx, Ny, Nz),
 #---
 
 #+++ Create model
-ν = 2e-3
 model = NonhydrostaticModel(grid;
-                            advection = UpwindBiased(order=5),
-                            closure = ScalarDiffusivity(ν=ν, κ=ν),
+                            advection = WENO(order=5),
+                            # closure = ScalarDiffusivity(ν=ν, κ=ν),
                             buoyancy = BuoyancyTracer(),
                             tracers = :b)
 u, v, w = model.velocities
@@ -122,6 +132,7 @@ NetCDFWriter(model, (; ω=vorticity, b),
 #---
 
 # Run simulation
+show_gpu_status()
 @info "Running Kelvin-Helmholtz instability simulation..."
 run!(simulation)
 
