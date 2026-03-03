@@ -46,7 +46,7 @@ def timeit(func):
 # File path to the simulation output
 filename = "output/kelvin_helmholtz_instability_64x1x64.nc"
 ds = load_dataset_and_grid(filename)
-ds = calculate_density_fields_from_buoyancy(ds)
+ds = calculate_density_fields_from_buoyancy(ds, compute_density_z=True)
 
 #+++ Test that convertion between ρ and b is correct
 ds0 = ds.sel(time=[100])

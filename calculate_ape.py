@@ -49,15 +49,19 @@ gaussian_filter = gcm_filters.Filter(
 
 ds["b̄"] = gaussian_filter.apply(ds.b, dims=["x_caa", "y_aca"]) # An overbar denotes a filtering operation
 print(f"Buoyancy filtered with length scale: {filter_length_scale}")
+
+ds_filt = ds[["b̄"]].copy()
+ds_full = ds[["b"]].copy()
 #---
 
 #+++ Calculate density fields
 print("\n" + "="*60)
 print("Calculating density fields...")
 print("="*60)
-ds = calculate_density_fields_from_buoyancy(ds, buoyancy_name="b", density_name="ρ")
-ds = calculate_density_fields_from_buoyancy(ds, buoyancy_name="b̄", density_name="ρ̄")
-print("Density fields calculated: ρ, ρ_z, Z, ρ̄, ρ̄_z")
+ds_full = calculate_density_fields_from_buoyancy(ds_full, buoyancy_name="b", density_name="ρ")
+ds_filt = calculate_density_fields_from_buoyancy(ds_filt, buoyancy_name="b̄", density_name="ρ̄")
+print("Density fields calculated: ρ, Z, ρ̄")
+pause
 #---
 
 #+++ Calculate local APE using precomputed_integral method

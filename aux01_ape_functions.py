@@ -16,7 +16,7 @@ g = 9.81  # gravitational acceleration [m/s^2]
 ρ0 = 1025  # reference density [kg/m^3]
 
 #+++ Calculate density fields (preprocessing step)
-def calculate_density_fields_from_buoyancy(ds, ρ_ref=ρ0, buoyancy_name="b", density_name="rho"):
+def calculate_density_fields_from_buoyancy(ds, ρ_ref=ρ0, buoyancy_name="b", density_name="rho", compute_density_z=False):
     """
     Calculate density and related fields from buoyancy
 
@@ -30,16 +30,20 @@ def calculate_density_fields_from_buoyancy(ds, ρ_ref=ρ0, buoyancy_name="b", de
         Name of the buoyancy field in the dataset, default is "b"
     density_name : str, optional
         Name for the calculated density field, default is "rho"
+    compute_density_z : bool, optional
+        If True, also compute {density_name}_z = ρ₀·z + pe/g (≡ ρ·z) for
+        cross-checking TPE via the online pe field. Default is False.
 
     Returns
     -------
     ds : xr.Dataset
-        Dataset with added fields: {density_name}, {density_name}_z, Z
+        Dataset with added fields: {density_name}, Z, and optionally {density_name}_z
     """
     # Convert buoyancy to density
     # b = g * (ρ0 - rho) / ρ0  =>  rho = ρ0 * (1 - b/g)
     ds[density_name] = ρ_ref * (1 - ds[buoyancy_name] / g)
-    ds[f"{density_name}_z"] = (ρ_ref * ds.z_aac + ds.pe / g)  # pe = -b*z
+    if compute_density_z:
+        ds[f"{density_name}_z"] = (ρ_ref * ds.z_aac + ds.pe / g)  # pe = -b*z
 
     # Add coordinate arrays
     if "z_aac" in ds.coords:
