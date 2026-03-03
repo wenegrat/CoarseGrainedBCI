@@ -72,8 +72,9 @@ local_potential_energies = local_potential_energies_timeseries(
     test=False,
     verbose_level=1,
     use_numpy_version=True,
-    ape_method="precomputed_integral"
-    )
+    ape_method="precomputed_integral",
+    rho_name="ρ",
+)
 #---
 
 #+++ Filter local APE
@@ -93,7 +94,8 @@ print("="*60)
 output_ds = xr.Dataset({
     "ape_local": local_potential_energies.ape,
     "ape_filtered": ape_filtered,
-    "rho_filtered": ds.rho_filtered,
+    "rho": ds.ρ,
+    "rho_filtered": ds["ρ̄"],
 })
 
 output_filename = "kelvin_helmholtz_ape_local.nc"
