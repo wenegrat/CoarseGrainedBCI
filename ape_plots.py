@@ -146,3 +146,88 @@ def plot_potential_energies(time, TPE=None, RPE=None, APE=None):
     plt.tight_layout()
     return fig
 #---
+
+#+++ Plot all dataset variables
+def plot_dataset_variables(ds, time_stride=None, col_wrap=5, cmap="RdBu_r", robust=True, figsize=None):
+    """
+    Plot all variables in a dataset as spatial-temporal plots
+
+    This function creates facet plots for each variable in the dataset,
+    showing multiple time steps in a grid layout.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        Dataset containing variables to plot
+    time_stride : int, optional
+        Stride for selecting time steps (e.g., 6 means every 6th time step).
+        If None, plots all time steps.
+    col_wrap : int, optional
+        Number of columns in the facet grid, default is 5
+    cmap : str, optional
+        Colormap to use, default is "RdBu_r"
+    robust : bool, optional
+        If True, use robust colorbar limits (2nd and 98th percentiles), default is True
+    figsize : tuple, optional
+        Figure size (width, height) for each variable plot
+
+    Returns
+    -------
+    dict
+        Dictionary mapping variable names to their figure objects
+    """
+    import matplotlib.pyplot as plt
+
+    figures = {}
+
+    # Determine time selection
+    if time_stride is not None:
+        time_sel = slice(None, None, time_stride)
+    else:
+        time_sel = slice(None, None)
+
+    # Loop through all data variables in the dataset
+    for var_name in ds.data_vars:
+        var = ds[var_name]
+
+        # Check if variable has time dimension
+        if "time" not in var.dims:
+            print(f"Skipping {var_name}: no time dimension")
+            continue
+
+        # Check if variable has spatial dimensions
+        spatial_dims = [d for d in var.dims if d not in ["time"]]
+        if len(spatial_dims) == 0:
+            print(f"Skipping {var_name}: no spatial dimensions")
+            continue
+
+        print(f"Plotting {var_name}...")
+
+        try:
+            # Squeeze to remove singleton dimensions and select time steps
+            var_plot = var.squeeze().sel(time=time_sel)
+
+            # Create the facet plot
+            if figsize is not None:
+                fig = plt.figure(figsize=figsize)
+
+            plot = var_plot.plot(
+                col="time",
+                col_wrap=col_wrap,
+                cmap=cmap,
+                robust=robust,
+            )
+
+            # Get the figure from the facet grid
+            fig = plt.gcf()
+            fig.suptitle(f"{var_name}", fontsize=14, y=1.02)
+
+            figures[var_name] = fig
+
+        except Exception as e:
+            print(f"Error plotting {var_name}: {e}")
+            continue
+
+    return figures
+#---
+

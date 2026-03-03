@@ -19,6 +19,7 @@ from aux01_ape_functions import (
     calculate_density_fields_from_buoyancy,
     local_potential_energies_timeseries,
 )
+from ape_plots import plot_dataset_variables
 #---
 
 #+++ Configuration
@@ -93,5 +94,12 @@ output_ds = xr.Dataset({
 
 output_filename = filename.replace(".nc", "_ape_local.nc")
 output_ds.to_netcdf(output_filename)
-print(f"Results saved to: {output_filename}")
+print(f"\nResults saved to: {output_filename}")
+#---
+
+#+++ Plot all variables in output_ds
+print("\n" + "="*60)
+print("Creating plots...")
+print("="*60)
+figures = plot_dataset_variables(output_ds[["Ea(ρ, z)", "Ea(ρ̄, z)", "Ēa(ρ, z) - Ea(ρ̄, z)"]], time_stride=6, col_wrap=5, cmap="RdBu_r", robust=True)
 #---
