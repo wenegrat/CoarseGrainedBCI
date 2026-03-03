@@ -57,9 +57,9 @@ print(f"Buoyancy filtered with length scale: {filter_length_scale}")
 print("\n" + "="*60)
 print("Calculating density fields...")
 print("="*60)
-ds = calculate_density_fields_from_buoyancy(ds, buoyancy_name="b", density_name="rho")
-ds = calculate_density_fields_from_buoyancy(ds, buoyancy_name="b̄", density_name="rho_filtered")
-print("Density fields calculated: rho, rho_z, Z, rho_filtered, rho_filtered_z")
+ds = calculate_density_fields_from_buoyancy(ds, buoyancy_name="b", density_name="ρ")
+ds = calculate_density_fields_from_buoyancy(ds, buoyancy_name="b̄", density_name="ρ̄")
+print("Density fields calculated: ρ, ρ_z, Z, ρ̄, ρ̄_z")
 #---
 
 #+++ Calculate local APE using precomputed_integral method
@@ -67,17 +67,13 @@ print("\n" + "="*60)
 print("Calculating local APE...")
 print("="*60)
 
-@timeit
-def calculate_local_ape():
-    return local_potential_energies_timeseries(
-        ds,
-        test=False,
-        verbose_level=1,
-        use_numpy_version=True,
-        ape_method="precomputed_integral"
+local_potential_energies = local_potential_energies_timeseries(
+    ds,
+    test=False,
+    verbose_level=1,
+    use_numpy_version=True,
+    ape_method="precomputed_integral"
     )
-
-local_potential_energies = calculate_local_ape()
 #---
 
 #+++ Filter local APE
