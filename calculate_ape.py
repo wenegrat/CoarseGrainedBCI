@@ -9,30 +9,28 @@ Workflow:
 4. Filter local APE with length scale 0.8
 """
 
+#+++ Imports
 import numpy as np
 import xarray as xr
 import gcm_filters
 from ape_calculations import load_data, local_potential_energies_timeseries
 from aux00_utils import timeit
+#---
 
-# ============================================================================
-# Configuration
-# ============================================================================
+#+++ Configuration
 filename = "output/kelvin_helmholtz_instability_64x1x64.nc"
 filter_length_scale = 0.8  # Length scale for filtering
+#---
 
-# ============================================================================
-# Load data
-# ============================================================================
+#+++ Load data
 print("="*60)
 print("Loading data...")
 print("="*60)
 ds = load_data(filename)
 print(f"Dataset loaded: {len(ds.time)} time steps")
+#---
 
-# ============================================================================
-# Filter density field
-# ============================================================================
+#+++ Filter density field
 print("\n" + "="*60)
 print("Filtering density field...")
 print("="*60)
@@ -47,10 +45,9 @@ gaussian_filter = gcm_filters.Filter(
 
 ds["rho_filtered"] = gaussian_filter.apply(ds.rho, dims=["x_caa", "y_aca"])
 print(f"Density filtered with length scale: {filter_length_scale}")
+#---
 
-# ============================================================================
-# Calculate local APE using precomputed_integral method
-# ============================================================================
+#+++ Calculate local APE using precomputed_integral method
 print("\n" + "="*60)
 print("Calculating local APE...")
 print("="*60)
@@ -66,20 +63,18 @@ def calculate_local_ape():
     )
 
 local_potential_energies = calculate_local_ape()
+#---
 
-# ============================================================================
-# Filter local APE
-# ============================================================================
+#+++ Filter local APE
 print("\n" + "="*60)
 print("Filtering local APE...")
 print("="*60)
 
 ape_filtered = gaussian_filter.apply(local_potential_energies.ape, dims=["x_caa", "y_aca"])
 print(f"Local APE filtered with length scale: {filter_length_scale}")
+#---
 
-# ============================================================================
-# Save results
-# ============================================================================
+#+++ Save results
 print("\n" + "="*60)
 print("Saving results...")
 print("="*60)
@@ -94,3 +89,4 @@ output_filename = "kelvin_helmholtz_ape_local.nc"
 output_ds.to_netcdf(output_filename)
 print(f"Results saved to: {output_filename}")
 print("="*60)
+#---
