@@ -23,7 +23,7 @@ from ape_plots import plot_dataset_variables
 #---
 
 #+++ Configuration
-filename = "output/kelvin_helmholtz_instability_64x1x64.nc"
+filename = "output/kelvin_helmholtz_instability_64x1x256.nc"
 filter_length_scale = 0.8  # Length scale for filtering
 #---
 
@@ -38,6 +38,7 @@ print(f"Dataset loaded: {len(ds.time)} time steps")
 print("\n" + "="*60)
 print("Filtering buoyancy field...")
 
+filtered_dimensions = ["x_caa", "y_aca"]
 filter_scale = filter_length_scale * np.sqrt(12)
 gaussian_filter = gcm_filters.Filter(
     filter_scale=filter_scale,
@@ -46,7 +47,7 @@ gaussian_filter = gcm_filters.Filter(
     grid_type=gcm_filters.GridType.REGULAR,
 )
 
-ds["b̄"] = gaussian_filter.apply(ds.b, dims=["x_caa", "y_aca"]) # An overbar denotes a filtering operation
+ds["b̄"] = gaussian_filter.apply(ds.b, dims=filtered_dimensions) # An overbar denotes a filtering operation
 print(f"Buoyancy filtered with length scale: {filter_length_scale}")
 
 ds_filt = ds[["b̄", "dV", "LxLy"]].copy()
@@ -73,7 +74,7 @@ filt_local_potential_energies = local_potential_energies_timeseries(ds_filt, use
 print("\n" + "="*60)
 print("Filtering local APE...")
 
-full_local_ape_filtered = gaussian_filter.apply(full_local_potential_energies.ape, dims=["x_caa", "y_aca"])
+full_local_ape_filtered = gaussian_filter.apply(full_local_potential_energies.ape, dims=filtered_dimensions)
 print(f"Local APE filtered with length scale: {filter_length_scale}")
 
 subfilter_local_ape = full_local_ape_filtered - filt_local_potential_energies.ape
@@ -101,5 +102,5 @@ print(f"\nResults saved to: {output_filename}")
 print("\n" + "="*60)
 print("Creating plots...")
 print("="*60)
-figures = plot_dataset_variables(output_ds[["Ea(ρ, z)", "Ea(ρ̄, z)", "Ēa(ρ, z) - Ea(ρ̄, z)"]], time_stride=6, col_wrap=5, cmap="RdBu_r", robust=True)
+figures = plot_dataset_variables(output_ds[["Ea(ρ, z)", "Ea(ρ̄, z)", "Ēa(ρ, z) - Ea(ρ̄, z)"]], time_stride=6, col="time", col_wrap=5, cmap="RdBu_r", robust=True, x="x_caa")
 #---

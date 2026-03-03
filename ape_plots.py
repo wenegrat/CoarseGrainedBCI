@@ -148,7 +148,7 @@ def plot_potential_energies(time, TPE=None, RPE=None, APE=None):
 #---
 
 #+++ Plot all dataset variables
-def plot_dataset_variables(ds, time_stride=None, col_wrap=5, cmap="RdBu_r", robust=True, figsize=None):
+def plot_dataset_variables(ds, time_stride=None, figsize=None, **kwargs):
     """
     Plot all variables in a dataset as spatial-temporal plots
 
@@ -211,12 +211,7 @@ def plot_dataset_variables(ds, time_stride=None, col_wrap=5, cmap="RdBu_r", robu
             if figsize is not None:
                 fig = plt.figure(figsize=figsize)
 
-            plot = var_plot.plot(
-                col="time",
-                col_wrap=col_wrap,
-                cmap=cmap,
-                robust=robust,
-            )
+            plot = var_plot.plot(**kwargs)
 
             # Get the figure from the facet grid
             fig = plt.gcf()
