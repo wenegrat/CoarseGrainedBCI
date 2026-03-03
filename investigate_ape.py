@@ -12,7 +12,7 @@ import xarray as xr
 import scipy.integrate as integrate
 import time
 from functools import wraps
-from ape_calculations import (
+from aux01_ape_functions import (
     integrated_potential_energies_timeseries,
     integrated_KE_timeseries,
     local_potential_energies_timeseries,
@@ -21,10 +21,10 @@ from ape_calculations import (
     integrated_total_potential_energy,
     load_dataset_and_grid,
     calculate_density_fields_from_buoyancy,
-    integrate,
     g,
     ρ0,
 )
+from aux00_utils import integrate
 from ape_plots import plot_energy_timeseries, plot_potential_energies
 from matplotlib import pyplot as plt
 import pynanigans as pn
@@ -84,7 +84,7 @@ if True:
         filter_scale = gaussian_std * np.sqrt(12) # See docs: https://gcm-filters.readthedocs.io/en/latest/theory.html#filter-scale-and-shape
         gaussian_filter = gcm_filters.Filter(
             filter_scale=filter_scale,
-            dx_min=0.15625,
+            dx_min=min([ds.Δx_caa.min(), ds.Δy_aca.min()]),
             filter_shape=gcm_filters.FilterShape.GAUSSIAN,
             grid_type=gcm_filters.GridType.REGULAR,
         )

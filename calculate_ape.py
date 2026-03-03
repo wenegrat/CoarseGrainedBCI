@@ -14,12 +14,11 @@ Workflow:
 import numpy as np
 import xarray as xr
 import gcm_filters
-from ape_calculations import (
-    load_dataset_and_grid,
+from aux00_utils import load_dataset_and_grid
+from aux01_ape_functions import (
     calculate_density_fields_from_buoyancy,
     local_potential_energies_timeseries,
 )
-from aux00_utils import timeit
 import pynanigans as pn
 #---
 
