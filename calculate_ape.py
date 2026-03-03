@@ -27,6 +27,7 @@ from ape_calculations import (
 from ape_plots import plot_energy_timeseries, plot_potential_energies
 from matplotlib import pyplot as plt
 import pynanigans as pn
+import gcm_filters
 
 # Timing decorator
 def timeit(func):
@@ -69,10 +70,28 @@ if False:
 #---
 
 #+++ Test local calculations
-if False:
+if True:
     ds0 = ds.sel(time=[70], method="nearest")
     local_potential_energies = local_potential_energies_timeseries(ds0, test=True, verbose_level=0, use_numpy_version=True)
     global_potential_energies = integrated_potential_energies_timeseries(ds0, test=True, verbose_level=0)
+
+    gaussian_std_values = [0.1, 0.2, 0.4, 0.8, 1.6]
+    ape_filtered_list = []
+
+    for gaussian_std in gaussian_std_values:
+        filter_scale = gaussian_std * np.sqrt(12) # See docs: https://gcm-filters.readthedocs.io/en/latest/theory.html#filter-scale-and-shape
+        gaussian_filter = gcm_filters.Filter(
+            filter_scale=filter_scale,
+            dx_min=0.15625,
+            filter_shape=gcm_filters.FilterShape.GAUSSIAN,
+            grid_type=gcm_filters.GridType.REGULAR,
+        )
+
+        ape_filtered_single = gaussian_filter.apply(local_potential_energies.ape, dims=["x_caa", "y_aca"])
+        ape_filtered_list.append(ape_filtered_single)
+
+    # Stack results along a new gaussian_std dimension
+    ape_filtered = xr.concat(ape_filtered_list, dim=xr.DataArray(gaussian_std_values, dims="gaussian_std", name="gaussian_std"))
     pause
 #---
 
@@ -84,9 +103,8 @@ global_potential_energies = integrated_potential_energies_timeseries(ds, test=Fa
 def calculate_local_ape(func, *args, **kwargs):
     return func(*args, **kwargs)
 
-local_potential_energies = calculate_local_ape(local_potential_energies_timeseries, ds, test=False, verbose_level=1, use_numpy_version=True, ape_method="on_the_fly")
 local_potential_energies = calculate_local_ape(local_potential_energies_timeseries, ds, test=False, verbose_level=1, use_numpy_version=True, ape_method="precomputed_integral")
-pause
+# local_potential_energies = calculate_local_ape(local_potential_energies_timeseries, ds, test=False, verbose_level=1, use_numpy_version=True, ape_method="on_the_fly")
 
 integrated_local_potential_energies = integrate(local_potential_energies[["ape", "tpe"]], ds.dV)
 integrated_local_potential_energies["rpe"] = (local_potential_energies.rho_sorted * local_potential_energies.dz_sorted).sum("z_1d_sorted")
