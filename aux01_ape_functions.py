@@ -751,7 +751,7 @@ def vectorized_local_APE_precomputed_integral(ds0, vertically_sorted_ds, use_num
 
 #+++ Local APE and TPE time series calculations
 def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting_method="vertically_flattened",
-                                        ape_method="on_the_fly", use_numpy_version=True,
+                                        ape_method="precomputed_integral", use_numpy_version=True,
                                         density_name="rho", dV_name="dV", LxLy_name="LxLy",
                                         z_min_name="z_min", Lz_name="Lz", z_name="z_aac"):
     """

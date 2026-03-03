@@ -27,9 +27,8 @@ filter_length_scale = 0.8  # Length scale for filtering
 #---
 
 #+++ Load data and grid
-print("="*60)
+print("\n" + "="*60)
 print("Loading data and grid...")
-print("="*60)
 ds = load_dataset_and_grid(filename)
 print(f"Dataset loaded: {len(ds.time)} time steps")
 #---
@@ -37,7 +36,6 @@ print(f"Dataset loaded: {len(ds.time)} time steps")
 #+++ Filter buoyancy field
 print("\n" + "="*60)
 print("Filtering buoyancy field...")
-print("="*60)
 
 filter_scale = filter_length_scale * np.sqrt(12)
 gaussian_filter = gcm_filters.Filter(
@@ -50,58 +48,50 @@ gaussian_filter = gcm_filters.Filter(
 ds["b̄"] = gaussian_filter.apply(ds.b, dims=["x_caa", "y_aca"]) # An overbar denotes a filtering operation
 print(f"Buoyancy filtered with length scale: {filter_length_scale}")
 
-ds_filt = ds[["b̄"]].copy()
-ds_full = ds[["b"]].copy()
+ds_filt = ds[["b̄", "dV", "LxLy"]].copy()
+ds_full = ds[["b", "dV", "LxLy"]].copy()
 #---
 
 #+++ Calculate density fields
 print("\n" + "="*60)
 print("Calculating density fields...")
-print("="*60)
 ds_full = calculate_density_fields_from_buoyancy(ds_full, buoyancy_name="b", density_name="ρ")
 ds_filt = calculate_density_fields_from_buoyancy(ds_filt, buoyancy_name="b̄", density_name="ρ̄")
 print("Density fields calculated: ρ, Z, ρ̄")
-pause
 #---
 
 #+++ Calculate local APE using precomputed_integral method
 print("\n" + "="*60)
 print("Calculating local APE...")
-print("="*60)
 
-local_potential_energies = local_potential_energies_timeseries(
-    ds,
-    test=False,
-    verbose_level=1,
-    use_numpy_version=True,
-    ape_method="precomputed_integral",
-    density_name="ρ",
-)
+full_local_potential_energies = local_potential_energies_timeseries(ds_full, use_numpy_version=True, ape_method="precomputed_integral", density_name="ρ",)
+filt_local_potential_energies = local_potential_energies_timeseries(ds_filt, use_numpy_version=True, ape_method="precomputed_integral", density_name="ρ̄",)
 #---
 
 #+++ Filter local APE
 print("\n" + "="*60)
 print("Filtering local APE...")
-print("="*60)
 
-ape_filtered = gaussian_filter.apply(local_potential_energies.ape, dims=["x_caa", "y_aca"])
+full_local_ape_filtered = gaussian_filter.apply(full_local_potential_energies.ape, dims=["x_caa", "y_aca"])
 print(f"Local APE filtered with length scale: {filter_length_scale}")
+
+subfilter_local_ape = full_local_ape_filtered - filt_local_potential_energies.ape
 #---
 
 #+++ Save results
 print("\n" + "="*60)
 print("Saving results...")
-print("="*60)
 
 output_ds = xr.Dataset({
-    "ape_local": local_potential_energies.ape,
-    "ape_filtered": ape_filtered,
-    "rho": ds.ρ,
-    "rho_filtered": ds["ρ̄"],
+    "Ea(ρ, z)": full_local_potential_energies.ape,
+    "Ea(ρ̄, z)": filt_local_potential_energies.ape,
+    "Ēa(ρ, z)": full_local_ape_filtered,
+    "Ēa(ρ, z) - Ea(ρ̄, z)": subfilter_local_ape,
+    "ρ": ds_full.ρ,
+    "ρ̄": ds_filt.ρ̄,
 })
 
-output_filename = "kelvin_helmholtz_ape_local.nc"
+output_filename = filename.replace(".nc", "_ape_local.nc")
 output_ds.to_netcdf(output_filename)
 print(f"Results saved to: {output_filename}")
-print("="*60)
 #---
