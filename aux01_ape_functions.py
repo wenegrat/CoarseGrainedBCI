@@ -239,7 +239,7 @@ def integrated_reference_potential_energy(vertically_sorted_ds, LxLy):
     return g * np.sum(vertically_sorted_ds.rho_1d_sorted * vertically_sorted_ds.z_1d_sorted * dV_flat_1d_sorted)
 
 def integrated_potential_energies(ds, time_idx, test=False, sorting_method="vertically_flattened",
-                                  rho_name="rho", dV_name="dV", LxLy_name="LxLy",
+                                  density_name="rho", dV_name="dV", LxLy_name="LxLy",
                                   z_min_name="z_min", Lz_name="Lz", z_name="z_aac"):
     """
     Calculate volume-integrated potential energies (APE, TPE, RPE)
@@ -254,7 +254,7 @@ def integrated_potential_energies(ds, time_idx, test=False, sorting_method="vert
         Whether to run tests
     sorting_method : str
         Method for sorting density
-    rho_name : str
+    density_name : str
         Name of density field in dataset
     dV_name : str
         Name of volume element field
@@ -272,7 +272,7 @@ def integrated_potential_energies(ds, time_idx, test=False, sorting_method="vert
     tuple
         (APE, TPE, RPE) - all volume-integrated scalars
     """
-    rho = ds[rho_name].isel(time=time_idx)
+    rho = ds[density_name].isel(time=time_idx)
     dV = ds[dV_name]
     LxLy = ds[LxLy_name]
     z_min = ds.attrs[z_min_name] if isinstance(z_min_name, str) else z_min_name
@@ -289,7 +289,7 @@ def integrated_potential_energies(ds, time_idx, test=False, sorting_method="vert
 
 #+++ Integrated APE, TPE, RPE time series calculations
 def integrated_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting_method="vertically_flattened",
-                                             rho_name="rho", dV_name="dV", LxLy_name="LxLy",
+                                             density_name="rho", dV_name="dV", LxLy_name="LxLy",
                                              z_min_name="z_min", Lz_name="Lz", z_name="z_aac"):
     """
     Calculate volume-integrated potential energies for all time steps
@@ -304,7 +304,7 @@ def integrated_potential_energies_timeseries(ds, test=False, verbose_level=1, so
         Verbosity level
     sorting_method : str
         Method for sorting density
-    rho_name : str
+    density_name : str
         Name of density field in dataset
     dV_name : str
         Name of volume element field
@@ -336,7 +336,7 @@ def integrated_potential_energies_timeseries(ds, test=False, verbose_level=1, so
         if verbose_level > 0: print(f"  Processing time step {i+1}/{n_times}", end="\r")
         APE[i], TPE[i], RPE[i] = integrated_potential_energies(
             ds, i, test=test, sorting_method=sorting_method,
-            rho_name=rho_name, dV_name=dV_name, LxLy_name=LxLy_name,
+            density_name=density_name, dV_name=dV_name, LxLy_name=LxLy_name,
             z_min_name=z_min_name, Lz_name=Lz_name, z_name=z_name
         )
 
@@ -748,7 +748,7 @@ def vectorized_local_APE_precomputed_integral(ds0, vertically_sorted_ds, use_num
 #+++ Local APE and TPE time series calculations
 def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting_method="vertically_flattened",
                                         ape_method="on_the_fly", use_numpy_version=True,
-                                        rho_name="rho", dV_name="dV", LxLy_name="LxLy",
+                                        density_name="rho", dV_name="dV", LxLy_name="LxLy",
                                         z_min_name="z_min", Lz_name="Lz", z_name="z_aac"):
     """
     Calculate local APE and TPE fields for all time steps
@@ -770,7 +770,7 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting
         Method for computing local APE ("on_the_fly" or "precomputed_integral")
     use_numpy_version : bool
         Whether to use numpy-optimized version (only for on_the_fly method)
-    rho_name : str
+    density_name : str
         Name of density field in dataset
     dV_name : str
         Name of volume element field
@@ -810,7 +810,7 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting
 
         # Get data for this time step
         ds_t = ds.isel(time=i)
-        rho_t = ds_t[rho_name]
+        rho_t = ds_t[density_name]
 
         # Perform vertical sorting
         if sorting_method == "vertically_flattened":
@@ -872,7 +872,7 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting
     local_dz_sorted_4d = xr.concat(local_dz_sorted_list, dim="time")
     local_dz_sorted_4d["time"] = ds.time
 
-    tpe = local_TPE(ds[rho_name], z_name=z_name)
+    tpe = local_TPE(ds[density_name], z_name=z_name)
     rpe = local_TPE(local_rho_sorted_4d, z_name="z_1d_sorted")
 
     # Combine into a Dataset

@@ -19,7 +19,6 @@ from aux01_ape_functions import (
     calculate_density_fields_from_buoyancy,
     local_potential_energies_timeseries,
 )
-import pynanigans as pn
 #---
 
 #+++ Configuration
@@ -72,7 +71,7 @@ local_potential_energies = local_potential_energies_timeseries(
     verbose_level=1,
     use_numpy_version=True,
     ape_method="precomputed_integral",
-    rho_name="ρ",
+    density_name="ρ",
 )
 #---
 
