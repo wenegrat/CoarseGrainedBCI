@@ -19,7 +19,8 @@ from ape_calculations import (
     calculate_reference_potential_energy_profile,
     integrated_reference_potential_energy,
     integrated_total_potential_energy,
-    load_data,
+    load_dataset_and_grid,
+    calculate_density_fields_from_buoyancy,
     integrate,
     g,
     ρ0,
@@ -44,7 +45,8 @@ def timeit(func):
 
 # File path to the simulation output
 filename = "output/kelvin_helmholtz_instability_64x1x64.nc"
-ds = load_data(filename)
+ds = load_dataset_and_grid(filename)
+ds = calculate_density_fields_from_buoyancy(ds)
 
 #+++ Test that convertion between ρ and b is correct
 ds0 = ds.sel(time=[100])

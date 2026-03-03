@@ -3,18 +3,24 @@
 Calculate Available Potential Energy (APE) from Kelvin-Helmholtz simulation output
 
 Workflow:
-1. Load data
-2. Filter density field
-3. Calculate local APE using precomputed_integral method
-4. Filter local APE with length scale 0.8
+1. Load data and grid
+2. Calculate density fields from buoyancy
+3. Filter density field
+4. Calculate local APE using precomputed_integral method
+5. Filter local APE with length scale 0.8
 """
 
 #+++ Imports
 import numpy as np
 import xarray as xr
 import gcm_filters
-from ape_calculations import load_data, local_potential_energies_timeseries
+from ape_calculations import (
+    load_dataset_and_grid,
+    calculate_density_fields_from_buoyancy,
+    local_potential_energies_timeseries,
+)
 from aux00_utils import timeit
+import pynanigans as pn
 #---
 
 #+++ Configuration
@@ -22,17 +28,17 @@ filename = "output/kelvin_helmholtz_instability_64x1x64.nc"
 filter_length_scale = 0.8  # Length scale for filtering
 #---
 
-#+++ Load data
+#+++ Load data and grid
 print("="*60)
-print("Loading data...")
+print("Loading data and grid...")
 print("="*60)
-ds = load_data(filename)
+ds = load_dataset_and_grid(filename)
 print(f"Dataset loaded: {len(ds.time)} time steps")
 #---
 
-#+++ Filter density field
+#+++ Filter buoyancy field
 print("\n" + "="*60)
-print("Filtering density field...")
+print("Filtering buoyancy field...")
 print("="*60)
 
 filter_scale = filter_length_scale * np.sqrt(12)
@@ -43,8 +49,17 @@ gaussian_filter = gcm_filters.Filter(
     grid_type=gcm_filters.GridType.REGULAR,
 )
 
-ds["rho_filtered"] = gaussian_filter.apply(ds.rho, dims=["x_caa", "y_aca"])
-print(f"Density filtered with length scale: {filter_length_scale}")
+ds["b̄"] = gaussian_filter.apply(ds.b, dims=["x_caa", "y_aca"]) # An overbar denotes a filtering operation
+print(f"Buoyancy filtered with length scale: {filter_length_scale}")
+#---
+
+#+++ Calculate density fields
+print("\n" + "="*60)
+print("Calculating density fields...")
+print("="*60)
+ds = calculate_density_fields_from_buoyancy(ds, buoyancy_name="b", density_name="rho")
+ds = calculate_density_fields_from_buoyancy(ds, buoyancy_name="b̄", density_name="rho_filtered")
+print("Density fields calculated: rho, rho_z, Z, rho_filtered, rho_filtered_z")
 #---
 
 #+++ Calculate local APE using precomputed_integral method

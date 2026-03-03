@@ -24,12 +24,25 @@ def integrate(da, dV, dims=("x_caa", "y_aca", "z_aac")):
 #---
 
 #+++ Load data
-def load_data(filename):
-    """Load the simulation output"""
+def load_dataset_and_grid(filename):
+    """
+    Load the simulation output and grid information
+
+    Parameters
+    ----------
+    filename : str
+        Path to the NetCDF file
+
+    Returns
+    -------
+    ds : xr.Dataset
+        Dataset with grid information added as attributes and variables
+    """
     print(f"Loading data from {filename}...")
     ds = xr.open_dataset(filename, decode_times=False)
     grid = xr.open_dataset(filename, group="underlying_grid_reconstruction_kwargs")
 
+    # Add grid extent as attributes
     ds.attrs["Lx"] = np.diff(grid.x)
     ds.attrs["Ly"] = np.diff(grid.y)
     ds.attrs["Lz"] = np.diff(grid.z)
@@ -41,17 +54,41 @@ def load_data(filename):
     ds.attrs["z_min"] = grid.z.min()
     ds.attrs["z_max"] = grid.z.max()
 
+    # Add volume and area variables
     ds["dV"] = ds.Δx_caa * ds.Δy_aca * ds.Δz_aac
     ds["LxLy"] = ds.Lx * ds.Ly
 
+    return ds
+
+
+def calculate_density_fields_from_buoyancy(ds, ρ_ref=ρ0, buoyancy_name="b", density_name="rho"):
+    """
+    Calculate density and related fields from buoyancy
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        Dataset containing buoyancy field
+    ρ_ref : float, optional
+        Reference density [kg/m^3], default is global ρ0
+    buoyancy_name : str, optional
+        Name of the buoyancy field in the dataset, default is "b"
+    density_name : str, optional
+        Name for the calculated density field, default is "rho"
+
+    Returns
+    -------
+    ds : xr.Dataset
+        Dataset with added fields: {density_name}, {density_name}_z, Z
+    """
     # Convert buoyancy to density
     # b = g * (ρ0 - rho) / ρ0  =>  rho = ρ0 * (1 - b/g)
-    ds["rho"] = ρ0 * (1 - ds.b / g)
-    ds["rho_z"] = (ρ0 * ds.z_aac + ds.pe / g) # pe  = -b*z
+    ds[density_name] = ρ_ref * (1 - ds[buoyancy_name] / g)
+    ds[f"{density_name}_z"] = (ρ_ref * ds.z_aac + ds.pe / g)  # pe = -b*z
 
     # Add coordinate arrays
     if "z_aac" in ds.coords:
-        ds["Z"] = ds.rho * 0 + ds.z_aac
+        ds["Z"] = ds[density_name] * 0 + ds.z_aac
     else:
         print("Warning: z_aac coordinate not found, trying to infer from data")
 
