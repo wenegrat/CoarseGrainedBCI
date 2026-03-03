@@ -82,7 +82,7 @@ if True:
         filter_scale = gaussian_std * np.sqrt(12) # See docs: https://gcm-filters.readthedocs.io/en/latest/theory.html#filter-scale-and-shape
         gaussian_filter = gcm_filters.Filter(
             filter_scale=filter_scale,
-            dx_min=min([ds.Δx_caa.min(), ds.Δy_aca.min()]),
+            dx_min=0.15625,
             filter_shape=gcm_filters.FilterShape.GAUSSIAN,
             grid_type=gcm_filters.GridType.REGULAR,
         )
