@@ -66,8 +66,8 @@ print("Density fields calculated: ρ, Z, ρ̄")
 print("\n" + "="*60)
 print("Calculating local APE...")
 
-full_local_potential_energies = local_potential_energies_timeseries(ds_full, use_numpy_version=True, ape_method="precomputed_integral", density_name="ρ",)
-filt_local_potential_energies = local_potential_energies_timeseries(ds_filt, use_numpy_version=True, ape_method="precomputed_integral", density_name="ρ̄",)
+full_local_potential_energies = local_potential_energies_timeseries(ds_full, use_numpy_version=True, ape_method="on_the_fly", density_name="ρ", rho_to_sort=ds_full.ρ)
+filt_local_potential_energies = local_potential_energies_timeseries(ds_filt, use_numpy_version=True, ape_method="on_the_fly", density_name="ρ̄", rho_to_sort=ds_full.ρ)
 #---
 
 #+++ Filter local APE
@@ -102,5 +102,6 @@ print(f"\nResults saved to: {output_filename}")
 print("\n" + "="*60)
 print("Creating plots...")
 print("="*60)
-figures = plot_dataset_variables(output_ds[["Ea(ρ, z)", "Ea(ρ̄, z)", "Ēa(ρ, z) - Ea(ρ̄, z)"]], time_stride=6, col="time", col_wrap=5, cmap="RdBu_r", robust=True, x="x_caa")
+# figures = plot_dataset_variables(output_ds[["Ea(ρ, z)", "Ea(ρ̄, z)", "Ēa(ρ, z) - Ea(ρ̄, z)"]], time_stride=1, col="time", col_wrap=5, cmap="viridis", vmin=0 ,vmax=3, x="x_caa")
+figures = plot_dataset_variables(output_ds[["Ea(ρ, z)", "Ea(ρ̄, z)", "Ēa(ρ, z) - Ea(ρ̄, z)"]], time_stride=1, col="time", col_wrap=5, cmap="RdBu_r", vmin=-10, vmax=10, x="x_caa")
 #---
