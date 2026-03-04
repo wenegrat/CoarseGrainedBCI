@@ -77,12 +77,13 @@ def vertical_sort_density_by_flattening(rho, dV, LxLy, test=False, z_min=0, Lz=N
 
     Returns
     -------
-    dz_flat_1d_sorted : np.ndarray
-        Sorted vertical coordinate in sorted space
-    z_star : np.ndarray
-        Cumulative vertical coordinate in sorted space
-    rho_1d_sorted : np.ndarray
-        Sorted density field with same shape as input
+    vertically_sorted_ds : xr.Dataset
+        1D sorted dataset with variables: rho_1d_sorted, dz_1d_sorted,
+        sort_indices_1d — all indexed by the virtual z_1d_sorted coordinate
+        (cell centres in the sorted reference state, running bottom to top).
+    threed_sorted_ds : xr.Dataset
+        3D sorted fields in the original grid shape: rho_3d_sorted,
+        z_3d_sorted, sort_indices_3d.
     """
     rho_1d = np.ravel(rho.copy(), order="C")
 
@@ -184,7 +185,10 @@ def integrated_total_potential_energy(rho, dV=None, ds=None, z_name="z_aac"):
 #+++ Calculate reference state using sorting method
 def calculate_reference_potential_energy_profile(rho, dV, LxLy, test=False, z_min=0, Lz=None, sorting_method="vertically_flattened"):
     """
-    Calculate local Reference Potential Energy density using sorted density
+    Compute the adiabatically sorted reference-state density profile
+
+    Sorts rho to obtain the minimum-PE reference state and returns it as a
+    1D Dataset indexed by virtual z in the sorted state.
 
     Parameters
     ----------
@@ -217,7 +221,7 @@ def calculate_reference_potential_energy_profile(rho, dV, LxLy, test=False, z_mi
                 assert(np.sum(vertically_sorted_ds.dz_1d_sorted).values == Lz)
 
     elif sorting_method == "PDF":
-        vertically_sorted_ds = vertical_sort_density_by_PDF(rho, Lz, nbins=1000)[0]
+        vertically_sorted_ds = vertical_sort_density_by_PDF(rho, Lz, nbins=1000)
     else:
         raise ValueError(f"Invalid sorting method: {sorting_method}")
 
@@ -402,14 +406,16 @@ def _local_APE_on_the_fly_integral_xarray(ρ, z, vertically_sorted_ds):
 
     Parameters
     ----------
-    ρ : xr.DataArray
-        Density field
-    z : xr.DataArray
-        Z coordinate
+    ρ : float
+        Density at the point (scalar, passed by apply_ufunc with vectorize=True)
+    z : float
+        Physical z coordinate at the point (scalar)
     vertically_sorted_ds : xr.Dataset
         Dataset containing sorted density profile and dz
-    ρ0 : float
-        Reference density
+
+    Notes
+    -----
+    ρ0 is the module-level reference density constant, not a parameter.
     """
     # Get z_0
     ρ_sorted_profile = vertically_sorted_ds.rho_1d_sorted
@@ -419,7 +425,7 @@ def _local_APE_on_the_fly_integral_xarray(ρ, z, vertically_sorted_ds):
         z_0 = z_possibilities[abs(z_possibilities - z).argmin()]
     else:
         idx_min = np.argmin(np.abs(ρ_sorted_profile - ρ))
-        z_0 = ρ_sorted_profile[idx_min]
+        z_0 = ρ_sorted_profile.z_1d_sorted[idx_min]
 
     # Calculate displacement and slice
     if z > z_0:
@@ -449,26 +455,26 @@ def _local_APE_on_the_fly_integral_numpy(ρ, z, vertically_sorted_ds):
     Parameters
     ----------
     ρ : float
-        Density at the point
+        Density at the point (scalar, passed by apply_ufunc with vectorize=True)
     z : float
-        Z coordinate at the point
+        Physical z coordinate at the point (scalar)
     vertically_sorted_ds : xr.Dataset
-        Dataset containing sorted density profile and dz
-    ρ0 : float
-        Reference density
+        Dataset containing sorted density profile (rho_1d_sorted, dz_1d_sorted)
+        indexed by z_1d_sorted (virtual z in sorted reference state)
 
     Returns
     -------
     float
-        Local APE
+        Local APE density [J m⁻³]
 
     Notes
     -----
-    This function is designed to be called by xr.apply_ufunc with vectorize=True
-    and is optimized to use numpy array indexing instead of slow .sel() operations.
-
-    z_0 is calculated by finding all z values where the sorted density equals ρ,
-    then selecting the one closest to the current z coordinate.
+    ρ0 is the module-level reference density constant, not a parameter.
+    Optimised to extract numpy arrays once and use binary search (searchsorted)
+    instead of slow xarray .sel() calls.
+    z_0 is the reference z where ρ sits in the sorted profile; if ρ is not
+    present exactly (e.g. filtered density not in the full sorted profile) the
+    closest density value is used as a fallback.
     """
     # Extract numpy arrays once (faster than repeated xarray operations)
     ρ_sorted_array = vertically_sorted_ds.rho_1d_sorted.values
@@ -824,8 +830,11 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting
     -------
     xr.Dataset
         Dataset containing:
-        - local_ape: 4D DataArray (time, x, y, z) with local APE values
-        - TPE: 1D DataArray (time) with total potential energy
+        - ape       : 4D DataArray (time, x, y, z) — local APE density [J m⁻³]
+        - tpe       : 4D DataArray (time, x, y, z) — local TPE density g·ρ·z
+        - rpe       : 2D DataArray (time, z_1d_sorted) — local RPE density in sorted state
+        - rho_sorted: 2D DataArray (time, z_1d_sorted) — sorted reference density profile
+        - dz_sorted : 2D DataArray (time, z_1d_sorted) — cell heights in sorted state
     """
     if verbose_level > 0: print("Calculating local APE and TPE time series...")
 
