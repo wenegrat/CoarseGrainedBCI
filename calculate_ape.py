@@ -18,6 +18,7 @@ from aux00_utils import load_dataset_and_grid
 from aux01_ape_functions import (
     calculate_density_fields_from_buoyancy,
     local_potential_energies_timeseries,
+    calculate_reference_potential_energy_profile,
 )
 from ape_plots import plot_dataset_variables
 #---
@@ -66,8 +67,17 @@ print("Density fields calculated: ρ, Z, ρ̄")
 print("\n" + "="*60)
 print("Calculating local APE...")
 
-full_local_potential_energies = local_potential_energies_timeseries(ds_full, use_numpy_version=True, ape_method="precomputed_integral", density_name="ρ",)
-filt_local_potential_energies = local_potential_energies_timeseries(ds_filt, use_numpy_version=True, ape_method="precomputed_integral", density_name="ρ̄",)
+vertically_sorted_ds_full_list = []
+for time_idx in range(len(ds_full.time)):
+    ds_t = ds_full.isel(time=time_idx)
+    vertically_sorted_ds_full_t = calculate_reference_potential_energy_profile(ds_t.ρ, ds_t.dV, ds_t.LxLy, test=False, z_min=ds_t.z_min, Lz=ds_t.Lz, sorting_method="vertically_flattened")
+    vertically_sorted_ds_full_list.append(vertically_sorted_ds_full_t)
+
+vertically_sorted_ds_full = xr.concat(vertically_sorted_ds_full_list, dim="time")
+vertically_sorted_ds_full["time"] = ds_full.time
+
+full_local_potential_energies = local_potential_energies_timeseries(ds_full, use_numpy_version=True, ape_method="precomputed_integral", density_name="ρ", vertically_sorted_ds=vertically_sorted_ds_full)
+filt_local_potential_energies = local_potential_energies_timeseries(ds_filt, use_numpy_version=True, ape_method="precomputed_integral", density_name="ρ̄", vertically_sorted_ds=vertically_sorted_ds_full)
 #---
 
 #+++ Filter local APE

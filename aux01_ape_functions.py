@@ -244,7 +244,8 @@ def integrated_reference_potential_energy(vertically_sorted_ds, LxLy):
 
 def integrated_potential_energies(ds, time_idx, test=False, sorting_method="vertically_flattened",
                                   density_name="rho", dV_name="dV", LxLy_name="LxLy",
-                                  z_min_name="z_min", Lz_name="Lz", z_name="z_aac"):
+                                  z_min_name="z_min", Lz_name="Lz", z_name="z_aac",
+                                  vertically_sorted_ds=None):
     """
     Calculate volume-integrated potential energies (APE, TPE, RPE)
 
@@ -270,6 +271,9 @@ def integrated_potential_energies(ds, time_idx, test=False, sorting_method="vert
         Name of vertical extent attribute
     z_name : str
         Name of vertical coordinate
+    vertically_sorted_ds : xr.Dataset, optional
+        Pre-computed sorted density dataset. If None, it will be calculated
+        from the density field at the given time index.
 
     Returns
     -------
@@ -283,9 +287,10 @@ def integrated_potential_energies(ds, time_idx, test=False, sorting_method="vert
     Lz = ds.attrs[Lz_name] if isinstance(Lz_name, str) else Lz_name
 
     TPE = integrated_total_potential_energy(rho, dV=dV, z_name=z_name)
-    vertically_sorted_ds = calculate_reference_potential_energy_profile(
-        rho, dV, LxLy, test=test, z_min=z_min, Lz=Lz, sorting_method=sorting_method
-    )
+    if vertically_sorted_ds is None:
+        vertically_sorted_ds = calculate_reference_potential_energy_profile(
+            rho, dV, LxLy, test=test, z_min=z_min, Lz=Lz, sorting_method=sorting_method
+        )
     RPE = integrated_reference_potential_energy(vertically_sorted_ds, LxLy if isinstance(LxLy, float) else LxLy.values)
     APE = TPE - RPE
     return APE, TPE, RPE
@@ -294,7 +299,8 @@ def integrated_potential_energies(ds, time_idx, test=False, sorting_method="vert
 #+++ Integrated APE, TPE, RPE time series calculations
 def integrated_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting_method="vertically_flattened",
                                              density_name="rho", dV_name="dV", LxLy_name="LxLy",
-                                             z_min_name="z_min", Lz_name="Lz", z_name="z_aac"):
+                                             z_min_name="z_min", Lz_name="Lz", z_name="z_aac",
+                                             vertically_sorted_ds=None):
     """
     Calculate volume-integrated potential energies for all time steps
 
@@ -320,6 +326,9 @@ def integrated_potential_energies_timeseries(ds, test=False, verbose_level=1, so
         Name of vertical extent attribute
     z_name : str
         Name of vertical coordinate
+    vertically_sorted_ds : xr.Dataset, optional
+        Pre-computed sorted density dataset to use for all time steps. If None,
+        the sorted profile will be calculated from each time step's density field.
 
     Returns
     -------
@@ -341,7 +350,8 @@ def integrated_potential_energies_timeseries(ds, test=False, verbose_level=1, so
         APE[i], TPE[i], RPE[i] = integrated_potential_energies(
             ds, i, test=test, sorting_method=sorting_method,
             density_name=density_name, dV_name=dV_name, LxLy_name=LxLy_name,
-            z_min_name=z_min_name, Lz_name=Lz_name, z_name=z_name
+            z_min_name=z_min_name, Lz_name=Lz_name, z_name=z_name,
+            vertically_sorted_ds=vertically_sorted_ds,
         )
 
     if verbose_level > 0: print("\nDone!")
@@ -753,7 +763,8 @@ def vectorized_local_APE_precomputed_integral(ds0, vertically_sorted_ds, use_num
 def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting_method="vertically_flattened",
                                         ape_method="precomputed_integral", use_numpy_version=True,
                                         density_name="rho", dV_name="dV", LxLy_name="LxLy",
-                                        z_min_name="z_min", Lz_name="Lz", z_name="z_aac"):
+                                        z_min_name="z_min", Lz_name="Lz", z_name="z_aac",
+                                        vertically_sorted_ds=None):
     """
     Calculate local APE and TPE fields for all time steps
 
@@ -786,6 +797,9 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting
         Name of vertical extent attribute
     z_name : str
         Name of vertical coordinate
+    vertically_sorted_ds : xr.Dataset, optional
+        Pre-computed sorted density dataset to use for all time steps. If None,
+        the sorted profile will be calculated from each time step's density field.
 
     Returns
     -------
@@ -816,15 +830,21 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting
         ds_t = ds.isel(time=i)
         rho_t = ds_t[density_name]
 
-        # Perform vertical sorting
-        if sorting_method == "vertically_flattened":
-            vertically_sorted_ds, threed_sorted_ds = vertical_sort_density_by_flattening(
-                rho_t, dV, LxLy, test=test, z_min=z_min, Lz=Lz
-            )
-        elif sorting_method == "PDF":
-            vertically_sorted_ds = vertical_sort_density_by_PDF(rho_t, Lz, nbins=1000)
+        # Perform vertical sorting (only if not provided by the caller)
+        if vertically_sorted_ds is None:
+            if sorting_method == "vertically_flattened":
+                _vertically_sorted_ds, threed_sorted_ds = vertical_sort_density_by_flattening(
+                    rho_t, dV, LxLy, test=test, z_min=z_min, Lz=Lz
+                )
+            elif sorting_method == "PDF":
+                _vertically_sorted_ds = vertical_sort_density_by_PDF(rho_t, Lz, nbins=1000)
+            else:
+                raise ValueError(f"Invalid sorting method: {sorting_method}")
         else:
-            raise ValueError(f"Invalid sorting method: {sorting_method}")
+            if "time" in vertically_sorted_ds.dims:
+                _vertically_sorted_ds = vertically_sorted_ds.isel(time=i)
+            else:
+                _vertically_sorted_ds = vertically_sorted_ds
 
         # Create a temporary dataset with the density field for APE calculation
         ds_t_with_rho = ds_t.copy()
@@ -834,7 +854,7 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting
         # Calculate local APE field using selected method
         if ape_method == "on_the_fly":
             local_ape = vectorized_local_APE_on_the_fly_integral(
-                ds_t_with_rho, vertically_sorted_ds,
+                ds_t_with_rho, _vertically_sorted_ds,
                 use_numpy_version=use_numpy_version,
                 verbose=verbose_level > 1,
                 z_name=z_name,
@@ -842,16 +862,16 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting
         elif ape_method == "precomputed_integral":
             # Compute cumulative integrals for precomputed method
             # ∫_0^z ρ(z') dz' = cumsum(ρ * dz)
-            vertically_sorted_ds["rho_1d_sorted_cumulative_integral"] = (
-                vertically_sorted_ds.rho_1d_sorted * vertically_sorted_ds.dz_1d_sorted
+            _vertically_sorted_ds["rho_1d_sorted_cumulative_integral"] = (
+                _vertically_sorted_ds.rho_1d_sorted * _vertically_sorted_ds.dz_1d_sorted
             ).cumsum("z_1d_sorted")
             # ∫_0^z dz' = cumsum(dz)
-            vertically_sorted_ds["dz_1d_sorted_cumulative_integral"] = (
-                vertically_sorted_ds.dz_1d_sorted.cumsum("z_1d_sorted")
+            _vertically_sorted_ds["dz_1d_sorted_cumulative_integral"] = (
+                _vertically_sorted_ds.dz_1d_sorted.cumsum("z_1d_sorted")
             )
 
             local_ape = vectorized_local_APE_precomputed_integral(
-                ds_t_with_rho, vertically_sorted_ds,
+                ds_t_with_rho, _vertically_sorted_ds,
                 verbose=verbose_level > 1,
                 use_numpy_version=use_numpy_version,
                 z_name=z_name,
@@ -861,8 +881,8 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting
 
         # Append to lists in order to concatenate later
         local_ape_list.append(local_ape)
-        local_rho_sorted_list.append(vertically_sorted_ds.rho_1d_sorted)
-        local_dz_sorted_list.append(vertically_sorted_ds.dz_1d_sorted)
+        local_rho_sorted_list.append(_vertically_sorted_ds.rho_1d_sorted)
+        local_dz_sorted_list.append(_vertically_sorted_ds.dz_1d_sorted)
 
     if verbose_level > 0: print("\nDone!")
 
