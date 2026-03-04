@@ -613,7 +613,10 @@ def _local_APE_precomputed_integral_numpy(ρ_3d, z_3d, ρ_sorted_array, z_sorted
         z_possibilities_idx = np.where(density_mask)[0]
 
         if len(z_possibilities_idx) == 0:
-            z_0_indices[point_mask] = 0  # Fallback
+            # Density not in sorted profile (e.g. filtered ρ̄ not in full ρ sort):
+            # fall back to nearest density, matching on-the-fly method behaviour
+            idx_min = np.argmin(np.abs(ρ_sorted_array - ρ_val))
+            z_0_indices[point_mask] = idx_min
             continue
 
         z_possibilities = z_sorted_array[z_possibilities_idx]
@@ -675,9 +678,14 @@ def _local_APE_precomputed_integral_xarray(ρ, z, vertically_sorted_ds):
     then selecting the one closest to the current z coordinate.
     """
     # Get z_0: find all z values where sorted density equals ρ, then pick closest to z
+    # If exact match not found (e.g. filtered ρ̄ not in full ρ sort), fall back to nearest density
     ρ_sorted_profile = vertically_sorted_ds.rho_1d_sorted
     z_possibilities = ρ_sorted_profile.where(ρ_sorted_profile == ρ, drop=True).z_1d_sorted
-    z_0 = z_possibilities[abs(z_possibilities - z).argmin()]
+    if len(z_possibilities) > 0:
+        z_0 = z_possibilities[abs(z_possibilities - z).argmin()]
+    else:
+        idx_min = int(np.argmin(np.abs(ρ_sorted_profile.values - ρ)))
+        z_0 = ρ_sorted_profile.z_1d_sorted[idx_min]
 
     # Get cumulative integral of sorted density profile
     cumulative_ρ_sorted_integral = vertically_sorted_ds["rho_1d_sorted_cumulative_integral"]
