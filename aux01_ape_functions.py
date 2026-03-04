@@ -245,7 +245,7 @@ def integrated_reference_potential_energy(vertically_sorted_ds, LxLy):
 def integrated_potential_energies(ds, time_idx, test=False, sorting_method="vertically_flattened",
                                   density_name="rho", dV_name="dV", LxLy_name="LxLy",
                                   z_min_name="z_min", Lz_name="Lz", z_name="z_aac",
-                                  vertically_sorted_ds=None, rho_to_sort=None):
+                                  rho_to_sort=None):
     """
     Calculate volume-integrated potential energies (APE, TPE, RPE)
 
@@ -271,8 +271,6 @@ def integrated_potential_energies(ds, time_idx, test=False, sorting_method="vert
         Name of vertical extent attribute
     z_name : str
         Name of vertical coordinate
-    vertically_sorted_ds : xr.Dataset, optional
-        Pre-computed sorted density dataset. If None, it will be calculated.
     rho_to_sort : xr.DataArray, optional
         Density field to use for sorting. If it has a "time" dimension it will
         be sliced at time_idx. If None, the density from the dataset is used.
@@ -289,14 +287,10 @@ def integrated_potential_energies(ds, time_idx, test=False, sorting_method="vert
     Lz = ds.attrs[Lz_name] if isinstance(Lz_name, str) else Lz_name
 
     TPE = integrated_total_potential_energy(rho, dV=dV, z_name=z_name)
-    if vertically_sorted_ds is None:
-        if rho_to_sort is not None:
-            _rho_to_sort = rho_to_sort.isel(time=time_idx) if "time" in rho_to_sort.dims else rho_to_sort
-        else:
-            _rho_to_sort = rho
-        vertically_sorted_ds = calculate_reference_potential_energy_profile(
-            _rho_to_sort, dV, LxLy, test=test, z_min=z_min, Lz=Lz, sorting_method=sorting_method
-        )
+    _rho_to_sort = rho_to_sort.isel(time=time_idx) if (rho_to_sort is not None and "time" in rho_to_sort.dims) else (rho_to_sort if rho_to_sort is not None else rho)
+    vertically_sorted_ds = calculate_reference_potential_energy_profile(
+        _rho_to_sort, dV, LxLy, test=test, z_min=z_min, Lz=Lz, sorting_method=sorting_method
+    )
     RPE = integrated_reference_potential_energy(vertically_sorted_ds, LxLy if isinstance(LxLy, float) else LxLy.values)
     APE = TPE - RPE
     return APE, TPE, RPE
@@ -306,7 +300,7 @@ def integrated_potential_energies(ds, time_idx, test=False, sorting_method="vert
 def integrated_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting_method="vertically_flattened",
                                              density_name="rho", dV_name="dV", LxLy_name="LxLy",
                                              z_min_name="z_min", Lz_name="Lz", z_name="z_aac",
-                                             vertically_sorted_ds=None, rho_to_sort=None):
+                                             rho_to_sort=None):
     """
     Calculate volume-integrated potential energies for all time steps
 
@@ -332,10 +326,6 @@ def integrated_potential_energies_timeseries(ds, test=False, verbose_level=1, so
         Name of vertical extent attribute
     z_name : str
         Name of vertical coordinate
-    vertically_sorted_ds : xr.Dataset, optional
-        Pre-computed sorted density dataset to use for all time steps. If it has
-        a "time" dimension it will be sliced per step; otherwise reused as-is.
-        If None, the sorted profile is calculated at each time step.
     rho_to_sort : xr.DataArray, optional
         Density field to use for sorting instead of the dataset density. If it
         has a "time" dimension it will be sliced per step. If None, the density
@@ -362,7 +352,6 @@ def integrated_potential_energies_timeseries(ds, test=False, verbose_level=1, so
             ds, i, test=test, sorting_method=sorting_method,
             density_name=density_name, dV_name=dV_name, LxLy_name=LxLy_name,
             z_min_name=z_min_name, Lz_name=Lz_name, z_name=z_name,
-            vertically_sorted_ds=vertically_sorted_ds,
             rho_to_sort=rho_to_sort,
         )
 
@@ -425,8 +414,12 @@ def _local_APE_on_the_fly_integral_xarray(ρ, z, vertically_sorted_ds):
     # Get z_0
     ρ_sorted_profile = vertically_sorted_ds.rho_1d_sorted
     mask = ρ_sorted_profile == ρ
-    z_possibilities = ρ_sorted_profile.where(mask, drop=True).z_1d_sorted
-    z_0 = z_possibilities[abs(z_possibilities - z).argmin()]
+    if any(mask):
+        z_possibilities = ρ_sorted_profile.where(mask, drop=True).z_1d_sorted
+        z_0 = z_possibilities[abs(z_possibilities - z).argmin()]
+    else:
+        idx_min = np.argmin(np.abs(ρ_sorted_profile - ρ))
+        z_0 = ρ_sorted_profile[idx_min]
 
     # Calculate displacement and slice
     if z > z_0:
@@ -781,7 +774,7 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting
                                         ape_method="precomputed_integral", use_numpy_version=True,
                                         density_name="rho", dV_name="dV", LxLy_name="LxLy",
                                         z_min_name="z_min", Lz_name="Lz", z_name="z_aac",
-                                        vertically_sorted_ds=None, rho_to_sort=None):
+                                        rho_to_sort=None):
     """
     Calculate local APE and TPE fields for all time steps
 
@@ -814,10 +807,6 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting
         Name of vertical extent attribute
     z_name : str
         Name of vertical coordinate
-    vertically_sorted_ds : xr.Dataset, optional
-        Pre-computed sorted density dataset to use for all time steps. If it has
-        a "time" dimension it will be sliced per step; otherwise reused as-is.
-        If None, the sorted profile is calculated at each time step.
     rho_to_sort : xr.DataArray, optional
         Density field to use for sorting instead of the dataset density. If it
         has a "time" dimension it will be sliced per step. If None, the density
@@ -852,26 +841,16 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting
         ds_t = ds.isel(time=i)
         rho_t = ds_t[density_name]
 
-        # Resolve the sorted dataset for this time step
-        if vertically_sorted_ds is not None:
-            if "time" in vertically_sorted_ds.dims:
-                _vertically_sorted_ds = vertically_sorted_ds.isel(time=i)
-            else:
-                _vertically_sorted_ds = vertically_sorted_ds
+        # Determine density field to sort and compute reference state
+        _rho_to_sort = rho_to_sort.isel(time=i) if (rho_to_sort is not None and "time" in rho_to_sort.dims) else (rho_to_sort if rho_to_sort is not None else rho_t)
+        if sorting_method == "vertically_flattened":
+            _vertically_sorted_ds, threed_sorted_ds = vertical_sort_density_by_flattening(
+                _rho_to_sort, dV, LxLy, test=test, z_min=z_min, Lz=Lz
+            )
+        elif sorting_method == "PDF":
+            _vertically_sorted_ds = vertical_sort_density_by_PDF(_rho_to_sort, Lz, nbins=1000)
         else:
-            # Determine density field to sort
-            if rho_to_sort is not None:
-                _rho_to_sort = rho_to_sort.isel(time=i) if "time" in rho_to_sort.dims else rho_to_sort
-            else:
-                _rho_to_sort = rho_t
-            if sorting_method == "vertically_flattened":
-                _vertically_sorted_ds, threed_sorted_ds = vertical_sort_density_by_flattening(
-                    _rho_to_sort, dV, LxLy, test=test, z_min=z_min, Lz=Lz
-                )
-            elif sorting_method == "PDF":
-                _vertically_sorted_ds = vertical_sort_density_by_PDF(_rho_to_sort, Lz, nbins=1000)
-            else:
-                raise ValueError(f"Invalid sorting method: {sorting_method}")
+            raise ValueError(f"Invalid sorting method: {sorting_method}")
 
         # Create a temporary dataset with the density field for APE calculation
         ds_t_with_rho = ds_t.copy()
