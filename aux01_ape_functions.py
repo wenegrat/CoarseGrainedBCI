@@ -574,69 +574,10 @@ def _local_APE_on_the_fly_integral_xarray(ρ, z, z_0, vertically_sorted_ds):
     return -ρ0 * (b_l * signed_dz_flat).sum("z_1d_sorted") # Convert to APE by unit of volume
 
 
-def _local_APE_on_the_fly_integral_numpy(ρ, z, z_0, vertically_sorted_ds):
+
+def vectorized_local_APE_on_the_fly_integral(ds0, vertically_sorted_ds, verbose=True, z_name="z_aac", z0=None):
     """
-    Compute APE for a single point using summation method (scalar inputs) according to the
-    definition:
-
-    E_a = -ρ0 ∫_{z_0}^{z} b_l dz = g ∫_{z_0}^{z} (ρ - ρ_ref) dz
-
-    Thus the output units are: kg m^2 s^-2 / m^3, which is the APE by unit of volume.
-
-    Parameters
-    ----------
-    ρ : float
-        Density at the point (scalar, passed by apply_ufunc with vectorize=True)
-    z : float
-        Physical z coordinate at the point (scalar)
-    z_0 : float
-        Reference height for this point (pre-computed)
-    vertically_sorted_ds : xr.Dataset
-        Dataset containing sorted density profile (rho_1d_sorted, dz_1d_sorted)
-        indexed by z_1d_sorted (virtual z in sorted reference state)
-
-    Returns
-    -------
-    float
-        Local APE density [J m⁻³]
-
-    Notes
-    -----
-    ρ0 is the module-level reference density constant, not a parameter.
-    Optimised to extract numpy arrays once and use binary search (searchsorted)
-    instead of slow xarray .sel() calls.
-    """
-    # Extract numpy arrays once (faster than repeated xarray operations)
-    ρ_sorted_array = vertically_sorted_ds.rho_1d_sorted.values
-    dz_sorted_array = vertically_sorted_ds.dz_1d_sorted.values
-    z_sorted_array = vertically_sorted_ds.z_1d_sorted.values
-
-    # Find integer indices using binary search (much faster than .sel())
-    idx_z = np.searchsorted(z_sorted_array, z)
-    idx_z0 = np.searchsorted(z_sorted_array, z_0)
-
-    # Determine slice indices based on displacement direction
-    if z > z_0:
-        idx_start, idx_end = idx_z0, idx_z
-        signed_dz_slice = +dz_sorted_array[idx_start:idx_end]
-    else:
-        idx_start, idx_end = idx_z, idx_z0
-        signed_dz_slice = -dz_sorted_array[idx_start:idx_end]
-
-    # Fast numpy array slicing (much faster than .sel())
-    ρ_sorted_slice = ρ_sorted_array[idx_start:idx_end]
-
-    # Calculate buoyancy difference and integrate
-    b_l = -g * (ρ - ρ_sorted_slice) / ρ0
-    integral = np.sum(b_l * signed_dz_slice)
-    return -ρ0 * integral # Convert to APE by unit of volume
-
-
-def vectorized_local_APE_on_the_fly_integral(ds0, vertically_sorted_ds, use_numpy_version=True, verbose=True, z_name="z_aac", z0=None):
-    """
-    Vectorized calculation of local APE using summation method for all grid points
-
-    Uses optimized numpy/numba implementation for maximum performance.
+    Vectorized calculation of local APE using on-the-fly summation method for all grid points
 
     Parameters
     ----------
@@ -644,8 +585,6 @@ def vectorized_local_APE_on_the_fly_integral(ds0, vertically_sorted_ds, use_nump
         Dataset at a single time containing rho field
     vertically_sorted_ds : xr.Dataset
         Dataset containing sorted density profile and dz
-    use_numpy_version : bool
-        Whether to use the numpy optimized version
     verbose : bool
         Whether to print progress messages
     z_name : str
@@ -659,41 +598,23 @@ def vectorized_local_APE_on_the_fly_integral(ds0, vertically_sorted_ds, use_nump
     xr.DataArray
         Local APE values with same dimensions as ds0.rho
     """
-    if use_numpy_version:
-        if verbose:
-            print("Computing local APE using fast on-the-fly integral method...")
-    else:
-        if verbose:
-            print("Computing local APE using xarray on-the-fly method...")
+    if verbose:
+        print("Computing local APE using xarray on-the-fly method...")
 
     if z0 is None:
-        if use_numpy_version:
-            z0 = calculate_z0_field_numpy(ds0.rho, vertically_sorted_ds, z_name=z_name)
-        else:
-            z0 = calculate_z0_field_xarray(ds0.rho, vertically_sorted_ds, z_name=z_name)
+        z0 = calculate_z0_field_xarray(ds0.rho, vertically_sorted_ds, z_name=z_name)
 
     z_broadcast = xr.zeros_like(ds0.rho) + ds0[z_name]
 
-    if use_numpy_version:
-        result = xr.apply_ufunc(
-            _local_APE_on_the_fly_integral_numpy,
-            ds0.rho,
-            z_broadcast,
-            z0,
-            vectorize=True,
-            dask="allowed",
-            kwargs=dict(vertically_sorted_ds=vertically_sorted_ds),
-        )
-    else:
-        result = xr.apply_ufunc(
-            _local_APE_on_the_fly_integral_xarray,
-            ds0.rho,
-            z_broadcast,
-            z0,
-            vectorize=True,
-            dask="allowed",
-            kwargs=dict(vertically_sorted_ds=vertically_sorted_ds),
-        )
+    result = xr.apply_ufunc(
+        _local_APE_on_the_fly_integral_xarray,
+        ds0.rho,
+        z_broadcast,
+        z0,
+        vectorize=True,
+        dask="allowed",
+        kwargs=dict(vertically_sorted_ds=vertically_sorted_ds),
+    )
 
     if verbose: print("Done!")
     return result
@@ -1010,7 +931,6 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting
         if ape_method == "on_the_fly":
             local_ape = vectorized_local_APE_on_the_fly_integral(
                 ds_t_with_rho, _vertically_sorted_ds,
-                use_numpy_version=use_numpy_version,
                 verbose=verbose_level > 1,
                 z_name=z_name,
                 z0=local_z0,
