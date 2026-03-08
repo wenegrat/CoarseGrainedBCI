@@ -32,6 +32,8 @@ print("\n" + "="*60)
 print("Loading data and grid...")
 ds = load_dataset_and_grid(filename)
 print(f"Dataset loaded: {len(ds.time)} time steps")
+
+ds = ds.sel(time=[52, 72,], method="nearest")
 #---
 
 #+++ Filter buoyancy field
@@ -103,5 +105,6 @@ print("\n" + "="*60)
 print("Creating plots...")
 print("="*60)
 # figures = plot_dataset_variables(output_ds[["Ea(ρ, z)", "Ea(ρ̄, z)", "Ēa(ρ, z) - Ea(ρ̄, z)"]], time_stride=1, col="time", col_wrap=5, cmap="viridis", vmin=0 ,vmax=3, x="x_caa")
-figures = plot_dataset_variables(output_ds[["Ea(ρ, z)", "Ea(ρ̄, z)", "Ēa(ρ, z) - Ea(ρ̄, z)"]], time_stride=1, col="time", col_wrap=5, cmap="RdBu_r", vmin=-10, vmax=10, x="x_caa")
+figures = plot_dataset_variables(output_ds[["Ea(ρ, z)", "Ea(ρ̄, z)", "Ēa(ρ, z) - Ea(ρ̄, z)"]], time_stride=1, col="time", cmap="RdBu_r", vmin=-10, vmax=10, x="x_caa")
+# figures = plot_dataset_variables(output_ds[["Ea(ρ, z)", "Ea(ρ̄, z)", "Ēa(ρ, z) - Ea(ρ̄, z)"]], time_stride=1, cmap="RdBu_r", vmin=-10, vmax=10, x="x_caa")
 #---

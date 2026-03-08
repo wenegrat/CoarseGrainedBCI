@@ -397,6 +397,69 @@ def _create_inverse_sort_lookup(vertically_sorted_ds, verbose=False):
     return inverse_sort_indices, z_1d_sorted_values
 #---
 
+#+++ z_0 lookup helpers
+def _find_z0_xarray(ρ, z, ρ_sorted_profile):
+    """
+    Find the reference height z_0 for a single point (xarray inputs)
+
+    z_0 is the height in the sorted reference state where density equals ρ,
+    choosing the one closest to the actual height z. If ρ is not present
+    exactly in the sorted profile (e.g. a filtered density not in the full
+    sort), the position of the nearest density value is returned instead.
+
+    Parameters
+    ----------
+    ρ : float
+        Density at the point
+    z : float
+        Physical z coordinate at the point
+    ρ_sorted_profile : xr.DataArray
+        1D sorted density profile indexed by z_1d_sorted
+
+    Returns
+    -------
+    z_0 : xr.DataArray
+        Reference height (scalar DataArray with z_1d_sorted coordinate)
+    """
+    z_possibilities = ρ_sorted_profile.where(ρ_sorted_profile == ρ, drop=True).z_1d_sorted
+    if len(z_possibilities) > 0:
+        return z_possibilities[abs(z_possibilities - z).argmin()]
+    idx_min = int(np.argmin(np.abs(ρ_sorted_profile.values - ρ)))
+    return ρ_sorted_profile.z_1d_sorted[idx_min]
+
+
+def _find_z0_numpy(ρ, z, ρ_sorted_array, z_sorted_array):
+    """
+    Find the reference height z_0 for a single point (numpy inputs)
+
+    z_0 is the height in the sorted reference state where density equals ρ,
+    choosing the one closest to the actual height z. If ρ is not present
+    exactly in the sorted profile (e.g. a filtered density not in the full
+    sort), the position of the nearest density value is returned instead.
+
+    Parameters
+    ----------
+    ρ : float
+        Density at the point
+    z : float
+        Physical z coordinate at the point
+    ρ_sorted_array : np.ndarray
+        1D sorted density profile values
+    z_sorted_array : np.ndarray
+        1D z coordinates corresponding to ρ_sorted_array
+
+    Returns
+    -------
+    z_0 : float
+        Reference height
+    """
+    mask = ρ_sorted_array == ρ
+    if mask.any():
+        z_possibilities = z_sorted_array[mask]
+        return z_possibilities[np.abs(z_possibilities - z).argmin()]
+    return z_sorted_array[np.argmin(np.abs(ρ_sorted_array - ρ))]
+#---
+
 #+++ Local APE calculations using on-the-fly integral method
 def _local_APE_on_the_fly_integral_xarray(ρ, z, vertically_sorted_ds):
     """
@@ -417,15 +480,8 @@ def _local_APE_on_the_fly_integral_xarray(ρ, z, vertically_sorted_ds):
     -----
     ρ0 is the module-level reference density constant, not a parameter.
     """
-    # Get z_0
     ρ_sorted_profile = vertically_sorted_ds.rho_1d_sorted
-    mask = ρ_sorted_profile == ρ
-    if any(mask):
-        z_possibilities = ρ_sorted_profile.where(mask, drop=True).z_1d_sorted
-        z_0 = z_possibilities[abs(z_possibilities - z).argmin()]
-    else:
-        idx_min = np.argmin(np.abs(ρ_sorted_profile - ρ))
-        z_0 = ρ_sorted_profile.z_1d_sorted[idx_min]
+    z_0 = _find_z0_xarray(ρ, z, ρ_sorted_profile)
 
     # Calculate displacement and slice
     if z > z_0:
@@ -481,14 +537,7 @@ def _local_APE_on_the_fly_integral_numpy(ρ, z, vertically_sorted_ds):
     dz_sorted_array = vertically_sorted_ds.dz_1d_sorted.values
     z_sorted_array = vertically_sorted_ds.z_1d_sorted.values
 
-    # Get z_0: find all z values where sorted density equals ρ, then pick closest to z
-    mask = ρ_sorted_array == ρ
-    if any(mask):
-        z_possibilities = z_sorted_array[mask]
-        z_0 = z_possibilities[np.abs(z_possibilities - z).argmin()]
-    else:
-        idx_min = np.argmin(np.abs(ρ_sorted_array - ρ))
-        z_0 = z_sorted_array[idx_min]
+    z_0 = _find_z0_numpy(ρ, z, ρ_sorted_array, z_sorted_array)
 
     # Find integer indices using binary search (much faster than .sel())
     idx_z = np.searchsorted(z_sorted_array, z)
@@ -683,15 +732,8 @@ def _local_APE_precomputed_integral_xarray(ρ, z, vertically_sorted_ds):
     z_0 is calculated by finding all z values where the sorted density equals ρ,
     then selecting the one closest to the current z coordinate.
     """
-    # Get z_0: find all z values where sorted density equals ρ, then pick closest to z
-    # If exact match not found (e.g. filtered ρ̄ not in full ρ sort), fall back to nearest density
     ρ_sorted_profile = vertically_sorted_ds.rho_1d_sorted
-    z_possibilities = ρ_sorted_profile.where(ρ_sorted_profile == ρ, drop=True).z_1d_sorted
-    if len(z_possibilities) > 0:
-        z_0 = z_possibilities[abs(z_possibilities - z).argmin()]
-    else:
-        idx_min = int(np.argmin(np.abs(ρ_sorted_profile.values - ρ)))
-        z_0 = ρ_sorted_profile.z_1d_sorted[idx_min]
+    z_0 = _find_z0_xarray(ρ, z, ρ_sorted_profile)
 
     # Get cumulative integral of sorted density profile
     cumulative_ρ_sorted_integral = vertically_sorted_ds["rho_1d_sorted_cumulative_integral"]
