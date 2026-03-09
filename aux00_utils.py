@@ -78,7 +78,7 @@ def condense(ds, vlist, varname, dimname="i", indices=None):
     ds = ds.drop(vlist)
     return ds
 
-def condense_velocities(ds, indices=[1, 2, 3]):
+def condense_velocities(ds, dimname="i", indices=[1, 2, 3]):
     """Condense velocity components into tensor form"""
-    return condense(ds, ["u", "v", "w"], "uᵢ", dimname="i", indices=indices)
+    return condense(ds, ["u", "v", "w"], "uᵢ", dimname=dimname, indices=indices)
 #---

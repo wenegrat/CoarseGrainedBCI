@@ -14,10 +14,11 @@ Workflow:
 import numpy as np
 import xarray as xr
 import gcm_filters
-from aux00_utils import load_dataset_and_grid
+from aux00_utils import load_dataset_and_grid, condense_velocities, condense_velocities
 from aux01_ape_functions import (
     calculate_density_fields_from_buoyancy,
     local_potential_energies_timeseries,
+    calculate_subfilter_stress,
 )
 from ape_plots import plot_dataset_variables
 #---
@@ -50,10 +51,11 @@ gaussian_filter = gcm_filters.Filter(
 )
 
 ds["b̄"] = gaussian_filter.apply(ds.b, dims=filtered_dimensions) # An overbar denotes a filtering operation
+ds = condense_velocities(ds, indices=[1, 2, 3]) # Condense velocity components into tensor form
 print(f"Buoyancy filtered with length scale: {filter_length_scale}")
 
-ds_filt = ds[["b̄", "dV", "LxLy"]].copy()
-ds_full = ds[["b", "dV", "LxLy"]].copy()
+ds_filt = ds[["b̄", "dV", "LxLy", "uᵢ"]].copy()
+ds_full = ds[["b", "dV", "LxLy", "uᵢ"]].copy()
 #---
 
 #+++ Calculate density fields
@@ -70,6 +72,13 @@ print("Calculating local APE...")
 
 full_local_potential_energies = local_potential_energies_timeseries(ds_full, use_numpy_version=True, ape_method="precomputed_integral", density_name="ρ", rho_to_sort=ds_full.ρ)
 filt_local_potential_energies = local_potential_energies_timeseries(ds_filt, use_numpy_version=True, ape_method="precomputed_integral", density_name="ρ̄", rho_to_sort=ds_full.ρ)
+
+subfilter_stress = calculate_subfilter_stress(
+    ds_full,
+    gaussian_filter, filter_dims=filtered_dimensions,
+    density_name="ρ", velocity_vector_name="uᵢ", filtered_density=ds_filt.ρ̄,
+)
+pause
 #---
 
 #+++ Filter local APE

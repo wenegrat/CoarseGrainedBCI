@@ -1110,3 +1110,50 @@ def integrated_KE_timeseries(ds, verbose=False, u_name="u", v_name="v", w_name="
     if verbose: print("\nDone!")
     return KE
 #---
+
+#+++ Subfilter stress tensor
+def calculate_subfilter_stress(ds, gaussian_filter, filter_dims=["x_caa", "y_aca"],
+                                density_name="rho", velocity_vector_name="uᵢ",
+                                filtered_density=None):
+    """
+    Calculate the subfilter stress tensor τᵢ = filtered(ρ uᵢ) - filtered(ρ) filtered(uᵢ)
+
+    This represents the subfilter momentum flux arising from correlations between
+    density and velocity fluctuations at scales smaller than the filter width.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        Dataset containing the density and velocity fields. The velocity field
+        must have an "i" dimension indexing the three components, as produced
+        by condense_velocities().
+    gaussian_filter : gcm_filters.Filter
+        Filter object used to apply the spatial filtering operation
+    filter_dims : list of str, optional
+        Spatial dimensions along which to apply the filter. Default is ["x_caa", "y_aca"].
+    density_name : str, optional
+        Name of the density field in ds, default "rho"
+    velocity_vector_name : str, optional
+        Name of the velocity vector field in ds, default "uᵢ"
+    filtered_density : xr.DataArray, optional
+        Pre-computed filtered(ρ). If None, it is computed by applying
+        gaussian_filter to ds[density_name].
+
+    Returns
+    -------
+    xr.DataArray
+        Subfilter stress τᵢ [kg m⁻² s⁻¹] with the same dimensions as ds[velocity_vector_name]
+    """
+    rho = ds[density_name]
+    u_i = ds[velocity_vector_name]
+
+    if filtered_density is None:
+        filtered_density = gaussian_filter.apply(rho, dims=filter_dims)
+
+    filtered_rho_u_i = gaussian_filter.apply(rho * u_i, dims=filter_dims)
+    filtered_u_i = gaussian_filter.apply(u_i, dims=filter_dims)
+
+    tau_i = filtered_rho_u_i - filtered_density * filtered_u_i
+    tau_i.name = "τᵢ"
+    return tau_i
+#---
