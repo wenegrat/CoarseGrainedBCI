@@ -14,7 +14,7 @@ Workflow:
 import numpy as np
 import xarray as xr
 import gcm_filters
-from aux00_utils import load_dataset_and_grid, condense_velocities, condense_velocities
+from aux00_utils import load_dataset_and_grid, condense_velocities, condense_velocities, calculate_gradient
 from aux01_ape_functions import (
     calculate_density_fields_from_buoyancy,
     local_potential_energies_timeseries,
@@ -78,6 +78,9 @@ subfilter_stress = calculate_subfilter_tracer_flux(
     gaussian_filter, filter_dims=filtered_dimensions,
     filtered_density=ds_filt.ρ̄,
 )
+grad_upsilon = calculate_gradient(filt_local_potential_energies.upsilon)
+Pi = -(subfilter_stress * grad_upsilon).sum(dim="i")
+pause
 #---
 
 #+++ Filter local APE
