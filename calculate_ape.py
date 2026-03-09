@@ -18,7 +18,7 @@ from aux00_utils import load_dataset_and_grid, condense_velocities, condense_vel
 from aux01_ape_functions import (
     calculate_density_fields_from_buoyancy,
     local_potential_energies_timeseries,
-    calculate_subfilter_stress,
+    calculate_subfilter_tracer_flux,
 )
 from ape_plots import plot_dataset_variables
 #---
@@ -73,12 +73,11 @@ print("Calculating local APE...")
 full_local_potential_energies = local_potential_energies_timeseries(ds_full, use_numpy_version=True, ape_method="precomputed_integral", density_name="ρ", rho_to_sort=ds_full.ρ)
 filt_local_potential_energies = local_potential_energies_timeseries(ds_filt, use_numpy_version=True, ape_method="precomputed_integral", density_name="ρ̄", rho_to_sort=ds_full.ρ)
 
-subfilter_stress = calculate_subfilter_stress(
-    ds_full,
+subfilter_stress = calculate_subfilter_tracer_flux(
+    ds_full.ρ, ds_full["uᵢ"],
     gaussian_filter, filter_dims=filtered_dimensions,
-    density_name="ρ", velocity_vector_name="uᵢ", filtered_density=ds_filt.ρ̄,
+    filtered_density=ds_filt.ρ̄,
 )
-pause
 #---
 
 #+++ Filter local APE

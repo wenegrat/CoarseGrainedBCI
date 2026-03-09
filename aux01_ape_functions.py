@@ -1112,9 +1112,8 @@ def integrated_KE_timeseries(ds, verbose=False, u_name="u", v_name="v", w_name="
 #---
 
 #+++ Subfilter stress tensor
-def calculate_subfilter_stress(ds, gaussian_filter, filter_dims=["x_caa", "y_aca"],
-                                density_name="rho", velocity_vector_name="uᵢ",
-                                filtered_density=None):
+def calculate_subfilter_tracer_flux(rho, u_i, gaussian_filter, filter_dims=["x_caa", "y_aca"],
+                                filtered_density=None, filtered_velocity_vector=None):
     """
     Calculate the subfilter stress tensor τᵢ = filtered(ρ uᵢ) - filtered(ρ) filtered(uᵢ)
 
@@ -1123,37 +1122,37 @@ def calculate_subfilter_stress(ds, gaussian_filter, filter_dims=["x_caa", "y_aca
 
     Parameters
     ----------
-    ds : xr.Dataset
-        Dataset containing the density and velocity fields. The velocity field
-        must have an "i" dimension indexing the three components, as produced
-        by condense_velocities().
+    rho : xr.DataArray
+        Full (unfiltered) density field
+    u_i : xr.DataArray
+        Full (unfiltered) velocity vector with an "i" dimension indexing the
+        three components (shape: i × time × z × y × x), as produced by
+        condense_velocities()
     gaussian_filter : gcm_filters.Filter
         Filter object used to apply the spatial filtering operation
-    filter_dims : list of str, optional
-        Spatial dimensions along which to apply the filter. Default is ["x_caa", "y_aca"].
-    density_name : str, optional
-        Name of the density field in ds, default "rho"
-    velocity_vector_name : str, optional
-        Name of the velocity vector field in ds, default "uᵢ"
+    filter_dims : list of str
+        Spatial dimensions along which to apply the filter
     filtered_density : xr.DataArray, optional
         Pre-computed filtered(ρ). If None, it is computed by applying
-        gaussian_filter to ds[density_name].
+        gaussian_filter to rho.
+    filtered_velocity_vector : xr.DataArray, optional
+        Pre-computed filtered(uᵢ). If None, it is computed by applying
+        gaussian_filter to u_i.
 
     Returns
     -------
     xr.DataArray
-        Subfilter stress τᵢ [kg m⁻² s⁻¹] with the same dimensions as ds[velocity_vector_name]
+        Subfilter stress τᵢ [kg m⁻² s⁻¹] with the same dimensions as u_i
     """
-    rho = ds[density_name]
-    u_i = ds[velocity_vector_name]
-
     if filtered_density is None:
         filtered_density = gaussian_filter.apply(rho, dims=filter_dims)
 
-    filtered_rho_u_i = gaussian_filter.apply(rho * u_i, dims=filter_dims)
-    filtered_u_i = gaussian_filter.apply(u_i, dims=filter_dims)
+    if filtered_velocity_vector is None:
+        filtered_velocity_vector = gaussian_filter.apply(u_i, dims=filter_dims)
 
-    tau_i = filtered_rho_u_i - filtered_density * filtered_u_i
+    filtered_rho_u_i = gaussian_filter.apply(rho * u_i, dims=filter_dims)
+
+    tau_i = filtered_rho_u_i - filtered_density * filtered_velocity_vector
     tau_i.name = "τᵢ"
     return tau_i
 #---
