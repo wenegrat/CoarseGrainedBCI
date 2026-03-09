@@ -19,6 +19,7 @@ from aux01_ape_functions import (
     calculate_density_fields_from_buoyancy,
     local_potential_energies_timeseries,
     calculate_subfilter_tracer_flux,
+    calculate_cross_scale_ape_flux,
 )
 from ape_plots import plot_dataset_variables
 #---
@@ -73,13 +74,8 @@ print("Calculating local APE...")
 full_local_potential_energies = local_potential_energies_timeseries(ds_full, density_name="ρ", rho_to_sort=ds_full.ρ, ape_method="precomputed_integral", use_numpy_version=True)
 filt_local_potential_energies = local_potential_energies_timeseries(ds_filt, density_name="ρ̄", rho_to_sort=ds_full.ρ, ape_method="precomputed_integral", use_numpy_version=True)
 
-subfilter_stress = calculate_subfilter_tracer_flux(
-    ds_full.ρ, ds_full["uᵢ"],
-    gaussian_filter, filter_dims=filtered_dimensions,
-    filtered_density=ds_filt.ρ̄,
-)
-grad_upsilon = calculate_gradient(filt_local_potential_energies.upsilon)
-cross_scale_ape_flux = -(subfilter_stress * grad_upsilon).sum(dim="i")
+cross_scale_ape_flux = calculate_cross_scale_ape_flux(ds_full.ρ, ds_full["uᵢ"], filt_local_potential_energies.upsilon, gaussian_filter, filter_dims=filtered_dimensions,
+    filtered_density=ds_filt.ρ̄,)
 #---
 
 #+++ Filter local APE

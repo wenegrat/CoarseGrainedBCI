@@ -9,7 +9,7 @@ import numpy as np
 import xarray as xr
 from scipy.integrate import cumulative_trapezoid
 import warnings
-from aux00_utils import integrate
+from aux00_utils import integrate, calculate_gradient
 
 # Physical constants
 g = 9.81  # gravitational acceleration [m/s^2]
@@ -1153,4 +1153,53 @@ def calculate_subfilter_tracer_flux(rho, u_i, gaussian_filter, filter_dims=["x_c
     tau_i = filtered_rho_u_i - filtered_density * filtered_velocity_vector
     tau_i.name = "τᵢ"
     return tau_i
+#---
+
+#+++ Cross-scale APE flux
+def calculate_cross_scale_ape_flux(rho, u_i, upsilon, gaussian_filter, filter_dims=["x_caa", "y_aca"],
+                                    filtered_density=None, filtered_velocity_vector=None,
+                                    i_dim="i"):
+    """
+    Calculate the cross-scale APE flux Π = -τᵢ · ∇Υ
+
+    The cross-scale APE flux quantifies the transfer of APE across the filter
+    scale via the contraction of the subfilter tracer flux τᵢ with the gradient
+    of the buoyancy displacement potential Υ = g(z - z₀)/ρ₀:
+
+        Π = -(filtered(ρ uᵢ) - filtered(ρ) filtered(uᵢ)) · ∂Υ/∂xᵢ
+
+    Parameters
+    ----------
+    rho : xr.DataArray
+        Full (unfiltered) density field
+    u_i : xr.DataArray
+        Full (unfiltered) velocity vector with an "i" index dimension, as
+        produced by condense_velocities()
+    upsilon : xr.DataArray
+        Buoyancy displacement potential Υ = g(z - z₀)/ρ₀, typically taken
+        from the filtered potential energies dataset
+    gaussian_filter : gcm_filters.Filter
+        Filter object used to apply the spatial filtering operation
+    filter_dims : list of str
+        Spatial dimensions along which to apply the filter
+    filtered_density : xr.DataArray, optional
+        Pre-computed filtered(ρ). Passed through to calculate_subfilter_tracer_flux.
+    filtered_velocity_vector : xr.DataArray, optional
+        Pre-computed filtered(uᵢ). Passed through to calculate_subfilter_tracer_flux.
+    i_dim : str, optional
+        Name of the vector index dimension, default "i"
+
+    Returns
+    -------
+    xr.DataArray
+        Cross-scale APE flux Π [J m⁻³ s⁻¹] with the same spatial dimensions
+        as rho (the i dimension is summed over)
+    """
+    tau_i = calculate_subfilter_tracer_flux(
+        rho, u_i, gaussian_filter, filter_dims,
+        filtered_density=filtered_density,
+        filtered_velocity_vector=filtered_velocity_vector,
+    )
+    grad_upsilon = calculate_gradient(upsilon)
+    return -(tau_i * grad_upsilon).sum(dim=i_dim)
 #---
