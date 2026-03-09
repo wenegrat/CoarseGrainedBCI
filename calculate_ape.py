@@ -79,8 +79,7 @@ subfilter_stress = calculate_subfilter_tracer_flux(
     filtered_density=ds_filt.ρ̄,
 )
 grad_upsilon = calculate_gradient(filt_local_potential_energies.upsilon)
-Pi = -(subfilter_stress * grad_upsilon).sum(dim="i")
-pause
+cross_scale_ape_flux = -(subfilter_stress * grad_upsilon).sum(dim="i")
 #---
 
 #+++ Filter local APE
