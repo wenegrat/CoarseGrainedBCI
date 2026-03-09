@@ -64,3 +64,21 @@ def load_dataset_and_grid(filename):
 
     return ds
 #---
+
+#+++ Condensing operations for Datasets
+def condense(ds, vlist, varname, dimname="i", indices=None):
+    """
+    Condense variables in `vlist` into one variable named `varname`.
+    In the process, individual variables in `vlist` are removed from `ds`.
+    """
+    if indices is None:
+        indices = range(1, len(vlist)+1)
+
+    ds[varname] = ds[vlist].to_array(dim=dimname).assign_coords({dimname : list(indices)})
+    ds = ds.drop(vlist)
+    return ds
+
+def condense_velocities(ds, indices=[1, 2, 3]):
+    """Condense velocity components into tensor form"""
+    return condense(ds, ["u", "v", "w"], "uᵢ", dimname="i", indices=indices)
+#---
