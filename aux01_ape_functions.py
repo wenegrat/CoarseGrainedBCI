@@ -532,6 +532,31 @@ def calculate_z0_field_numpy(rho, vertically_sorted_ds, z_name="z_aac"):
         dask="allowed",
         kwargs=dict(ρ_sorted_array=ρ_sorted_array, z_sorted_array=z_sorted_array),
     )
+
+
+def calculate_Upsilon(z0_field, rho, z_name="z_aac"):
+    """
+    Calculate the buoyancy displacement potential Υ = g (z - z_0) / ρ0
+
+    Υ represents the work done per unit mass in displacing a parcel from its
+    reference height z_0 to its actual height z, against the background
+    buoyancy gradient.
+
+    Parameters
+    ----------
+    z0_field : xr.DataArray
+        3D field of reference heights z_0, same shape as rho
+    rho : xr.DataArray
+        Density field, used to supply the z coordinate
+    z_name : str, optional
+        Name of the vertical coordinate in rho, default "z_aac"
+
+    Returns
+    -------
+    xr.DataArray
+        3D field of Υ values [m² s⁻²], same shape as rho
+    """
+    return g * (rho[z_name] - z0_field) / ρ0
 #---
 
 #+++ Local APE calculations using on-the-fly integral method
@@ -895,6 +920,7 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting
     # Initialize list to store local APE fields for each time
     local_ape_list = []
     local_z0_list = []
+    local_upsilon_list = []
     local_rho_sorted_list = []
     local_dz_sorted_list = []
 
@@ -956,9 +982,12 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting
         else:
             raise ValueError(f"Invalid ape_method: {ape_method}. Must be 'on_the_fly' or 'precomputed_integral'")
 
+        local_upsilon = calculate_Upsilon(local_z0, rho_t, z_name=z_name)
+
         # Append to lists in order to concatenate later
         local_ape_list.append(local_ape)
         local_z0_list.append(local_z0)
+        local_upsilon_list.append(local_upsilon)
         local_rho_sorted_list.append(_vertically_sorted_ds.rho_1d_sorted)
         local_dz_sorted_list.append(_vertically_sorted_ds.dz_1d_sorted)
 
@@ -970,6 +999,9 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting
 
     local_z0_4d = xr.concat(local_z0_list, dim="time")
     local_z0_4d["time"] = ds.time
+
+    local_upsilon_4d = xr.concat(local_upsilon_list, dim="time")
+    local_upsilon_4d["time"] = ds.time
 
     local_rho_sorted_4d = xr.concat(local_rho_sorted_list, dim="time")
     local_rho_sorted_4d["time"] = ds.time
@@ -984,6 +1016,7 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting
     local_potential_energies_ds = xr.Dataset(dict(
         ape = local_ape_4d,
         z0 = local_z0_4d,
+        upsilon = local_upsilon_4d,
         tpe = tpe,
         rpe = rpe,
         rho_sorted = local_rho_sorted_4d,
