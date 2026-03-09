@@ -70,8 +70,8 @@ print("Density fields calculated: ρ, Z, ρ̄")
 print("\n" + "="*60)
 print("Calculating local APE...")
 
-full_local_potential_energies = local_potential_energies_timeseries(ds_full, use_numpy_version=True, ape_method="precomputed_integral", density_name="ρ", rho_to_sort=ds_full.ρ)
-filt_local_potential_energies = local_potential_energies_timeseries(ds_filt, use_numpy_version=True, ape_method="precomputed_integral", density_name="ρ̄", rho_to_sort=ds_full.ρ)
+full_local_potential_energies = local_potential_energies_timeseries(ds_full, density_name="ρ", rho_to_sort=ds_full.ρ, ape_method="precomputed_integral", use_numpy_version=True)
+filt_local_potential_energies = local_potential_energies_timeseries(ds_filt, density_name="ρ̄", rho_to_sort=ds_full.ρ, ape_method="precomputed_integral", use_numpy_version=True)
 
 subfilter_stress = calculate_subfilter_tracer_flux(
     ds_full.ρ, ds_full["uᵢ"],

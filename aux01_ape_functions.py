@@ -545,7 +545,9 @@ def calculate_Upsilon(z0_field, rho, z_name="z_aac"):
     Parameters
     ----------
     z0_field : xr.DataArray
-        3D field of reference heights z_0, same shape as rho
+        3D field of reference heights z_0, which is where the density rho is at
+        neutral buoyancy in the sorted reference state (using the original non-filtered
+        density for the sorting). Same shape as rho.
     rho : xr.DataArray
         Density field, used to supply the z coordinate
     z_name : str, optional
@@ -964,13 +966,9 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting
         elif ape_method == "precomputed_integral":
             # Compute cumulative integrals for precomputed method
             # ∫_0^z ρ(z') dz' = cumsum(ρ * dz)
-            _vertically_sorted_ds["rho_1d_sorted_cumulative_integral"] = (
-                _vertically_sorted_ds.rho_1d_sorted * _vertically_sorted_ds.dz_1d_sorted
-            ).cumsum("z_1d_sorted")
+            _vertically_sorted_ds["rho_1d_sorted_cumulative_integral"] = (_vertically_sorted_ds.rho_1d_sorted * _vertically_sorted_ds.dz_1d_sorted).cumsum("z_1d_sorted")
             # ∫_0^z dz' = cumsum(dz)
-            _vertically_sorted_ds["dz_1d_sorted_cumulative_integral"] = (
-                _vertically_sorted_ds.dz_1d_sorted.cumsum("z_1d_sorted")
-            )
+            _vertically_sorted_ds["dz_1d_sorted_cumulative_integral"] = _vertically_sorted_ds.dz_1d_sorted.cumsum("z_1d_sorted")
 
             local_ape = vectorized_local_APE_precomputed_integral(
                 ds_t_with_rho, _vertically_sorted_ds,
