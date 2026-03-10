@@ -1,7 +1,7 @@
 """
-Energy calculation functions for Available Potential Energy (APE) analysis
+Potential energy calculation functions for Available Potential Energy (APE) analysis
 
-This module contains functions for calculating APE using the sorting method
+This module contains functions for calculating TPE, RPE, and APE using the sorting method
 following Winters et al. (1995).
 """
 
@@ -1024,94 +1024,9 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting
     return local_potential_energies_ds
 #---
 
-#+++ Calculate kinetic energy
-def local_KE(u, v, w):
-    """
-    Calculate local kinetic energy density
-
-    Parameters
-    ----------
-    u, v, w : xr.DataArray
-        Velocity components
-
-    Returns
-    -------
-    xr.DataArray
-        Local KE density: ρ0 * (u^2 + v^2 + w^2) / 2
-    """
-    return ρ0 * (u**2 + v**2 + w**2) / 2
-
-def integrated_KE(ds, u_name="u", v_name="v", w_name="w", dV_name="dV",
-                  x_dim="x_caa", y_dim="y_aca", z_dim="z_aac"):
-    """
-    Calculate volume-integrated kinetic energy
-
-    Parameters
-    ----------
-    ds : xr.Dataset
-        Dataset containing velocity fields
-    u_name : str
-        Name of u velocity component
-    v_name : str
-        Name of v velocity component
-    w_name : str
-        Name of w velocity component
-    dV_name : str
-        Name of volume element field
-    x_dim, y_dim, z_dim : str
-        Names of spatial dimensions
-
-    Returns
-    -------
-    xr.DataArray
-        Integrated KE
-    """
-    u = ds[u_name]
-    v = ds[v_name]
-    w = ds[w_name]
-    dV = ds[dV_name]
-
-    ke = local_KE(u, v, w)
-    KE = (ke * dV).sum((x_dim, y_dim, z_dim))
-    return KE
-
-def integrated_KE_timeseries(ds, verbose=False, u_name="u", v_name="v", w_name="w",
-                             dV_name="dV", x_dim="x_caa", y_dim="y_aca", z_dim="z_aac"):
-    """
-    Calculate volume-integrated KE for all time steps
-
-    Parameters
-    ----------
-    ds : xr.Dataset
-        Dataset containing velocity fields
-    verbose : bool
-        Whether to print progress
-    u_name : str
-        Name of u velocity component
-    v_name : str
-        Name of v velocity component
-    w_name : str
-        Name of w velocity component
-    dV_name : str
-        Name of volume element field
-    x_dim, y_dim, z_dim : str
-        Names of spatial dimensions
-
-    Returns
-    -------
-    xr.DataArray
-        Time series of volume-integrated KE
-    """
-    if verbose: print("Calculating KE time series...")
-    KE = integrated_KE(ds, u_name=u_name, v_name=v_name, w_name=w_name,
-                      dV_name=dV_name, x_dim=x_dim, y_dim=y_dim, z_dim=z_dim)
-    if verbose: print("\nDone!")
-    return KE
-#---
-
 #+++ Subfilter stress tensor
 def calculate_subfilter_tracer_flux(rho, u_i, gaussian_filter, filter_dims=["x_caa", "y_aca"],
-                                filtered_density=None, filtered_velocity_vector=None):
+                                    filtered_density=None, filtered_velocity_vector=None):
     """
     Calculate the subfilter stress tensor τᵢ = filtered(ρ uᵢ) - filtered(ρ) filtered(uᵢ)
 
@@ -1155,10 +1070,70 @@ def calculate_subfilter_tracer_flux(rho, u_i, gaussian_filter, filter_dims=["x_c
     return tau_i
 #---
 
+#+++ SFS APE dissipation
+def calculate_sfs_ape_dissipation(rho, upsilon, upsilon_l, kappa, gaussian_filter,
+                                  filter_dims=["x_caa", "y_aca"],
+                                  filtered_density=None, index_dim="i"):
+    """
+    Calculate the SFS APE dissipation ε_s = filtered(κ ∇ρ · ∇Υ) - κ ∇ρ̄ · ∇Υˡ
+
+    The SFS APE dissipation quantifies the removal of large-scale APE by
+    subfilter-scale diffusive processes:
+
+        ε_s = filtered(κ ∇ρ · ∇Υ) - κ ∇ρ̄ · ∇Υˡ
+
+    where:
+        Υ  = g (z - z_*(ρ)) / ρ₀   — displacement potential using full density
+        Υˡ = g (z - z_*(ρ̄)) / ρ₀   — displacement potential using filtered density
+        κ  — diffusivity field
+
+    Parameters
+    ----------
+    rho : xr.DataArray
+        Full (unfiltered) density field ρ
+    upsilon : xr.DataArray
+        Buoyancy displacement potential Υ(ρ, z) = g(z - z_*(ρ))/ρ₀, computed
+        from the full density sort (full_local_potential_energies.upsilon)
+    upsilon_l : xr.DataArray
+        Large-scale displacement potential Υˡ(ρ̄, z) = g(z - z_*(ρ̄))/ρ₀,
+        computed from the filtered density sort (filt_local_potential_energies.upsilon)
+    kappa : xr.DataArray
+        Diffusivity field κ (e.g. ds.κ_e from SmagorinskyLilly)
+    gaussian_filter : gcm_filters.Filter
+        Filter object used to apply the spatial filtering operation
+    filter_dims : list of str
+        Spatial dimensions along which to apply the filter
+    filtered_density : xr.DataArray, optional
+        Pre-computed filtered density ρ̄. If None, it is computed by applying
+        gaussian_filter to rho.
+    index_dim : str, optional
+        Name of the vector index dimension, default "i"
+
+    Returns
+    -------
+    xr.DataArray
+        SFS APE dissipation ε_s [J m⁻³ s⁻¹] with the same spatial dimensions as rho
+    """
+    # Term 1: filtered(κ ∇ρ · ∇Υ)
+    grad_rho = calculate_gradient(rho)
+    grad_upsilon = calculate_gradient(upsilon)
+    kappa_grad_dot = kappa * (grad_rho * grad_upsilon).sum(dim=index_dim)
+    term1 = gaussian_filter.apply(kappa_grad_dot, dims=filter_dims)
+
+    # Term 2: κ ∇ρ̄ · ∇Υˡ
+    if filtered_density is None:
+        filtered_density = gaussian_filter.apply(rho, dims=filter_dims)
+    grad_rho_bar = calculate_gradient(filtered_density)
+    grad_upsilon_l = calculate_gradient(upsilon_l)
+    term2 = kappa * (grad_rho_bar * grad_upsilon_l).sum(dim=index_dim)
+
+    return term1 - term2
+#---
+
 #+++ Cross-scale APE flux
 def calculate_cross_scale_ape_flux(rho, u_i, upsilon, gaussian_filter, filter_dims=["x_caa", "y_aca"],
                                     filtered_density=None, filtered_velocity_vector=None,
-                                    i_dim="i"):
+                                    index_dim="i"):
     """
     Calculate the cross-scale APE flux Π = -τᵢ · ∇Υ
 
@@ -1186,7 +1161,7 @@ def calculate_cross_scale_ape_flux(rho, u_i, upsilon, gaussian_filter, filter_di
         Pre-computed filtered(ρ). Passed through to calculate_subfilter_tracer_flux.
     filtered_velocity_vector : xr.DataArray, optional
         Pre-computed filtered(uᵢ). Passed through to calculate_subfilter_tracer_flux.
-    i_dim : str, optional
+    index_dim : str, optional
         Name of the vector index dimension, default "i"
 
     Returns
@@ -1201,5 +1176,5 @@ def calculate_cross_scale_ape_flux(rho, u_i, upsilon, gaussian_filter, filter_di
         filtered_velocity_vector=filtered_velocity_vector,
     )
     grad_upsilon = calculate_gradient(upsilon)
-    return -(tau_i * grad_upsilon).sum(dim=i_dim)
+    return -(tau_i * grad_upsilon).sum(dim=index_dim)
 #---

@@ -8,41 +8,59 @@ using Oceananigans.Architectures: on_architecture
 
 include("utils.jl")
 
-#+++ Create grid
-Lx = Lz = 10
-Ly = 5
+#+++ Define simulation parameters
+params = (
+    Lx = 10,
+    Ly = 5,
+    Lz = 10,
+    Ri = 0.1,
+    h = 1/4,
+    perturbation_amplitude = 0.01,
+    stop_time = 200.0,
+)
+#---
 
+#+++ Create grid
 if has_cuda_gpu()
     arch = GPU()
     Nz = 1024
     x_aspect_ratio = 2  # Δx / Δz ratio
     y_aspect_ratio = 8  # Δy / Δz ratio
+    ν = 1e-4
+    κ = 1e-4
 else
     arch = CPU()
     Nz = 256
     x_aspect_ratio = 4   # Δx / Δz ratio
     y_aspect_ratio = Inf # Δy / Δz ratio
+    ν = 1e-3
+    κ = 1e-3
+
     @info "No CUDA GPU detected"
     @info "Cell aspect ratio: Δx/Δz = $(x_aspect_ratio)"
 end
 
 # Calculate horizontal resolutions based on aspect ratios
-Nx = round(Int, Nz * (Lx / Lz) / x_aspect_ratio)
-Ny = isinf(y_aspect_ratio) ? 1 : round(Int, Nz * (Ly / Lz) / y_aspect_ratio)
+Nx = round(Int, Nz * (params.Lx / params.Lz) / x_aspect_ratio)
+Ny = isinf(y_aspect_ratio) ? 1 : round(Int, Nz * (params.Ly / params.Lz) / y_aspect_ratio)
 
 # Adjust grid sizes to be factorizable by 2, 3, and 5 (for FFT performance)
 Nx = closest_factor_number((2, 3, 5), Nx)
 Ny = closest_factor_number((2, 3, 5), Ny)
 
-grid = RectilinearGrid(arch; size=(Nx, Ny, Nz),
-                       x=(-Lx/2, Lx/2), y=(-Ly/2, Ly/2), z=(-Lz/2, Lz/2),
+params = (; params..., Nx, Ny, Nz, ν, κ)
+
+grid = RectilinearGrid(arch; size=(params.Nx, params.Ny, params.Nz),
+                       x=(-params.Lx/2, params.Lx/2),
+                       y=(-params.Ly/2, params.Ly/2),
+                       z=(-params.Lz/2, params.Lz/2),
                        topology=(Periodic, Periodic, Bounded))
 #---
 
 #+++ Create model
 model = NonhydrostaticModel(grid;
                             advection = WENO(order=5),
-                            # closure = ScalarDiffusivity(ν=ν, κ=ν),
+                            closure = ScalarDiffusivity(ν=params.ν, κ=params.κ),
                             buoyancy = BuoyancyTracer(),
                             tracers = :b)
 u, v, w = model.velocities
@@ -50,24 +68,20 @@ b = model.tracers.b
 #---
 
 #+++ Define initial conditions: shear flow with stratification and perturbation
-Ri = 0.1
-h = 1/4
-perturbation_amplitude = 0.01
-
 shear_flow(x, z) = tanh(z) # Base shear flow
-stratification(x, z) = h * Ri * tanh(z / h) # Base stratification
-perturbation(x, z) = perturbation_amplitude * sin(2π * x / 10) * exp(-z^2 / 2) # Small perturbation to trigger instability
+stratification(x, z) = params.h * params.Ri * tanh(z / params.h) # Base stratification
+perturbation(x, z) = params.perturbation_amplitude * sin(2π * x / 10) * exp(-z^2 / 2) # Small perturbation to trigger instability
 
 # Set initial conditions
 uᵢ(x, y, z) = shear_flow(x, z)
 bᵢ(x, y, z) = stratification(x, z)
-wᵢ(x, y, z) = perturbation_amplitude * cos(2π * x / 10) * exp(-z^2 / 2)
+wᵢ(x, y, z) = params.perturbation_amplitude * cos(2π * x / 10 + π/2) * exp(-z^2 / 2)
 
 set!(model, u=uᵢ, b=bᵢ, w=wᵢ)
 #---
 
 #+++ Setup simulation
-simulation = Simulation(model, Δt=0.01, stop_time=200.0)
+simulation = Simulation(model, Δt=0.01, stop_time=params.stop_time)
 
 #+++ Add progress messenger
 using Oceanostics.ProgressMessengers
@@ -109,22 +123,32 @@ PE = Integral(pe)
 
 vorticity = Field(∂z(u) - ∂x(w))
 
+outputs = (; ω=vorticity, b, pe, PE, u=u_center, v=v_center, w=w_center)
+
 using NCDatasets
-output_filename = "output/kelvin_helmholtz_instability_$(Nx)x$(Ny)x$(Nz)"
+output_filename = "output/kelvin_helmholtz_instability_$(params.Nx)x$(params.Ny)x$(params.Nz)"
+if !(model.closure isa ScalarDiffusivity)
+    ν = viscosity(model)
+    κ = diffusivity(model, Val(:b))
+    outputs = (; outputs..., ν, κ)
+end
+
 simulation.output_writers[:fields] =
-    NetCDFWriter(model, (; ω=vorticity, b, pe, PE, u=u_center, v=v_center, w=w_center),
+    NetCDFWriter(model, outputs,
                  schedule = TimeInterval(4),
                  filename = output_filename,
                  array_type = Array{Float64},
+                 global_attributes = params,
                  overwrite_existing = true)
 
-output_filename_2d = "output/kelvin_helmholtz_instability_$(Nx)x$(Ny)x$(Nz)_2d.nc"
+output_filename_2d = "output/kelvin_helmholtz_instability_$(params.Nx)x$(params.Ny)x$(params.Nz)_2d.nc"
 simulation.output_writers[:twod_fields] =
-NetCDFWriter(model, (; ω=vorticity, b),
+NetCDFWriter(model, outputs,
             schedule = TimeInterval(2),
             filename = output_filename_2d,
             array_type = Array{Float32},
             indices = (:, 1, :),
+            global_attributes = params,
             overwrite_existing = true)
 
 
