@@ -1025,7 +1025,7 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting
 #---
 
 #+++ SFS flux tensor (general)
-def calculate_sfs_flux_tensor(a, b, gaussian_filter, filter_dims=["x_caa", "y_aca"],
+def calculate_sfs_flux_tensor(a, b, filter, filter_dims=["x_caa", "y_aca"],
                               filtered_a=None, filtered_b=None):
     """
     Calculate the SFS flux tensor filtered(a·b) - filtered(a)·filtered(b)
@@ -1040,7 +1040,7 @@ def calculate_sfs_flux_tensor(a, b, gaussian_filter, filter_dims=["x_caa", "y_ac
         First (unfiltered) field
     b : xr.DataArray
         Second (unfiltered) field
-    gaussian_filter : gcm_filters.Filter
+    filter : gcm_filters.Filter
         Filter object used to apply the spatial filtering operation
     filter_dims : list of str
         Spatial dimensions along which to apply the filter
@@ -1055,16 +1055,16 @@ def calculate_sfs_flux_tensor(a, b, gaussian_filter, filter_dims=["x_caa", "y_ac
         SFS flux tensor filtered(a·b) - filtered(a)·filtered(b)
     """
     if filtered_a is None:
-        filtered_a = gaussian_filter.apply(a, dims=filter_dims)
+        filtered_a = filter.apply(a, dims=filter_dims)
 
     if filtered_b is None:
-        filtered_b = gaussian_filter.apply(b, dims=filter_dims)
+        filtered_b = filter.apply(b, dims=filter_dims)
 
-    return gaussian_filter.apply(a * b, dims=filter_dims) - filtered_a * filtered_b
+    return filter.apply(a * b, dims=filter_dims) - filtered_a * filtered_b
 #---
 
 #+++ Subfilter stress tensor
-def calculate_subfilter_tracer_flux(rho, u_i, gaussian_filter, filter_dims=["x_caa", "y_aca"],
+def calculate_subfilter_tracer_flux(rho, u_i, filter, filter_dims=["x_caa", "y_aca"],
                                     filtered_density=None, filtered_velocity_vector=None):
     """
     Calculate the subfilter stress tensor τᵢ = filtered(ρ uᵢ) - filtered(ρ) filtered(uᵢ)
@@ -1080,23 +1080,23 @@ def calculate_subfilter_tracer_flux(rho, u_i, gaussian_filter, filter_dims=["x_c
         Full (unfiltered) velocity vector with an "i" dimension indexing the
         three components (shape: i × time × z × y × x), as produced by
         condense_velocities()
-    gaussian_filter : gcm_filters.Filter
+    filter : gcm_filters.Filter
         Filter object used to apply the spatial filtering operation
     filter_dims : list of str
         Spatial dimensions along which to apply the filter
     filtered_density : xr.DataArray, optional
         Pre-computed filtered(ρ). If None, it is computed by applying
-        gaussian_filter to rho.
+        filter to rho.
     filtered_velocity_vector : xr.DataArray, optional
         Pre-computed filtered(uᵢ). If None, it is computed by applying
-        gaussian_filter to u_i.
+        filter to u_i.
 
     Returns
     -------
     xr.DataArray
         Subfilter stress τᵢ [kg m⁻² s⁻¹] with the same dimensions as u_i
     """
-    tau_i = calculate_sfs_flux_tensor(rho, u_i, gaussian_filter,
+    tau_i = calculate_sfs_flux_tensor(rho, u_i, filter,
                                       filter_dims=filter_dims,
                                       filtered_a=filtered_density,
                                       filtered_b=filtered_velocity_vector)
@@ -1105,7 +1105,7 @@ def calculate_subfilter_tracer_flux(rho, u_i, gaussian_filter, filter_dims=["x_c
 #---
 
 #+++ KE-APE exchange term
-def calculate_ke_ape_exchange_term(w, b, gaussian_filter, filter_dims=["x_caa", "y_aca"],
+def calculate_ke_ape_exchange_term(w, b, filter, filter_dims=["x_caa", "y_aca"],
                                    filtered_w=None, filtered_b=None):
     """
     Calculate the KE-APE exchange term -(filtered(w·b) - filtered(w)·filtered(b))
@@ -1120,7 +1120,7 @@ def calculate_ke_ape_exchange_term(w, b, gaussian_filter, filter_dims=["x_caa", 
         Full (unfiltered) vertical velocity field
     b : xr.DataArray
         Full (unfiltered) buoyancy field
-    gaussian_filter : gcm_filters.Filter
+    filter : gcm_filters.Filter
         Filter object used to apply the spatial filtering operation
     filter_dims : list of str
         Spatial dimensions along which to apply the filter
@@ -1134,7 +1134,7 @@ def calculate_ke_ape_exchange_term(w, b, gaussian_filter, filter_dims=["x_caa", 
     xr.DataArray
         KE-APE exchange term -(filtered(w·b) - filtered(w)·filtered(b))
     """
-    result = -calculate_sfs_flux_tensor(w, b, gaussian_filter,
+    result = -calculate_sfs_flux_tensor(w, b, filter,
                                         filter_dims=filter_dims,
                                         filtered_a=filtered_w,
                                         filtered_b=filtered_b)
@@ -1143,7 +1143,7 @@ def calculate_ke_ape_exchange_term(w, b, gaussian_filter, filter_dims=["x_caa", 
 #---
 
 #+++ SFS APE dissipation
-def calculate_sfs_ape_dissipation(rho, upsilon, upsilon_l, kappa, gaussian_filter,
+def calculate_sfs_ape_dissipation(rho, upsilon, upsilon_l, kappa, filter,
                                   filter_dims=["x_caa", "y_aca"],
                                   filtered_density=None, index_dim="i"):
     """
@@ -1171,13 +1171,13 @@ def calculate_sfs_ape_dissipation(rho, upsilon, upsilon_l, kappa, gaussian_filte
         computed from the filtered density sort (filt_local_potential_energies.upsilon)
     kappa : xr.DataArray
         Diffusivity field κ (e.g. ds.κ_e from SmagorinskyLilly)
-    gaussian_filter : gcm_filters.Filter
+    filter : gcm_filters.Filter
         Filter object used to apply the spatial filtering operation
     filter_dims : list of str
         Spatial dimensions along which to apply the filter
     filtered_density : xr.DataArray, optional
         Pre-computed filtered density ρ̄. If None, it is computed by applying
-        gaussian_filter to rho.
+        filter to rho.
     index_dim : str, optional
         Name of the vector index dimension, default "i"
 
@@ -1190,11 +1190,11 @@ def calculate_sfs_ape_dissipation(rho, upsilon, upsilon_l, kappa, gaussian_filte
     grad_rho = calculate_gradient(rho)
     grad_upsilon = calculate_gradient(upsilon)
     kappa_grad_dot = kappa * (grad_rho * grad_upsilon).sum(dim=index_dim)
-    term1 = gaussian_filter.apply(kappa_grad_dot, dims=filter_dims)
+    term1 = filter.apply(kappa_grad_dot, dims=filter_dims)
 
     # Term 2: κ ∇ρ̄ · ∇Υˡ
     if filtered_density is None:
-        filtered_density = gaussian_filter.apply(rho, dims=filter_dims)
+        filtered_density = filter.apply(rho, dims=filter_dims)
     grad_rho_bar = calculate_gradient(filtered_density)
     grad_upsilon_l = calculate_gradient(upsilon_l)
     term2 = kappa * (grad_rho_bar * grad_upsilon_l).sum(dim=index_dim)
@@ -1203,7 +1203,7 @@ def calculate_sfs_ape_dissipation(rho, upsilon, upsilon_l, kappa, gaussian_filte
 #---
 
 #+++ Cross-scale APE flux
-def calculate_cross_scale_ape_flux(rho, u_i, upsilon, gaussian_filter, filter_dims=["x_caa", "y_aca"],
+def calculate_cross_scale_ape_flux(rho, u_i, upsilon, filter, filter_dims=["x_caa", "y_aca"],
                                     filtered_density=None, filtered_velocity_vector=None,
                                     index_dim="i"):
     """
@@ -1225,7 +1225,7 @@ def calculate_cross_scale_ape_flux(rho, u_i, upsilon, gaussian_filter, filter_di
     upsilon : xr.DataArray
         Buoyancy displacement potential Υ = g(z - z₀)/ρ₀, typically taken
         from the filtered potential energies dataset
-    gaussian_filter : gcm_filters.Filter
+    filter : gcm_filters.Filter
         Filter object used to apply the spatial filtering operation
     filter_dims : list of str
         Spatial dimensions along which to apply the filter
@@ -1243,7 +1243,7 @@ def calculate_cross_scale_ape_flux(rho, u_i, upsilon, gaussian_filter, filter_di
         as rho (the i dimension is summed over)
     """
     tau_i = calculate_subfilter_tracer_flux(
-        rho, u_i, gaussian_filter, filter_dims,
+        rho, u_i, filter, filter_dims,
         filtered_density=filtered_density,
         filtered_velocity_vector=filtered_velocity_vector,
     )
