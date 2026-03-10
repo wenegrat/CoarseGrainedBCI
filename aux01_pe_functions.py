@@ -98,7 +98,7 @@ def vertical_sort_density_by_flattening(rho, dV, LxLy, test=False, z_min=0, Lz=N
     # Sort dz_flat using the same permutation
     dz_flat_1d_sorted = dz_flat_1d[sort_indices]
     rho_1d_sorted = rho_1d[sort_indices]
-    z_1d_sorted = z_min + np.cumsum(dz_flat_1d_sorted) - dz_flat_1d_sorted / 2
+    z_1d_sorted = np.cumsum(dz_flat_1d_sorted) + z_min + dz_flat_1d_sorted[0]/2
 
     # Reshape z_1d_sorted and rho_1d_sorted back into the original shape used by rho
     z_3d_sorted = z_1d_sorted.reshape(rho.shape, order="C")
@@ -764,12 +764,12 @@ def _local_APE_precomputed_integral_xarray(ρ, z, z_0, vertically_sorted_ds):
     # Get cumulative integral of sorted density profile
     cumulative_ρ_sorted_integral = vertically_sorted_ds["rho_1d_sorted_cumulative_integral"]
     ρ_sorted_integral = (cumulative_ρ_sorted_integral.sel(z_1d_sorted=z, method="nearest") -
-                         cumulative_ρ_sorted_integral.sel(z_1d_sorted=z_0, method="nearest"))
+                         cumulative_ρ_sorted_integral.sel(z_1d_sorted=z_0))
 
     # Get cumulative integral of dz
     cumulative_dz_sorted_integral = vertically_sorted_ds["dz_1d_sorted_cumulative_integral"]
     dz_integral = (cumulative_dz_sorted_integral.sel(z_1d_sorted=z, method="nearest") -
-                   cumulative_dz_sorted_integral.sel(z_1d_sorted=z_0, method="nearest"))
+                   cumulative_dz_sorted_integral.sel(z_1d_sorted=z_0))
 
     # Calculate local APE
     ρ_constant_integral = ρ * dz_integral
