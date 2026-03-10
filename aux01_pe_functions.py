@@ -1026,7 +1026,7 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting
 
 #+++ Subfilter stress tensor
 def calculate_subfilter_tracer_flux(rho, u_i, gaussian_filter, filter_dims=["x_caa", "y_aca"],
-                                filtered_density=None, filtered_velocity_vector=None):
+                                    filtered_density=None, filtered_velocity_vector=None):
     """
     Calculate the subfilter stress tensor τᵢ = filtered(ρ uᵢ) - filtered(ρ) filtered(uᵢ)
 
@@ -1070,10 +1070,70 @@ def calculate_subfilter_tracer_flux(rho, u_i, gaussian_filter, filter_dims=["x_c
     return tau_i
 #---
 
+#+++ SFS APE dissipation
+def calculate_sfs_ape_dissipation(rho, upsilon, upsilon_l, kappa, gaussian_filter,
+                                  filter_dims=["x_caa", "y_aca"],
+                                  filtered_density=None, index_dim="i"):
+    """
+    Calculate the SFS APE dissipation ε_s = filtered(κ ∇ρ · ∇Υ) - κ ∇ρ̄ · ∇Υˡ
+
+    The SFS APE dissipation quantifies the removal of large-scale APE by
+    subfilter-scale diffusive processes:
+
+        ε_s = filtered(κ ∇ρ · ∇Υ) - κ ∇ρ̄ · ∇Υˡ
+
+    where:
+        Υ  = g (z - z_*(ρ)) / ρ₀   — displacement potential using full density
+        Υˡ = g (z - z_*(ρ̄)) / ρ₀   — displacement potential using filtered density
+        κ  — diffusivity field
+
+    Parameters
+    ----------
+    rho : xr.DataArray
+        Full (unfiltered) density field ρ
+    upsilon : xr.DataArray
+        Buoyancy displacement potential Υ(ρ, z) = g(z - z_*(ρ))/ρ₀, computed
+        from the full density sort (full_local_potential_energies.upsilon)
+    upsilon_l : xr.DataArray
+        Large-scale displacement potential Υˡ(ρ̄, z) = g(z - z_*(ρ̄))/ρ₀,
+        computed from the filtered density sort (filt_local_potential_energies.upsilon)
+    kappa : xr.DataArray
+        Diffusivity field κ (e.g. ds.κ_e from SmagorinskyLilly)
+    gaussian_filter : gcm_filters.Filter
+        Filter object used to apply the spatial filtering operation
+    filter_dims : list of str
+        Spatial dimensions along which to apply the filter
+    filtered_density : xr.DataArray, optional
+        Pre-computed filtered density ρ̄. If None, it is computed by applying
+        gaussian_filter to rho.
+    index_dim : str, optional
+        Name of the vector index dimension, default "i"
+
+    Returns
+    -------
+    xr.DataArray
+        SFS APE dissipation ε_s [J m⁻³ s⁻¹] with the same spatial dimensions as rho
+    """
+    # Term 1: filtered(κ ∇ρ · ∇Υ)
+    grad_rho = calculate_gradient(rho)
+    grad_upsilon = calculate_gradient(upsilon)
+    kappa_grad_dot = kappa * (grad_rho * grad_upsilon).sum(dim=index_dim)
+    term1 = gaussian_filter.apply(kappa_grad_dot, dims=filter_dims)
+
+    # Term 2: κ ∇ρ̄ · ∇Υˡ
+    if filtered_density is None:
+        filtered_density = gaussian_filter.apply(rho, dims=filter_dims)
+    grad_rho_bar = calculate_gradient(filtered_density)
+    grad_upsilon_l = calculate_gradient(upsilon_l)
+    term2 = kappa * (grad_rho_bar * grad_upsilon_l).sum(dim=index_dim)
+
+    return term1 - term2
+#---
+
 #+++ Cross-scale APE flux
 def calculate_cross_scale_ape_flux(rho, u_i, upsilon, gaussian_filter, filter_dims=["x_caa", "y_aca"],
                                     filtered_density=None, filtered_velocity_vector=None,
-                                    i_dim="i"):
+                                    index_dim="i"):
     """
     Calculate the cross-scale APE flux Π = -τᵢ · ∇Υ
 
@@ -1101,7 +1161,7 @@ def calculate_cross_scale_ape_flux(rho, u_i, upsilon, gaussian_filter, filter_di
         Pre-computed filtered(ρ). Passed through to calculate_subfilter_tracer_flux.
     filtered_velocity_vector : xr.DataArray, optional
         Pre-computed filtered(uᵢ). Passed through to calculate_subfilter_tracer_flux.
-    i_dim : str, optional
+    index_dim : str, optional
         Name of the vector index dimension, default "i"
 
     Returns
@@ -1116,5 +1176,5 @@ def calculate_cross_scale_ape_flux(rho, u_i, upsilon, gaussian_filter, filter_di
         filtered_velocity_vector=filtered_velocity_vector,
     )
     grad_upsilon = calculate_gradient(upsilon)
-    return -(tau_i * grad_upsilon).sum(dim=i_dim)
+    return -(tau_i * grad_upsilon).sum(dim=index_dim)
 #---

@@ -20,6 +20,7 @@ from aux01_pe_functions import (
     local_potential_energies_timeseries,
     calculate_subfilter_tracer_flux,
     calculate_cross_scale_ape_flux,
+    calculate_sfs_ape_dissipation,
 )
 from ape_plots import plot_dataset_variables
 #---
@@ -71,10 +72,15 @@ print("Density fields calculated: ρ, Z, ρ̄")
 print("\n" + "="*60)
 print("Calculating local APE...")
 
-full_local_potential_energies = local_potential_energies_timeseries(ds_full, density_name="ρ", rho_to_sort=ds_full.ρ, ape_method="precomputed_integral", use_numpy_version=True)
-filt_local_potential_energies = local_potential_energies_timeseries(ds_filt, density_name="ρ̄", rho_to_sort=ds_full.ρ, ape_method="precomputed_integral", use_numpy_version=True)
+full_local_pes = local_potential_energies_timeseries(ds_full, density_name="ρ", rho_to_sort=ds_full.ρ, ape_method="precomputed_integral", use_numpy_version=True)
+filt_local_pes = local_potential_energies_timeseries(ds_filt, density_name="ρ̄", rho_to_sort=ds_full.ρ, ape_method="precomputed_integral", use_numpy_version=True)
 
-cross_scale_ape_flux = calculate_cross_scale_ape_flux(ds_full.ρ, ds_full["uᵢ"], filt_local_potential_energies.upsilon, gaussian_filter, filter_dims=filtered_dimensions,
+cross_scale_ape_flux = calculate_cross_scale_ape_flux(ds_full.ρ, ds_full["uᵢ"], filt_local_pes.upsilon, gaussian_filter,
+    filter_dims=filtered_dimensions,
+    filtered_density=ds_filt.ρ̄,)
+
+sfs_ape_dissipation = calculate_sfs_ape_dissipation(ds_full.ρ, full_local_pes.upsilon, filt_local_pes.upsilon, ds.κ, gaussian_filter,
+    filter_dims=filtered_dimensions,
     filtered_density=ds_filt.ρ̄,)
 #---
 
@@ -82,10 +88,10 @@ cross_scale_ape_flux = calculate_cross_scale_ape_flux(ds_full.ρ, ds_full["uᵢ"
 print("\n" + "="*60)
 print("Filtering local APE...")
 
-full_local_ape_filtered = gaussian_filter.apply(full_local_potential_energies.ape, dims=filtered_dimensions)
+full_local_ape_filtered = gaussian_filter.apply(full_local_pes.ape, dims=filtered_dimensions)
 print(f"Local APE filtered with length scale: {filter_length_scale}")
 
-subfilter_local_ape = full_local_ape_filtered - filt_local_potential_energies.ape
+subfilter_local_ape = full_local_ape_filtered - filt_local_pes.ape
 #---
 
 #+++ Save results
@@ -93,15 +99,18 @@ print("\n" + "="*60)
 print("Saving results...")
 
 output_ds = xr.Dataset({
-    "Ea(ρ, z)": full_local_potential_energies.ape,
-    "Ea(ρ̄, z)": filt_local_potential_energies.ape,
+    "z₀(ρ)": full_local_pes.z0,
+    "z₀(ρ̄)": filt_local_pes.z0,
+    "Ea(ρ, z)": full_local_pes.ape,
+    "Ea(ρ̄, z)": filt_local_pes.ape,
     "Ēa(ρ, z)": full_local_ape_filtered,
     "Ēa(ρ, z) - Ea(ρ̄, z)": subfilter_local_ape,
     "ρ": ds_full.ρ,
     "ρ̄": ds_filt.ρ̄,
     "Π": cross_scale_ape_flux,
-    "Υ": full_local_potential_energies.upsilon,
-    "Υˡ": filt_local_potential_energies.upsilon,
+    "εₛ": sfs_ape_dissipation,
+    "Υ": full_local_pes.upsilon,
+    "Υˡ": filt_local_pes.upsilon,
 })
 
 output_filename = filename.replace(".nc", "_ape_local.nc")
