@@ -218,7 +218,7 @@ def calculate_reference_potential_energy_profile(rho, dV, LxLy, test=False, z_mi
             assert(all(np.diff(vertically_sorted_ds.rho_1d_sorted) <= 0))
             assert(all(np.diff(vertically_sorted_ds.z_1d_sorted) > 0))
             if Lz is not None:
-                assert(np.sum(vertically_sorted_ds.dz_1d_sorted).values == Lz)
+                assert(np.isclose(np.sum(vertically_sorted_ds.dz_1d_sorted).values, Lz))
 
     elif sorting_method == "PDF":
         vertically_sorted_ds = vertical_sort_density_by_PDF(rho, Lz, nbins=1000)
