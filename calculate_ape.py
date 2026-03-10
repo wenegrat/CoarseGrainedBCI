@@ -15,7 +15,7 @@ import numpy as np
 import xarray as xr
 import gcm_filters
 from aux00_utils import load_dataset_and_grid, condense_velocities, calculate_gradient
-from aux01_ape_functions import (
+from aux01_pe_functions import (
     calculate_density_fields_from_buoyancy,
     local_potential_energies_timeseries,
     calculate_subfilter_tracer_flux,

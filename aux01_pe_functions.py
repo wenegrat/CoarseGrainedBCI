@@ -1,7 +1,7 @@
 """
-Energy calculation functions for Available Potential Energy (APE) analysis
+Potential energy calculation functions for Available Potential Energy (APE) analysis
 
-This module contains functions for calculating APE using the sorting method
+This module contains functions for calculating TPE, RPE, and APE using the sorting method
 following Winters et al. (1995).
 """
 
@@ -98,7 +98,7 @@ def vertical_sort_density_by_flattening(rho, dV, LxLy, test=False, z_min=0, Lz=N
     # Sort dz_flat using the same permutation
     dz_flat_1d_sorted = dz_flat_1d[sort_indices]
     rho_1d_sorted = rho_1d[sort_indices]
-    z_1d_sorted = np.cumsum(dz_flat_1d_sorted) + z_min + dz_flat_1d_sorted[0]/2
+    z_1d_sorted = z_min + np.cumsum(dz_flat_1d_sorted) - dz_flat_1d_sorted / 2
 
     # Reshape z_1d_sorted and rho_1d_sorted back into the original shape used by rho
     z_3d_sorted = z_1d_sorted.reshape(rho.shape, order="C")
@@ -764,12 +764,12 @@ def _local_APE_precomputed_integral_xarray(ρ, z, z_0, vertically_sorted_ds):
     # Get cumulative integral of sorted density profile
     cumulative_ρ_sorted_integral = vertically_sorted_ds["rho_1d_sorted_cumulative_integral"]
     ρ_sorted_integral = (cumulative_ρ_sorted_integral.sel(z_1d_sorted=z, method="nearest") -
-                         cumulative_ρ_sorted_integral.sel(z_1d_sorted=z_0))
+                         cumulative_ρ_sorted_integral.sel(z_1d_sorted=z_0, method="nearest"))
 
     # Get cumulative integral of dz
     cumulative_dz_sorted_integral = vertically_sorted_ds["dz_1d_sorted_cumulative_integral"]
     dz_integral = (cumulative_dz_sorted_integral.sel(z_1d_sorted=z, method="nearest") -
-                   cumulative_dz_sorted_integral.sel(z_1d_sorted=z_0))
+                   cumulative_dz_sorted_integral.sel(z_1d_sorted=z_0, method="nearest"))
 
     # Calculate local APE
     ρ_constant_integral = ρ * dz_integral
@@ -1022,91 +1022,6 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting
     ))
 
     return local_potential_energies_ds
-#---
-
-#+++ Calculate kinetic energy
-def local_KE(u, v, w):
-    """
-    Calculate local kinetic energy density
-
-    Parameters
-    ----------
-    u, v, w : xr.DataArray
-        Velocity components
-
-    Returns
-    -------
-    xr.DataArray
-        Local KE density: ρ0 * (u^2 + v^2 + w^2) / 2
-    """
-    return ρ0 * (u**2 + v**2 + w**2) / 2
-
-def integrated_KE(ds, u_name="u", v_name="v", w_name="w", dV_name="dV",
-                  x_dim="x_caa", y_dim="y_aca", z_dim="z_aac"):
-    """
-    Calculate volume-integrated kinetic energy
-
-    Parameters
-    ----------
-    ds : xr.Dataset
-        Dataset containing velocity fields
-    u_name : str
-        Name of u velocity component
-    v_name : str
-        Name of v velocity component
-    w_name : str
-        Name of w velocity component
-    dV_name : str
-        Name of volume element field
-    x_dim, y_dim, z_dim : str
-        Names of spatial dimensions
-
-    Returns
-    -------
-    xr.DataArray
-        Integrated KE
-    """
-    u = ds[u_name]
-    v = ds[v_name]
-    w = ds[w_name]
-    dV = ds[dV_name]
-
-    ke = local_KE(u, v, w)
-    KE = (ke * dV).sum((x_dim, y_dim, z_dim))
-    return KE
-
-def integrated_KE_timeseries(ds, verbose=False, u_name="u", v_name="v", w_name="w",
-                             dV_name="dV", x_dim="x_caa", y_dim="y_aca", z_dim="z_aac"):
-    """
-    Calculate volume-integrated KE for all time steps
-
-    Parameters
-    ----------
-    ds : xr.Dataset
-        Dataset containing velocity fields
-    verbose : bool
-        Whether to print progress
-    u_name : str
-        Name of u velocity component
-    v_name : str
-        Name of v velocity component
-    w_name : str
-        Name of w velocity component
-    dV_name : str
-        Name of volume element field
-    x_dim, y_dim, z_dim : str
-        Names of spatial dimensions
-
-    Returns
-    -------
-    xr.DataArray
-        Time series of volume-integrated KE
-    """
-    if verbose: print("Calculating KE time series...")
-    KE = integrated_KE(ds, u_name=u_name, v_name=v_name, w_name=w_name,
-                      dV_name=dV_name, x_dim=x_dim, y_dim=y_dim, z_dim=z_dim)
-    if verbose: print("\nDone!")
-    return KE
 #---
 
 #+++ Subfilter stress tensor
