@@ -17,8 +17,7 @@ params = (
     h = 1/4,
     perturbation_amplitude = 0.01,
     stop_time = 200.0,
-    ν = 1e-3,
-    κ = 1e-3)
+)
 #---
 
 #+++ Create grid
@@ -27,11 +26,16 @@ if has_cuda_gpu()
     Nz = 1024
     x_aspect_ratio = 2  # Δx / Δz ratio
     y_aspect_ratio = 8  # Δy / Δz ratio
+    ν = 1e-4
+    κ = 1e-4
 else
     arch = CPU()
     Nz = 256
     x_aspect_ratio = 4   # Δx / Δz ratio
     y_aspect_ratio = Inf # Δy / Δz ratio
+    ν = 1e-3
+    κ = 1e-3
+
     @info "No CUDA GPU detected"
     @info "Cell aspect ratio: Δx/Δz = $(x_aspect_ratio)"
 end
@@ -44,7 +48,7 @@ Ny = isinf(y_aspect_ratio) ? 1 : round(Int, Nz * (params.Ly / params.Lz) / y_asp
 Nx = closest_factor_number((2, 3, 5), Nx)
 Ny = closest_factor_number((2, 3, 5), Ny)
 
-params = (; params..., Nx, Ny, Nz)
+params = (; params..., Nx, Ny, Nz, ν, κ)
 
 grid = RectilinearGrid(arch; size=(params.Nx, params.Ny, params.Nz),
                        x=(-params.Lx/2, params.Lx/2),
