@@ -1024,6 +1024,45 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting
     return local_potential_energies_ds
 #---
 
+#+++ SFS flux tensor (general)
+def calculate_sfs_flux_tensor(a, b, gaussian_filter, filter_dims=["x_caa", "y_aca"],
+                              filtered_a=None, filtered_b=None):
+    """
+    Calculate the SFS flux tensor filtered(a·b) - filtered(a)·filtered(b)
+
+    This is the general building block for subfilter-scale flux quantities: it
+    measures the covariance between a and b at scales smaller than the filter
+    width.
+
+    Parameters
+    ----------
+    a : xr.DataArray
+        First (unfiltered) field
+    b : xr.DataArray
+        Second (unfiltered) field
+    gaussian_filter : gcm_filters.Filter
+        Filter object used to apply the spatial filtering operation
+    filter_dims : list of str
+        Spatial dimensions along which to apply the filter
+    filtered_a : xr.DataArray, optional
+        Pre-computed filtered(a). If None, it is computed from a.
+    filtered_b : xr.DataArray, optional
+        Pre-computed filtered(b). If None, it is computed from b.
+
+    Returns
+    -------
+    xr.DataArray
+        SFS flux tensor filtered(a·b) - filtered(a)·filtered(b)
+    """
+    if filtered_a is None:
+        filtered_a = gaussian_filter.apply(a, dims=filter_dims)
+
+    if filtered_b is None:
+        filtered_b = gaussian_filter.apply(b, dims=filter_dims)
+
+    return gaussian_filter.apply(a * b, dims=filter_dims) - filtered_a * filtered_b
+#---
+
 #+++ Subfilter stress tensor
 def calculate_subfilter_tracer_flux(rho, u_i, gaussian_filter, filter_dims=["x_caa", "y_aca"],
                                     filtered_density=None, filtered_velocity_vector=None):
@@ -1057,17 +1096,50 @@ def calculate_subfilter_tracer_flux(rho, u_i, gaussian_filter, filter_dims=["x_c
     xr.DataArray
         Subfilter stress τᵢ [kg m⁻² s⁻¹] with the same dimensions as u_i
     """
-    if filtered_density is None:
-        filtered_density = gaussian_filter.apply(rho, dims=filter_dims)
-
-    if filtered_velocity_vector is None:
-        filtered_velocity_vector = gaussian_filter.apply(u_i, dims=filter_dims)
-
-    filtered_rho_u_i = gaussian_filter.apply(rho * u_i, dims=filter_dims)
-
-    tau_i = filtered_rho_u_i - filtered_density * filtered_velocity_vector
+    tau_i = calculate_sfs_flux_tensor(rho, u_i, gaussian_filter,
+                                      filter_dims=filter_dims,
+                                      filtered_a=filtered_density,
+                                      filtered_b=filtered_velocity_vector)
     tau_i.name = "τᵢ"
     return tau_i
+#---
+
+#+++ KE-APE exchange term
+def calculate_ke_ape_exchange_term(w, b, gaussian_filter, filter_dims=["x_caa", "y_aca"],
+                                   filtered_w=None, filtered_b=None):
+    """
+    Calculate the KE-APE exchange term -(filtered(w·b) - filtered(w)·filtered(b))
+
+    This represents the cross-scale buoyancy flux: the rate at which large-scale
+    KE and APE exchange energy through the subfilter-scale vertical buoyancy
+    flux.
+
+    Parameters
+    ----------
+    w : xr.DataArray
+        Full (unfiltered) vertical velocity field
+    b : xr.DataArray
+        Full (unfiltered) buoyancy field
+    gaussian_filter : gcm_filters.Filter
+        Filter object used to apply the spatial filtering operation
+    filter_dims : list of str
+        Spatial dimensions along which to apply the filter
+    filtered_w : xr.DataArray, optional
+        Pre-computed filtered(w). If None, it is computed from w.
+    filtered_b : xr.DataArray, optional
+        Pre-computed filtered(b). If None, it is computed from b.
+
+    Returns
+    -------
+    xr.DataArray
+        KE-APE exchange term -(filtered(w·b) - filtered(w)·filtered(b))
+    """
+    result = -calculate_sfs_flux_tensor(w, b, gaussian_filter,
+                                        filter_dims=filter_dims,
+                                        filtered_a=filtered_w,
+                                        filtered_b=filtered_b)
+    result.name = "KE-APE exchange"
+    return result
 #---
 
 #+++ SFS APE dissipation

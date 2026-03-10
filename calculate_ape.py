@@ -21,6 +21,7 @@ from aux01_pe_functions import (
     calculate_subfilter_tracer_flux,
     calculate_cross_scale_ape_flux,
     calculate_sfs_ape_dissipation,
+    calculate_ke_ape_exchange_term,
 )
 from ape_plots import plot_dataset_variables
 #---
@@ -82,6 +83,11 @@ cross_scale_ape_flux = calculate_cross_scale_ape_flux(ds_full.ρ, ds_full["uᵢ"
 sfs_ape_dissipation = calculate_sfs_ape_dissipation(ds_full.ρ, full_local_pes.upsilon, filt_local_pes.upsilon, ds.κ, gaussian_filter,
     filter_dims=filtered_dimensions,
     filtered_density=ds_filt.ρ̄,)
+
+ke_ape_exchange = calculate_ke_ape_exchange_term(ds_full["uᵢ"].sel(i=3), ds_full.b, gaussian_filter,
+    filter_dims=filtered_dimensions,
+    filtered_w=ds_filt["uᵢ"].sel(i=3),
+    filtered_b=ds_filt["b̄"],)
 #---
 
 #+++ Filter local APE
@@ -109,6 +115,7 @@ output_ds = xr.Dataset({
     "ρ̄": ds_filt.ρ̄,
     "Π": cross_scale_ape_flux,
     "εₛ": sfs_ape_dissipation,
+    "KE-APE exchange": ke_ape_exchange,
     "Υ": full_local_pes.upsilon,
     "Υˡ": filt_local_pes.upsilon,
 })
