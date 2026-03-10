@@ -90,7 +90,7 @@ def vertical_sort_density_by_flattening(rho, dV, LxLy, test=False, z_min=0, Lz=N
     dz_flat = dV / LxLy # 3D DataArray with the same shape as rho
     dz_flat_1d = np.ravel(dz_flat.values, order="C")
     if test and Lz is not None:
-        assert(dz_flat.sum().values == Lz)
+        assert(np.isclose(dz_flat.sum().values, Lz))
 
     # Get the permutation indices used to sort rho_1d
     sort_indices = np.argsort(-rho_1d) # descending order since this is density
