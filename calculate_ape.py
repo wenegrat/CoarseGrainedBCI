@@ -99,6 +99,9 @@ output_ds = xr.Dataset({
     "Ēa(ρ, z) - Ea(ρ̄, z)": subfilter_local_ape,
     "ρ": ds_full.ρ,
     "ρ̄": ds_filt.ρ̄,
+    "Π": cross_scale_ape_flux,
+    "Υ": full_local_potential_energies.upsilon,
+    "Υˡ": filt_local_potential_energies.upsilon,
 })
 
 output_filename = filename.replace(".nc", "_ape_local.nc")
