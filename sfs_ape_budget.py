@@ -29,7 +29,7 @@ print("Loading data and grid...")
 ds = load_dataset_and_grid(filename)
 print(f"Dataset loaded: {len(ds.time)} time steps")
 
-ds = ds.sel(time=slice(50, 61))
+# ds = ds.sel(time=slice(20, 81))
 #---
 
 #+++ Filter buoyancy field
@@ -48,11 +48,11 @@ gaussian_filter = gcm_filters.Filter(
 ds["b̄"] = gaussian_filter.apply(ds.b, dims=filtered_dimensions) # An overbar denotes a filtering operation
 
 ds = condense_velocities(ds, indices=[1, 2, 3]) # Condense velocity components into tensor form
-ds["ūᵢ"] = gaussian_filter.apply(ds["uᵢ"], dims=filtered_dimensions)
+ds["ūᵢ"] = gaussian_filter.apply(ds["uᵢ"], dims=filtered_dimensions)
 
 print(f"Buoyancy and velocities filtered with length scale: {filter_length_scale}")
 
-ds_filt = ds[["b̄", "dV", "LxLy", "ūᵢ"]].copy()
+ds_filt = ds[["b̄", "dV", "LxLy", "ūᵢ"]].copy()
 ds_full = ds[["b", "dV", "LxLy", "uᵢ"]].copy()
 #---
 
@@ -93,7 +93,7 @@ sfs_ape_dissipation = calculate_sfs_ape_dissipation(ds_full.ρ, full_local_pes.u
 
 ke_ape_exchange = calculate_ke_ape_exchange_term(ds_full["uᵢ"].sel(i=3), ds_full.b, gaussian_filter,
     filter_dims=filtered_dimensions,
-    filtered_w=ds_filt["ūᵢ"].sel(i=3),
+    filtered_w=ds_filt["ūᵢ"].sel(i=3),
     filtered_b=ds_filt["b̄"],)
 #---
 
@@ -120,22 +120,34 @@ print("\n" + "="*60)
 print("Saving results...")
 
 output_ds = xr.Dataset({
-    "z₀(ρ)": full_local_pes.z0,
-    "z₀(ρ̄)": filt_local_pes.z0,
-    "Ea(ρ, z)": full_local_pes.ape,
-    "Ea(ρ̄, z)": filt_local_pes.ape,
-    "Ēa(ρ, z)": full_local_ape_filtered,
-    "Ēa(ρ, z) - Ea(ρ̄, z)": subfilter_local_ape,
+    # Density fields
     "ρ": ds_full.ρ,
     "ρ̄": ds_filt.ρ̄,
+    # Reference heights
+    "z₀(ρ)": full_local_pes.z0,
+    "z₀(ρ̄)": filt_local_pes.z0,
+    # Buoyancy displacement potentials
+    "Υ": full_local_pes.upsilon,
+    "Υˡ": filt_local_pes.upsilon,
+    # Local APE fields
+    "Ea(ρ, z)": full_local_pes.ape,
+    "Ea(ρ̄, z)": filt_local_pes.ape,
+    "Ēa(ρ, z)": full_local_ape_filtered,
+    "Eaˢ(ρ, z)": subfilter_local_ape,
+    # Local budget terms
+    "∂ₜEaˢ": dE_dt,
     "Π": cross_scale_ape_flux,
     "εₛ": sfs_ape_dissipation,
     "KE-APE exchange": ke_ape_exchange,
-    "Υ": full_local_pes.upsilon,
-    "Υˡ": filt_local_pes.upsilon,
+    # Integrated budget terms
+    "∫∂ₜEaˢ dV": int_dE_dt,
+    "∫Π dV": int_cross_scale_ape_flux,
+    "∫εₛ dV": int_sfs_ape_dissipation,
+    "∫(KE-APE) dV": int_ke_ape_exchange,
+    "residual": residual,
 })
 
-output_filename = filename.replace(".nc", "_ape_local.nc")
+output_filename = filename.replace(".nc", "_sfs_ape_budget.nc")
 output_ds.to_netcdf(output_filename)
 print(f"\nResults saved to: {output_filename}")
 #---
@@ -144,7 +156,5 @@ print(f"\nResults saved to: {output_filename}")
 print("\n" + "="*60)
 print("Creating plots...")
 print("="*60)
-# figures = plot_dataset_variables(output_ds[["Ea(ρ, z)", "Ea(ρ̄, z)", "Ēa(ρ, z) - Ea(ρ̄, z)"]], time_stride=1, col="time", col_wrap=5, cmap="viridis", vmin=0 ,vmax=3, x="x_caa")
-figures = plot_dataset_variables(output_ds[["Ea(ρ, z)", "Ea(ρ̄, z)", "Ēa(ρ, z) - Ea(ρ̄, z)"]], time_stride=1, col="time", cmap="RdBu_r", vmin=-10, vmax=10, x="x_caa")
-# figures = plot_dataset_variables(output_ds[["Ea(ρ, z)", "Ea(ρ̄, z)", "Ēa(ρ, z) - Ea(ρ̄, z)"]], time_stride=1, cmap="RdBu_r", vmin=-10, vmax=10, x="x_caa")
 #---
+
