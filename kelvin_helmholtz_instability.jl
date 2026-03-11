@@ -135,7 +135,7 @@ end
 
 simulation.output_writers[:fields] =
     NetCDFWriter(model, outputs,
-                 schedule = TimeInterval(4),
+                 schedule = ConsecutiveIterations(TimeInterval(4)), # Consecutive iterations every 4 periods to calculate time derivatives
                  filename = output_filename,
                  array_type = Array{Float64},
                  global_attributes = params,
