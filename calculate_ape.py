@@ -55,9 +55,10 @@ gaussian_filter = gcm_filters.Filter(
 
 ds["b̄"] = gaussian_filter.apply(ds.b, dims=filtered_dimensions) # An overbar denotes a filtering operation
 ds = condense_velocities(ds, indices=[1, 2, 3]) # Condense velocity components into tensor form
-print(f"Buoyancy filtered with length scale: {filter_length_scale}")
+ds["ūᵢ"] = gaussian_filter.apply(ds["uᵢ"], dims=filtered_dimensions)
+print(f"Buoyancy and velocities filtered with length scale: {filter_length_scale}")
 
-ds_filt = ds[["b̄", "dV", "LxLy", "uᵢ"]].copy()
+ds_filt = ds[["b̄", "dV", "LxLy", "ūᵢ"]].copy()
 ds_full = ds[["b", "dV", "LxLy", "uᵢ"]].copy()
 #---
 
@@ -98,7 +99,7 @@ sfs_ape_dissipation = calculate_sfs_ape_dissipation(ds_full.ρ, full_local_pes.u
 
 ke_ape_exchange = calculate_ke_ape_exchange_term(ds_full["uᵢ"].sel(i=3), ds_full.b, gaussian_filter,
     filter_dims=filtered_dimensions,
-    filtered_w=ds_filt["uᵢ"].sel(i=3),
+    filtered_w=ds_filt["ūᵢ"].sel(i=3),
     filtered_b=ds_filt["b̄"],)
 #---
 
