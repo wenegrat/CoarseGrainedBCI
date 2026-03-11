@@ -33,8 +33,8 @@ else
     Nz = 256
     x_aspect_ratio = 4   # Δx / Δz ratio
     y_aspect_ratio = Inf # Δy / Δz ratio
-    ν = 1e-3
-    κ = 1e-3
+    ν = 2e-3
+    κ = 2e-3
 
     @info "No CUDA GPU detected"
     @info "Cell aspect ratio: Δx/Δz = $(x_aspect_ratio)"
@@ -105,6 +105,7 @@ max_Δt = 0.2 / √N²_max # Max timestep is 0.2 times the buoyancy period
 conjure_time_step_wizard!(simulation, IterationInterval(1);
                           max_change=1.05,
                           cfl=0.8,
+                          diffusive_cfl=0.3,
                           min_Δt=1e-4,
                           max_Δt)
 #---
