@@ -13,13 +13,13 @@ from aux01_pe_functions import (
     local_potential_energies_timeseries,
     calculate_cross_scale_ape_flux,
     calculate_sfs_ape_dissipation,
-    calculate_ke_ape_exchange_term,
+    calculate_ape_to_ke_exchange_term,
 )
 #---
 
 #+++ Configuration
-filename = "output/kelvin_helmholtz_instability_128x1x512.nc"
-# filename = "output/kelvin_helmholtz_instability_64x1x256.nc"
+# filename = "output/kelvin_helmholtz_instability_128x1x512.nc"
+filename = "output/kelvin_helmholtz_instability_64x1x256.nc"
 filter_length_scale = 0.8  # Length scale for filtering
 #---
 
@@ -91,7 +91,7 @@ sfs_ape_dissipation = calculate_sfs_ape_dissipation(ds_full.ρ, full_local_pes.u
     filter_dims=filtered_dimensions,
     filtered_density=ds_filt.ρ̄,)
 
-ke_ape_exchange = calculate_ke_ape_exchange_term(ds_full["uᵢ"].sel(i=3), ds_full.b, gaussian_filter,
+ape_to_ke_exchange = calculate_ape_to_ke_exchange_term(ds_full["uᵢ"].sel(i=3), ds_full.b, gaussian_filter,
     filter_dims=filtered_dimensions,
     filtered_w=ds_filt["ūᵢ"].sel(i=3),
     filtered_b=ds_filt["b̄"],)
@@ -110,9 +110,9 @@ int_dE_dt = integrate(dE_dt, dV)
 
 int_cross_scale_ape_flux = integrate(cross_scale_ape_flux.reindex(time=dE_dt.time), dV)
 int_sfs_ape_dissipation = integrate(sfs_ape_dissipation.reindex(time=dE_dt.time), dV)
-int_ke_ape_exchange = integrate(ke_ape_exchange.reindex(time=dE_dt.time), dV)
+int_ape_to_ke_exchange = integrate(ape_to_ke_exchange.reindex(time=dE_dt.time), dV)
 
-residual = -int_dE_dt - int_ke_ape_exchange + int_cross_scale_ape_flux - int_sfs_ape_dissipation
+residual = -int_dE_dt - int_ape_to_ke_exchange + int_cross_scale_ape_flux - int_sfs_ape_dissipation
 #---
 
 #+++ Save results
@@ -138,12 +138,12 @@ output_ds = xr.Dataset({
     "∂ₜEaˢ": dE_dt,
     "Π": cross_scale_ape_flux,
     "εₛ": sfs_ape_dissipation,
-    "KE-APE exchange": ke_ape_exchange,
+    "SFS KE->APE exchange": ape_to_ke_exchange,
     # Integrated budget terms
     "∫∂ₜEaˢ dV": int_dE_dt,
     "∫Π dV": int_cross_scale_ape_flux,
-    "∫εₛ dV": int_sfs_ape_dissipation,
-    "∫(KE-APE) dV": int_ke_ape_exchange,
+    "∫-εₛ dV": -int_sfs_ape_dissipation,
+    "∫(SFS APE->KE) dV": -int_ape_to_ke_exchange,
     "residual": residual,
 })
 
@@ -160,7 +160,7 @@ print("="*60)
 import matplotlib.pyplot as plt
 fig, ax = plt.subplots(figsize=(10, 6), constrained_layout=True)
 
-integrated_vars = ["∫∂ₜEaˢ dV", "∫Π dV", "∫εₛ dV", "∫(KE-APE) dV", "residual"]
+integrated_vars = ["∫∂ₜEaˢ dV", "∫Π dV", "∫-εₛ dV", "∫(SFS APE->KE) dV", "residual"]
 for var in integrated_vars:
     output_ds[var].dropna("time").plot.line(ax=ax, x="time", label=var)
     ax.legend()
