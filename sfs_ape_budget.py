@@ -109,7 +109,7 @@ int_cross_scale_ape_flux = integrate(cross_scale_ape_flux.reindex(time=dE_dt.tim
 int_sfs_ape_dissipation = integrate(sfs_ape_dissipation.reindex(time=dE_dt.time), dV)
 int_ke_ape_exchange = integrate(ke_ape_exchange.reindex(time=dE_dt.time), dV)
 
-residual = int_dE_dt - int_cross_scale_ape_flux - int_sfs_ape_dissipation - int_ke_ape_exchange
+residual = -int_dE_dt + int_ke_ape_exchange + int_cross_scale_ape_flux - int_sfs_ape_dissipation
 #---
 
 pause
