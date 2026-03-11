@@ -135,15 +135,15 @@ output_ds = xr.Dataset({
     "Ēa(ρ, z)": full_local_ape_filtered,
     "Eaˢ(ρ, z)": subfilter_local_ape,
     # Local budget terms
-    "∂ₜEaˢ": dE_dt,
+    "∂ₜ-Eaˢ": -dE_dt,
     "Π": cross_scale_ape_flux,
     "εₛ": sfs_ape_dissipation,
     "SFS KE->APE exchange": ape_to_ke_exchange,
     # Integrated budget terms
-    "∫∂ₜEaˢ dV": int_dE_dt,
+    "∫∂ₜ-Eaˢ dV": -int_dE_dt,
     "∫Π dV": int_cross_scale_ape_flux,
     "∫-εₛ dV": -int_sfs_ape_dissipation,
-    "∫(SFS APE->KE) dV": -int_ape_to_ke_exchange,
+    "∫(SFS KE->APE) dV": -int_ape_to_ke_exchange, # Flip the sign to make plotting easier
     "residual": residual,
 })
 
@@ -160,7 +160,7 @@ print("="*60)
 import matplotlib.pyplot as plt
 fig, ax = plt.subplots(figsize=(10, 6), constrained_layout=True)
 
-integrated_vars = ["∫∂ₜEaˢ dV", "∫Π dV", "∫-εₛ dV", "∫(SFS APE->KE) dV", "residual"]
+integrated_vars = ["∫∂ₜ-Eaˢ dV", "∫Π dV", "∫-εₛ dV", "∫(SFS KE->APE) dV", "residual"]
 for var in integrated_vars:
     output_ds[var].dropna("time").plot.line(ax=ax, x="time", label=var)
     ax.legend()
