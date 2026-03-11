@@ -152,9 +152,21 @@ output_ds.to_netcdf(output_filename)
 print(f"\nResults saved to: {output_filename}")
 #---
 
-#+++ Plot all variables in output_ds
+#+++ Plot integrated budget terms
 print("\n" + "="*60)
 print("Creating plots...")
 print("="*60)
-#---
 
+import matplotlib.pyplot as plt
+fig, ax = plt.subplots(figsize=(10, 6), constrained_layout=True)
+
+integrated_vars = ["∫∂ₜEaˢ dV", "∫Π dV", "∫εₛ dV", "∫(KE-APE) dV", "residual"]
+for var in integrated_vars:
+    if var in output_ds:
+        output_ds[var].dropna("time").plot.line(ax=ax, x="time", label=var)
+        ax.legend()
+        ax.get_figure().tight_layout()
+plot_filename = output_filename.replace(".nc", f"_{var}.png")
+ax.get_figure().savefig(plot_filename, dpi=150, bbox_inches="tight")
+print(f"Budget timeseries plot saved to: {plot_filename}")
+#---
