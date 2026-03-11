@@ -151,9 +151,9 @@ def local_TPE(rho, z_name="z_aac"):
     Returns
     -------
     xr.DataArray
-        Local TPE density: g * rho * z
+        Local TPE density: g * rho * z / ρ0  [m² s⁻²]
     """
-    return g * rho * rho[z_name]
+    return g * rho * rho[z_name] / ρ0
 
 def integrated_total_potential_energy(rho, dV=None, ds=None, z_name="z_aac"):
     """
@@ -598,7 +598,7 @@ def _local_APE_on_the_fly_integral_xarray(ρ, z, z_0, vertically_sorted_ds):
 
     b_l = - g * (ρ - ρ_sorted_profile_slice) / ρ0
 
-    return -ρ0 * (b_l * signed_dz_flat).sum("z_1d_sorted") # Convert to APE by unit of volume
+    return -(b_l * signed_dz_flat).sum("z_1d_sorted")  # APE in Boussinesq units [m² s⁻²]
 
 
 
@@ -726,7 +726,7 @@ def _local_APE_precomputed_integral_numpy(ρ_3d, z_3d, ρ_sorted_array, z_sorted
 
     # Sign convention: positive if z > z_0, negative if z < z_0
     sign = np.where(z_indices > z_0_indices, 1.0, -1.0)
-    ape_flat = sign * g * (ρ_flat * dz_integral - rho_integral)
+    ape_flat = sign * g * (ρ_flat * dz_integral - rho_integral) / ρ0  # Boussinesq units [m² s⁻²]
 
     return ape_flat.reshape(ρ_3d.shape)
 
@@ -771,9 +771,9 @@ def _local_APE_precomputed_integral_xarray(ρ, z, z_0, vertically_sorted_ds):
     dz_integral = (cumulative_dz_sorted_integral.sel(z_1d_sorted=z, method="nearest") -
                    cumulative_dz_sorted_integral.sel(z_1d_sorted=z_0))
 
-    # Calculate local APE
+    # Calculate local APE in Boussinesq units [m² s⁻²]
     ρ_constant_integral = ρ * dz_integral
-    local_ape = g * (ρ_constant_integral - ρ_sorted_integral)
+    local_ape = g * (ρ_constant_integral - ρ_sorted_integral) / ρ0
 
     return float(local_ape)
 

@@ -115,8 +115,6 @@ int_ke_ape_exchange = integrate(ke_ape_exchange.reindex(time=dE_dt.time), dV)
 residual = -int_dE_dt + int_ke_ape_exchange + int_cross_scale_ape_flux - int_sfs_ape_dissipation
 #---
 
-pause
-
 #+++ Save results
 print("\n" + "="*60)
 print("Saving results...")
