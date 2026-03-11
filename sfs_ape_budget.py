@@ -15,11 +15,11 @@ from aux01_pe_functions import (
     calculate_sfs_ape_dissipation,
     calculate_ke_ape_exchange_term,
 )
-from ape_plots import plot_dataset_variables
 #---
 
 #+++ Configuration
-filename = "output/kelvin_helmholtz_instability_64x1x256.nc"
+filename = "output/kelvin_helmholtz_instability_128x1x512.nc"
+# filename = "output/kelvin_helmholtz_instability_64x1x256.nc"
 filter_length_scale = 0.8  # Length scale for filtering
 #---
 
@@ -112,7 +112,7 @@ int_cross_scale_ape_flux = integrate(cross_scale_ape_flux.reindex(time=dE_dt.tim
 int_sfs_ape_dissipation = integrate(sfs_ape_dissipation.reindex(time=dE_dt.time), dV)
 int_ke_ape_exchange = integrate(ke_ape_exchange.reindex(time=dE_dt.time), dV)
 
-residual = -int_dE_dt + int_ke_ape_exchange + int_cross_scale_ape_flux - int_sfs_ape_dissipation
+residual = -int_dE_dt - int_ke_ape_exchange + int_cross_scale_ape_flux - int_sfs_ape_dissipation
 #---
 
 #+++ Save results
@@ -162,11 +162,12 @@ fig, ax = plt.subplots(figsize=(10, 6), constrained_layout=True)
 
 integrated_vars = ["∫∂ₜEaˢ dV", "∫Π dV", "∫εₛ dV", "∫(KE-APE) dV", "residual"]
 for var in integrated_vars:
-    if var in output_ds:
-        output_ds[var].dropna("time").plot.line(ax=ax, x="time", label=var)
-        ax.legend()
-        ax.get_figure().tight_layout()
-plot_filename = output_filename.replace(".nc", f"_{var}.png")
-ax.get_figure().savefig(plot_filename, dpi=150, bbox_inches="tight")
+    output_ds[var].dropna("time").plot.line(ax=ax, x="time", label=var)
+    ax.legend()
+ax.set_ylabel("Budget Terms [W or J s⁻¹]")
+ax.set_title("Integrated SFS APE Budget Terms")
+ax.grid(True, alpha=0.3)
+plot_filename = output_filename.replace(".nc", ".png")
+fig.savefig(plot_filename, dpi=150, bbox_inches="tight")
 print(f"Budget timeseries plot saved to: {plot_filename}")
 #---

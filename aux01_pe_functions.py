@@ -1108,7 +1108,7 @@ def calculate_subfilter_tracer_flux(rho, u_i, filter, filter_dims=["x_caa", "y_a
 def calculate_ke_ape_exchange_term(w, b, filter, filter_dims=["x_caa", "y_aca"],
                                    filtered_w=None, filtered_b=None):
     """
-    Calculate the KE-APE exchange term -(filtered(w·b) - filtered(w)·filtered(b))
+    Calculate the KE-APE exchange term +(filtered(w·b) - filtered(w)·filtered(b))
 
     This represents the cross-scale buoyancy flux: the rate at which large-scale
     KE and APE exchange energy through the subfilter-scale vertical buoyancy
@@ -1132,12 +1132,12 @@ def calculate_ke_ape_exchange_term(w, b, filter, filter_dims=["x_caa", "y_aca"],
     Returns
     -------
     xr.DataArray
-        KE-APE exchange term -(filtered(w·b) - filtered(w)·filtered(b))
+        KE-APE exchange term +(filtered(w·b) - filtered(w)·filtered(b))
     """
-    result = -calculate_sfs_flux_tensor(w, b, filter,
-                                        filter_dims=filter_dims,
-                                        filtered_a=filtered_w,
-                                        filtered_b=filtered_b)
+    result = calculate_sfs_flux_tensor(w, b, filter,
+                                       filter_dims=filter_dims,
+                                       filtered_a=filtered_w,
+                                       filtered_b=filtered_b)
     result.name = "KE-APE exchange"
     return result
 #---
