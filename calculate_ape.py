@@ -75,7 +75,19 @@ print("Calculating local APE...")
 
 full_local_pes = local_potential_energies_timeseries(ds_full, density_name="ρ", rho_to_sort=ds_full.ρ, ape_method="precomputed_integral", use_numpy_version=True)
 filt_local_pes = local_potential_energies_timeseries(ds_filt, density_name="ρ̄", rho_to_sort=ds_full.ρ, ape_method="precomputed_integral", use_numpy_version=True)
+#---
 
+#+++ Filter local APE
+print("\n" + "="*60)
+print("Filtering local APE...")
+
+full_local_ape_filtered = gaussian_filter.apply(full_local_pes.ape, dims=filtered_dimensions)
+print(f"Local APE filtered with length scale: {filter_length_scale}")
+
+subfilter_local_ape = full_local_ape_filtered - filt_local_pes.ape
+#---
+
+#+++ Calculate budget terms
 cross_scale_ape_flux = calculate_cross_scale_ape_flux(ds_full.ρ, ds_full["uᵢ"], filt_local_pes.upsilon, gaussian_filter,
     filter_dims=filtered_dimensions,
     filtered_density=ds_filt.ρ̄,)
@@ -88,16 +100,6 @@ ke_ape_exchange = calculate_ke_ape_exchange_term(ds_full["uᵢ"].sel(i=3), ds_fu
     filter_dims=filtered_dimensions,
     filtered_w=ds_filt["uᵢ"].sel(i=3),
     filtered_b=ds_filt["b̄"],)
-#---
-
-#+++ Filter local APE
-print("\n" + "="*60)
-print("Filtering local APE...")
-
-full_local_ape_filtered = gaussian_filter.apply(full_local_pes.ape, dims=filtered_dimensions)
-print(f"Local APE filtered with length scale: {filter_length_scale}")
-
-subfilter_local_ape = full_local_ape_filtered - filt_local_pes.ape
 #---
 
 #+++ Save results
