@@ -151,9 +151,9 @@ def local_TPE(rho, z_name="z_aac"):
     Returns
     -------
     xr.DataArray
-        Local TPE density: g * rho * z
+        Local TPE density: g * rho * z / ρ0  [m² s⁻²]
     """
-    return g * rho * rho[z_name]
+    return g * rho * rho[z_name] / ρ0
 
 def integrated_total_potential_energy(rho, dV=None, ds=None, z_name="z_aac"):
     """
@@ -598,7 +598,7 @@ def _local_APE_on_the_fly_integral_xarray(ρ, z, z_0, vertically_sorted_ds):
 
     b_l = - g * (ρ - ρ_sorted_profile_slice) / ρ0
 
-    return -ρ0 * (b_l * signed_dz_flat).sum("z_1d_sorted") # Convert to APE by unit of volume
+    return -(b_l * signed_dz_flat).sum("z_1d_sorted")  # APE in Boussinesq units [m² s⁻²]
 
 
 
@@ -726,7 +726,7 @@ def _local_APE_precomputed_integral_numpy(ρ_3d, z_3d, ρ_sorted_array, z_sorted
 
     # Sign convention: positive if z > z_0, negative if z < z_0
     sign = np.where(z_indices > z_0_indices, 1.0, -1.0)
-    ape_flat = sign * g * (ρ_flat * dz_integral - rho_integral)
+    ape_flat = sign * g * (ρ_flat * dz_integral - rho_integral) / ρ0  # Boussinesq units [m² s⁻²]
 
     return ape_flat.reshape(ρ_3d.shape)
 
@@ -771,9 +771,9 @@ def _local_APE_precomputed_integral_xarray(ρ, z, z_0, vertically_sorted_ds):
     dz_integral = (cumulative_dz_sorted_integral.sel(z_1d_sorted=z, method="nearest") -
                    cumulative_dz_sorted_integral.sel(z_1d_sorted=z_0))
 
-    # Calculate local APE
+    # Calculate local APE in Boussinesq units [m² s⁻²]
     ρ_constant_integral = ρ * dz_integral
-    local_ape = g * (ρ_constant_integral - ρ_sorted_integral)
+    local_ape = g * (ρ_constant_integral - ρ_sorted_integral) / ρ0
 
     return float(local_ape)
 
@@ -1024,8 +1024,201 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting
     return local_potential_energies_ds
 #---
 
+#+++ Rate-of-change-of-reference-density correction term (R)
+def calculate_drho_star_dt(rho_sorted):
+    """
+    Compute ∂ρ_*/∂t by differentiating the reference density profile in time.
+
+    Uses xarray's differentiate (centered finite differences) along the time axis.
+
+    Parameters
+    ----------
+    rho_sorted : xr.DataArray
+        2D array (time, z_1d_sorted) of the reference density profile,
+        e.g. local_potential_energies_ds.rho_sorted.
+
+    Returns
+    -------
+    xr.DataArray
+        2D array (time, z_1d_sorted) of ∂ρ_*/∂t.
+    """
+    Δt = rho_sorted.time.diff("time").sel(time=slice(None, None, 2))
+    Δρ = rho_sorted.diff("time").sel(time=slice(None, None, 2))
+    drho_star_dt = Δρ / Δt
+
+    return drho_star_dt
+#---
+
+#+++ Reference-tendency correction R
+def calculate_R_reference_tendency(z0, drho_star_dt, dz_sorted, z_name="z_aac"):
+    """
+    Compute the reference-tendency correction term
+
+        R = -(g/ρ₀) ∫_{z_*(ρ)}^{z} ∂ρ_*(z̃)/∂t dz̃
+
+    using the cumulative-integral method:
+
+        F(z̃, t) = ∫_{z_bottom}^{z̃} (∂ρ_*/∂t)(z̃', t) dz̃'   [cumulated from bottom]
+        R(x, y, z, t) = -(g/ρ₀) [F(z, t) - F(z₀(x,y,z,t), t)]
+
+    Pass z0 = full_local_pes.z0  to get the total R,
+    pass z0 = filt_local_pes.z0  to get the large-scale R_l.
+    The subfilter correction is then R_s = filter(R) - R_l.
+
+    Parameters
+    ----------
+    z0 : xr.DataArray
+        4D reference-height field (time, x, y, z), e.g. full_local_pes.z0
+        or filt_local_pes.z0.
+    drho_star_dt : xr.DataArray
+        2D array (time, z_1d_sorted) — ∂ρ_*/∂t from calculate_drho_star_dt().
+    dz_sorted : xr.DataArray
+        2D array (time, z_1d_sorted) — cell heights in sorted state,
+        e.g. local_potential_energies_ds.dz_sorted.
+    z_name : str
+        Name of the vertical coordinate in z0.
+
+    Returns
+    -------
+    xr.DataArray
+        4D field of R values (time, x, y, z), same shape and coordinates as z0.
+    """
+    # Cumulative integral F(z̃, t) = ∫_bottom^{z̃} ∂ρ_*/∂t dz̃
+    F = (drho_star_dt * dz_sorted).cumsum("z_1d_sorted")  # (time, z_1d_sorted)
+
+    z_sorted_vals = drho_star_dt.z_1d_sorted.values  # monotonically increasing physical z
+
+    R_list = []
+    for time in drho_star_dt.time:
+        z0_t = z0.sel(time=time)       # (x, y, z)
+        F_t = F.sel(time=time).values  # 1D, length nz_sorted
+
+        # Physical z of each grid cell, broadcast to full (x, y, z) shape
+        z_3d = (xr.zeros_like(z0_t) + z0_t[z_name]).values.ravel()
+        z0_flat = z0_t.values.ravel()
+
+        # Nearest-index lookup in the sorted z grid
+        iz  = np.clip(np.searchsorted(z_sorted_vals, z_3d),   0, len(F_t) - 1)
+        iz0 = np.clip(np.searchsorted(z_sorted_vals, z0_flat), 0, len(F_t) - 1)
+
+        R_flat = -(g / ρ0) * (F_t[iz] - F_t[iz0])
+        R_list.append(xr.DataArray(
+            R_flat.reshape(z0_t.shape),
+            dims=z0_t.dims,
+            coords=z0_t.coords,
+        ))
+
+    R = xr.concat(R_list, dim="time")
+    R["time"] = drho_star_dt.time
+    return R
+#---
+
+#+++ SFS APE tendency
+def calculate_sfs_ape_tendency(subfilter_local_ape):
+    """
+    Compute ∂Eaˢ/∂t as a centred finite difference in time.
+
+    Parameters
+    ----------
+    subfilter_local_ape : xr.DataArray
+        4D subfilter APE field (time, x, y, z),
+        e.g. filter(full_local_pes.ape) - filt_local_pes.ape.
+
+    Returns
+    -------
+    xr.DataArray
+        4D tendency field on the staggered (mid-point) time grid.
+    """
+    Δt = subfilter_local_ape.time.diff("time").sel(time=slice(None, None, 2))
+    ΔE = subfilter_local_ape.diff("time").sel(time=slice(None, None, 2))
+    return ΔE / Δt
+#---
+
+#+++ SFS reference-tendency correction R_s
+def calculate_sfs_R_correction(full_rho_sorted, full_z0, filt_z0, full_dz_sorted,
+                                filter, filter_dims=["x_caa", "y_aca"], z_name="z_aac"):
+    """
+    Compute the subfilter reference-tendency correction
+
+        R_s = filter(R) - R_l
+
+    where:
+        R   = -(g/ρ₀) ∫_{z_*(ρ)}^{z}  ∂ρ_*/∂t dz̃   (total,      uses full z₀)
+        R_l = -(g/ρ₀) ∫_{z_*(ρ̄)}^{z} ∂ρ_*/∂t dz̃   (large-scale, uses filtered z₀)
+
+    Parameters
+    ----------
+    full_rho_sorted : xr.DataArray
+        2D reference density profile (time, z_1d_sorted),
+        e.g. full_local_pes.rho_sorted.
+    full_z0 : xr.DataArray
+        4D reference-height field using the full density (time, x, y, z),
+        e.g. full_local_pes.z0.
+    filt_z0 : xr.DataArray
+        4D reference-height field using the filtered density (time, x, y, z),
+        e.g. filt_local_pes.z0.
+    full_dz_sorted : xr.DataArray
+        2D cell heights in sorted state (time, z_1d_sorted),
+        e.g. full_local_pes.dz_sorted.
+    filter : gcm_filters.Filter
+        Filter object used for the spatial filtering operation.
+    filter_dims : list of str
+        Spatial dimensions along which to apply the filter.
+    z_name : str
+        Name of the vertical coordinate in z0.
+
+    Returns
+    -------
+    xr.DataArray
+        4D subfilter correction R_s (time, x, y, z).
+    """
+    drho_star_dt = calculate_drho_star_dt(full_rho_sorted)
+    R_full = calculate_R_reference_tendency(full_z0, drho_star_dt, full_dz_sorted, z_name=z_name)
+    R_l    = calculate_R_reference_tendency(filt_z0, drho_star_dt, full_dz_sorted, z_name=z_name)
+    return filter.apply(R_full, dims=filter_dims) - R_l
+#---
+
+#+++ SFS flux tensor (general)
+def calculate_sfs_flux_tensor(a, b, filter, filter_dims=["x_caa", "y_aca"],
+                              filtered_a=None, filtered_b=None):
+    """
+    Calculate the SFS flux tensor filtered(a·b) - filtered(a)·filtered(b)
+
+    This is the general building block for subfilter-scale flux quantities: it
+    measures the covariance between a and b at scales smaller than the filter
+    width.
+
+    Parameters
+    ----------
+    a : xr.DataArray
+        First (unfiltered) field
+    b : xr.DataArray
+        Second (unfiltered) field
+    filter : gcm_filters.Filter
+        Filter object used to apply the spatial filtering operation
+    filter_dims : list of str
+        Spatial dimensions along which to apply the filter
+    filtered_a : xr.DataArray, optional
+        Pre-computed filtered(a). If None, it is computed from a.
+    filtered_b : xr.DataArray, optional
+        Pre-computed filtered(b). If None, it is computed from b.
+
+    Returns
+    -------
+    xr.DataArray
+        SFS flux tensor filtered(a·b) - filtered(a)·filtered(b)
+    """
+    if filtered_a is None:
+        filtered_a = filter.apply(a, dims=filter_dims)
+
+    if filtered_b is None:
+        filtered_b = filter.apply(b, dims=filter_dims)
+
+    return filter.apply(a * b, dims=filter_dims) - filtered_a * filtered_b
+#---
+
 #+++ Subfilter stress tensor
-def calculate_subfilter_tracer_flux(rho, u_i, gaussian_filter, filter_dims=["x_caa", "y_aca"],
+def calculate_subfilter_tracer_flux(rho, u_i, filter, filter_dims=["x_caa", "y_aca"],
                                     filtered_density=None, filtered_velocity_vector=None):
     """
     Calculate the subfilter stress tensor τᵢ = filtered(ρ uᵢ) - filtered(ρ) filtered(uᵢ)
@@ -1041,37 +1234,68 @@ def calculate_subfilter_tracer_flux(rho, u_i, gaussian_filter, filter_dims=["x_c
         Full (unfiltered) velocity vector with an "i" dimension indexing the
         three components (shape: i × time × z × y × x), as produced by
         condense_velocities()
-    gaussian_filter : gcm_filters.Filter
+    filter : gcm_filters.Filter
         Filter object used to apply the spatial filtering operation
     filter_dims : list of str
         Spatial dimensions along which to apply the filter
     filtered_density : xr.DataArray, optional
         Pre-computed filtered(ρ). If None, it is computed by applying
-        gaussian_filter to rho.
+        filter to rho.
     filtered_velocity_vector : xr.DataArray, optional
         Pre-computed filtered(uᵢ). If None, it is computed by applying
-        gaussian_filter to u_i.
+        filter to u_i.
 
     Returns
     -------
     xr.DataArray
         Subfilter stress τᵢ [kg m⁻² s⁻¹] with the same dimensions as u_i
     """
-    if filtered_density is None:
-        filtered_density = gaussian_filter.apply(rho, dims=filter_dims)
-
-    if filtered_velocity_vector is None:
-        filtered_velocity_vector = gaussian_filter.apply(u_i, dims=filter_dims)
-
-    filtered_rho_u_i = gaussian_filter.apply(rho * u_i, dims=filter_dims)
-
-    tau_i = filtered_rho_u_i - filtered_density * filtered_velocity_vector
+    tau_i = calculate_sfs_flux_tensor(rho, u_i, filter,
+                                      filter_dims=filter_dims,
+                                      filtered_a=filtered_density,
+                                      filtered_b=filtered_velocity_vector)
     tau_i.name = "τᵢ"
     return tau_i
 #---
 
+#+++ KE-APE exchange term
+def calculate_ape_to_ke_exchange_term(w, b, filter, filter_dims=["x_caa", "y_aca"],
+                                      filtered_w=None, filtered_b=None):
+    """
+    Calculate the SFS KE->APE exchange term +(filtered(w·b) - filtered(w)·filtered(b))
+
+    This represents the SFS flux of KE to APE: the rate at which small-scale KE is converted to APE.
+
+    Parameters
+    ----------
+    w : xr.DataArray
+        Full (unfiltered) vertical velocity field
+    b : xr.DataArray
+        Full (unfiltered) buoyancy field
+    filter : gcm_filters.Filter
+        Filter object used to apply the spatial filtering operation
+    filter_dims : list of str
+        Spatial dimensions along which to apply the filter
+    filtered_w : xr.DataArray, optional
+        Pre-computed filtered(w). If None, it is computed from w.
+    filtered_b : xr.DataArray, optional
+        Pre-computed filtered(b). If None, it is computed from b.
+
+    Returns
+    -------
+    xr.DataArray
+        SFS KE->APE exchange term +(filtered(w·b) - filtered(w)·filtered(b))
+    """
+    result = calculate_sfs_flux_tensor(w, b, filter,
+                                       filter_dims=filter_dims,
+                                       filtered_a=filtered_w,
+                                       filtered_b=filtered_b)
+    result.name = "SFS KE->APE exchange"
+    return result
+#---
+
 #+++ SFS APE dissipation
-def calculate_sfs_ape_dissipation(rho, upsilon, upsilon_l, kappa, gaussian_filter,
+def calculate_sfs_ape_dissipation(rho, upsilon, upsilon_l, kappa, filter,
                                   filter_dims=["x_caa", "y_aca"],
                                   filtered_density=None, index_dim="i"):
     """
@@ -1099,13 +1323,13 @@ def calculate_sfs_ape_dissipation(rho, upsilon, upsilon_l, kappa, gaussian_filte
         computed from the filtered density sort (filt_local_potential_energies.upsilon)
     kappa : xr.DataArray
         Diffusivity field κ (e.g. ds.κ_e from SmagorinskyLilly)
-    gaussian_filter : gcm_filters.Filter
+    filter : gcm_filters.Filter
         Filter object used to apply the spatial filtering operation
     filter_dims : list of str
         Spatial dimensions along which to apply the filter
     filtered_density : xr.DataArray, optional
         Pre-computed filtered density ρ̄. If None, it is computed by applying
-        gaussian_filter to rho.
+        filter to rho.
     index_dim : str, optional
         Name of the vector index dimension, default "i"
 
@@ -1118,11 +1342,11 @@ def calculate_sfs_ape_dissipation(rho, upsilon, upsilon_l, kappa, gaussian_filte
     grad_rho = calculate_gradient(rho)
     grad_upsilon = calculate_gradient(upsilon)
     kappa_grad_dot = kappa * (grad_rho * grad_upsilon).sum(dim=index_dim)
-    term1 = gaussian_filter.apply(kappa_grad_dot, dims=filter_dims)
+    term1 = filter.apply(kappa_grad_dot, dims=filter_dims)
 
     # Term 2: κ ∇ρ̄ · ∇Υˡ
     if filtered_density is None:
-        filtered_density = gaussian_filter.apply(rho, dims=filter_dims)
+        filtered_density = filter.apply(rho, dims=filter_dims)
     grad_rho_bar = calculate_gradient(filtered_density)
     grad_upsilon_l = calculate_gradient(upsilon_l)
     term2 = kappa * (grad_rho_bar * grad_upsilon_l).sum(dim=index_dim)
@@ -1131,7 +1355,7 @@ def calculate_sfs_ape_dissipation(rho, upsilon, upsilon_l, kappa, gaussian_filte
 #---
 
 #+++ Cross-scale APE flux
-def calculate_cross_scale_ape_flux(rho, u_i, upsilon, gaussian_filter, filter_dims=["x_caa", "y_aca"],
+def calculate_cross_scale_ape_flux(rho, u_i, upsilon, filter, filter_dims=["x_caa", "y_aca"],
                                     filtered_density=None, filtered_velocity_vector=None,
                                     index_dim="i"):
     """
@@ -1153,7 +1377,7 @@ def calculate_cross_scale_ape_flux(rho, u_i, upsilon, gaussian_filter, filter_di
     upsilon : xr.DataArray
         Buoyancy displacement potential Υ = g(z - z₀)/ρ₀, typically taken
         from the filtered potential energies dataset
-    gaussian_filter : gcm_filters.Filter
+    filter : gcm_filters.Filter
         Filter object used to apply the spatial filtering operation
     filter_dims : list of str
         Spatial dimensions along which to apply the filter
@@ -1171,7 +1395,7 @@ def calculate_cross_scale_ape_flux(rho, u_i, upsilon, gaussian_filter, filter_di
         as rho (the i dimension is summed over)
     """
     tau_i = calculate_subfilter_tracer_flux(
-        rho, u_i, gaussian_filter, filter_dims,
+        rho, u_i, filter, filter_dims,
         filtered_density=filtered_density,
         filtered_velocity_vector=filtered_velocity_vector,
     )

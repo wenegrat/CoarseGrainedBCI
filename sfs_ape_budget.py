@@ -1,32 +1,26 @@
 #!/usr/bin/env python
 """
-Calculate Available Potential Energy (APE) from Kelvin-Helmholtz simulation output
-
-Workflow:
-1. Load data and grid
-2. Calculate density fields from buoyancy
-3. Filter density field
-4. Calculate local APE using precomputed_integral method
-5. Filter local APE with length scale 0.8
+Calculate SFS APE budget from Kelvin-Helmholtz simulation output
 """
 
 #+++ Imports
 import numpy as np
 import xarray as xr
 import gcm_filters
-from aux00_utils import load_dataset_and_grid, condense_velocities, calculate_gradient
+from aux00_utils import load_dataset_and_grid, condense_velocities, integrate
 from aux01_pe_functions import (
     calculate_density_fields_from_buoyancy,
     local_potential_energies_timeseries,
-    calculate_subfilter_tracer_flux,
+    calculate_sfs_ape_tendency,
+    calculate_sfs_R_correction,
     calculate_cross_scale_ape_flux,
     calculate_sfs_ape_dissipation,
     calculate_ape_to_ke_exchange_term,
 )
-from ape_plots import plot_dataset_variables
 #---
 
 #+++ Configuration
+filename = "output/kelvin_helmholtz_instability_128x1x512.nc"
 filename = "output/kelvin_helmholtz_instability_64x1x256.nc"
 filter_length_scale = 0.8  # Length scale for filtering
 #---
@@ -37,7 +31,7 @@ print("Loading data and grid...")
 ds = load_dataset_and_grid(filename)
 print(f"Dataset loaded: {len(ds.time)} time steps")
 
-ds = ds.sel(time=[52, 72,], method="nearest")
+# ds = ds.sel(time=slice(20, 81))
 #---
 
 #+++ Filter buoyancy field
@@ -54,8 +48,10 @@ gaussian_filter = gcm_filters.Filter(
 )
 
 ds["b̄"] = gaussian_filter.apply(ds.b, dims=filtered_dimensions) # An overbar denotes a filtering operation
+
 ds = condense_velocities(ds, indices=[1, 2, 3]) # Condense velocity components into tensor form
 ds["ūᵢ"] = gaussian_filter.apply(ds["uᵢ"], dims=filtered_dimensions)
+
 print(f"Buoyancy and velocities filtered with length scale: {filter_length_scale}")
 
 ds_filt = ds[["b̄", "dV", "LxLy", "ūᵢ"]].copy()
@@ -97,10 +93,30 @@ sfs_ape_dissipation = calculate_sfs_ape_dissipation(ds_full.ρ, full_local_pes.u
     filter_dims=filtered_dimensions,
     filtered_density=ds_filt.ρ̄,)
 
-ke_ape_exchange = calculate_ape_to_ke_exchange_term(ds_full["uᵢ"].sel(i=3), ds_full.b, gaussian_filter,
+ape_to_ke_exchange = calculate_ape_to_ke_exchange_term(ds_full["uᵢ"].sel(i=3), ds_full.b, gaussian_filter,
     filter_dims=filtered_dimensions,
     filtered_w=ds_filt["ūᵢ"].sel(i=3),
     filtered_b=ds_filt["b̄"],)
+
+R_s = calculate_sfs_R_correction(full_local_pes.rho_sorted, full_local_pes.z0, filt_local_pes.z0,
+                                  full_local_pes.dz_sorted, gaussian_filter, filter_dims=filtered_dimensions)
+#---
+
+#+++ Calculate SFS APE time derivatives
+dE_dt = calculate_sfs_ape_tendency(subfilter_local_ape)
+#---
+
+#+++ Integrate and budget
+dV = ds.Δx_caa * ds.Δy_aca * ds.Δz_aac
+
+int_dE_dt = integrate(dE_dt, dV)
+
+int_cross_scale_ape_flux = integrate(cross_scale_ape_flux.reindex(time=dE_dt.time), dV)
+int_sfs_ape_dissipation = integrate(sfs_ape_dissipation.reindex(time=dE_dt.time), dV)
+int_ape_to_ke_exchange = integrate(ape_to_ke_exchange.reindex(time=dE_dt.time), dV)
+int_R_s = integrate(R_s.reindex(time=dE_dt.time), dV)
+
+residual = -int_dE_dt - int_ape_to_ke_exchange + int_cross_scale_ape_flux - int_sfs_ape_dissipation + int_R_s
 #---
 
 #+++ Save results
@@ -108,31 +124,56 @@ print("\n" + "="*60)
 print("Saving results...")
 
 output_ds = xr.Dataset({
-    "z₀(ρ)": full_local_pes.z0,
-    "z₀(ρ̄)": filt_local_pes.z0,
-    "Ea(ρ, z)": full_local_pes.ape,
-    "Ea(ρ̄, z)": filt_local_pes.ape,
-    "Ēa(ρ, z)": full_local_ape_filtered,
-    "Ēa(ρ, z) - Ea(ρ̄, z)": subfilter_local_ape,
+    # Density fields
     "ρ": ds_full.ρ,
     "ρ̄": ds_filt.ρ̄,
-    "Π": cross_scale_ape_flux,
-    "εₛ": sfs_ape_dissipation,
-    "KE-APE exchange": ke_ape_exchange,
+    # Reference heights
+    "z₀(ρ)": full_local_pes.z0,
+    "z₀(ρ̄)": filt_local_pes.z0,
+    # Buoyancy displacement potentials
     "Υ": full_local_pes.upsilon,
     "Υˡ": filt_local_pes.upsilon,
+    # Local APE fields
+    "Ea(ρ, z)": full_local_pes.ape,
+    "Ea(ρ̄, z)": filt_local_pes.ape,
+    "Ēa(ρ, z)": full_local_ape_filtered,
+    "Eaˢ(ρ, z)": subfilter_local_ape,
+    # Local budget terms
+    "∂ₜ-Eaˢ": -dE_dt,
+    "Π": cross_scale_ape_flux,
+    "εₛ": sfs_ape_dissipation,
+    "SFS KE->APE exchange": ape_to_ke_exchange,
+    "Rˢ": R_s,
+    # Integrated budget terms
+    "∫∂ₜ-Eaˢ dV": -int_dE_dt,
+    "∫Π dV": int_cross_scale_ape_flux,
+    "∫-εₛ dV": -int_sfs_ape_dissipation,
+    "∫(SFS KE->APE) dV": -int_ape_to_ke_exchange, # Flip the sign to make plotting easier
+    "∫Rˢ dV": int_R_s,
+    "residual": residual,
 })
 
-output_filename = filename.replace(".nc", "_ape_local.nc")
+output_filename = filename.replace(".nc", "_sfs_ape_budget.nc")
 output_ds.to_netcdf(output_filename)
 print(f"\nResults saved to: {output_filename}")
 #---
 
-#+++ Plot all variables in output_ds
+#+++ Plot integrated budget terms
 print("\n" + "="*60)
 print("Creating plots...")
 print("="*60)
-# figures = plot_dataset_variables(output_ds[["Ea(ρ, z)", "Ea(ρ̄, z)", "Ēa(ρ, z) - Ea(ρ̄, z)"]], time_stride=1, col="time", col_wrap=5, cmap="viridis", vmin=0 ,vmax=3, x="x_caa")
-figures = plot_dataset_variables(output_ds[["Ea(ρ, z)", "Ea(ρ̄, z)", "Ēa(ρ, z) - Ea(ρ̄, z)"]], time_stride=1, col="time", cmap="RdBu_r", vmin=-10, vmax=10, x="x_caa")
-# figures = plot_dataset_variables(output_ds[["Ea(ρ, z)", "Ea(ρ̄, z)", "Ēa(ρ, z) - Ea(ρ̄, z)"]], time_stride=1, cmap="RdBu_r", vmin=-10, vmax=10, x="x_caa")
+
+import matplotlib.pyplot as plt
+fig, ax = plt.subplots(figsize=(10, 6), constrained_layout=True)
+
+integrated_vars = ["∫∂ₜ-Eaˢ dV", "∫Π dV", "∫-εₛ dV", "∫(SFS KE->APE) dV", "∫Rˢ dV", "residual"]
+for var in integrated_vars:
+    output_ds[var].dropna("time").plot.line(ax=ax, x="time", label=var)
+    ax.legend()
+ax.set_ylabel("Budget Terms [W or J s⁻¹]")
+ax.set_title("Integrated SFS APE Budget Terms")
+ax.grid(True, alpha=0.3)
+plot_filename = output_filename.replace(".nc", ".png")
+fig.savefig(plot_filename, dpi=150, bbox_inches="tight")
+print(f"Budget timeseries plot saved to: {plot_filename}")
 #---

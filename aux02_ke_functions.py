@@ -24,9 +24,9 @@ def local_KE(u, v, w):
     Returns
     -------
     xr.DataArray
-        Local KE density: ρ0 * (u^2 + v^2 + w^2) / 2
+        Local KE density: (u^2 + v^2 + w^2) / 2  [m² s⁻²]
     """
-    return ρ0 * (u**2 + v**2 + w**2) / 2
+    return (u**2 + v**2 + w**2) / 2
 
 def integrated_KE(ds, u_name="u", v_name="v", w_name="w", dV_name="dV",
                   x_dim="x_caa", y_dim="y_aca", z_dim="z_aac"):
