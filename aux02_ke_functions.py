@@ -92,6 +92,59 @@ def local_KE_s(u_i, u_i_bar, filter, filter_dims=["x_caa", "y_aca"], index_dim="
     return KE_bar - KE_l
 #---
 
+#+++ SFS stress tensor
+def calculate_sfs_stress_tensor(u_i, filter, filter_dims=["x_caa", "y_aca"],
+                                 filtered_u_i=None, index_dim="i"):
+    """
+    Calculate the full 3×3 SFS stress tensor τ̄ℓⁱʲ(u, u)
+
+    Following Aluie et al. (2018, JPO) Eq. (5), each component is:
+
+        τ̄ℓⁱʲ = filter(uⁱ uʲ) - ūⁱ ūʲ
+
+    The result is a symmetric tensor with a new dimension "j" (same index values
+    as the input "i" dimension). The trace gives twice the SFS KE:
+
+        (1/2) tr(τ̄ℓ) = (1/2)[ filter(|u|²) - |ū|² ] = KE_s  ≥ 0
+
+    The filter is applied to the outer product uⁱ uʲ using xarray broadcasting,
+    which evaluates all 9 components in a single pass — the same approach as
+    calculate_sfs_flux_tensor() in aux01_pe_functions.py.
+
+    Parameters
+    ----------
+    u_i : xr.DataArray
+        Full (unfiltered) velocity tensor with index dimension (e.g. i=1,2,3).
+    filter : gcm_filters.Filter
+        Filter object used for the spatial filtering operation.
+    filter_dims : list of str
+        Spatial dimensions along which to apply the filter.
+    filtered_u_i : xr.DataArray, optional
+        Pre-computed filtered velocity ūⁱ. If None, it is computed from u_i.
+    index_dim : str
+        Name of the vector index dimension (default "i").
+
+    Returns
+    -------
+    xr.DataArray
+        Tensor τ̄ℓⁱʲ with dimensions (i, j, ...) where j carries the same
+        coordinate values as i. Select a component via e.g.
+        tau.sel(i=1, j=2) for τxy.
+    """
+    if filtered_u_i is None:
+        filtered_u_i = filter.apply(u_i, dims=filter_dims)
+
+    # Rename index dimension to "j" on the second operand so xarray broadcasts
+    # u_i (i, ...) × u_j (j, ...) → outer product with shape (i, j, ...)
+    u_j     = u_i.rename({index_dim: "j"})
+    u_j_bar = filtered_u_i.rename({index_dim: "j"})
+
+    # τ̄ℓⁱʲ = filter(uⁱ uʲ) - ūⁱ ūʲ  (all components in one vectorised call)
+    tau = filter.apply(u_i * u_j, dims=filter_dims) - filtered_u_i * u_j_bar
+
+    return tau
+#---
+
 #+++ Calculate kinetic energy
 def local_KE(u, v, w):
     """

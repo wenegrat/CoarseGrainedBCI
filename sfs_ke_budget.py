@@ -22,7 +22,7 @@ import numpy as np
 import xarray as xr
 import gcm_filters
 from aux00_utils import load_dataset_and_grid, condense_velocities, integrate
-from aux02_ke_functions import local_KE_vector, local_KE_l, local_KE_s
+from aux02_ke_functions import local_KE_vector, local_KE_l, local_KE_s, calculate_sfs_stress_tensor
 #---
 
 #+++ Configuration
@@ -80,6 +80,30 @@ KE_s.name = "KE_s"
 print("KE fields calculated: KE, KE_l, KE_bar, KE_s")
 #---
 
+#+++ Calculate SFS stress tensor
+print("\n" + "="*60)
+print("Calculating SFS stress tensor...")
+
+# τ̄ℓⁱʲ = filter(uⁱ uʲ) - ūⁱ ūʲ   shape: (i, j, time, z, y, x)
+# Pre-pass filtered_u_i so the filter is not applied a second time
+tau = calculate_sfs_stress_tensor(ds["uᵢ"], gaussian_filter,
+                                   filter_dims=filtered_dimensions,
+                                   filtered_u_i=ds["ūᵢ"])
+tau.name = "τ"
+
+# Sanity check: trace/2 must equal KE_s pointwise
+tau_trace_half = tau.sel(i=1, j=1) + tau.sel(i=2, j=2) + tau.sel(i=3, j=3)
+tau_trace_half = tau_trace_half / 2
+tau_trace_half.name = "KE_s (from τ trace)"
+
+print("Done!")
+#---
+
+#+++ Sanity check: (1/2) tr(τ) == KE_s
+xr.testing.assert_allclose(tau_trace_half, KE_s, rtol=1e-4)
+print("Sanity check passed: (1/2)tr(τ) = KE_s ✓")
+#---
+
 #+++ Integrate
 print("\n" + "="*60)
 print("Integrating KE fields...")
@@ -104,6 +128,7 @@ output_ds = xr.Dataset({
     "KE_l":   KE_l,
     "KE_bar": KE_bar,
     "KE_s":   KE_s,
+    "τ":      tau,
     # Integrated scalars
     "∫KE dV":     int_KE,
     "∫KE_l dV":   int_KE_l,
