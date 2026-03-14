@@ -895,9 +895,10 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting
     z_name : str
         Name of vertical coordinate
     rho_to_sort : xr.DataArray, optional
-        Density field to use for sorting instead of the dataset density. If it
-        has a "time" dimension it will be sliced per step. If None, the density
-        from the dataset is used.
+        Density field to use for sorting instead of the dataset density. Only
+        the first time step (time=0) is used to compute the reference profile,
+        which is then held fixed for all time steps. If None, the density from
+        the dataset at time=0 is used.
 
     Returns
     -------
@@ -919,6 +920,29 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting
     z_min = ds.attrs[z_min_name] if isinstance(z_min_name, str) else z_min_name
     Lz = ds.attrs[Lz_name] if isinstance(Lz_name, str) else Lz_name
 
+    # Compute reference state once from the first time step (t=0) and reuse it
+    # for all subsequent time steps so the reference profile is fixed in time.
+    rho_t0 = ds.isel(time=0)[density_name]
+    _rho_to_sort_t0 = (rho_to_sort.isel(time=0) if (rho_to_sort is not None and "time" in rho_to_sort.dims)
+                       else (rho_to_sort if rho_to_sort is not None else rho_t0))
+    if sorting_method == "vertically_flattened":
+        _vertically_sorted_ds_fixed, _ = vertical_sort_density_by_flattening(
+            _rho_to_sort_t0, dV, LxLy, test=test, z_min=z_min, Lz=Lz
+        )
+    elif sorting_method == "PDF":
+        _vertically_sorted_ds_fixed = vertical_sort_density_by_PDF(_rho_to_sort_t0, Lz, nbins=1000)
+    else:
+        raise ValueError(f"Invalid sorting method: {sorting_method}")
+
+    # Pre-compute cumulative integrals for precomputed_integral method (fixed reference)
+    if ape_method == "precomputed_integral":
+        _vertically_sorted_ds_fixed["rho_1d_sorted_cumulative_integral"] = (
+            _vertically_sorted_ds_fixed.rho_1d_sorted * _vertically_sorted_ds_fixed.dz_1d_sorted
+        ).cumsum("z_1d_sorted")
+        _vertically_sorted_ds_fixed["dz_1d_sorted_cumulative_integral"] = (
+            _vertically_sorted_ds_fixed.dz_1d_sorted.cumsum("z_1d_sorted")
+        )
+
     # Initialize list to store local APE fields for each time
     local_ape_list = []
     local_z0_list = []
@@ -933,16 +957,8 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting
         ds_t = ds.isel(time=i)
         rho_t = ds_t[density_name]
 
-        # Determine density field to sort and compute reference state
-        _rho_to_sort = rho_to_sort.isel(time=i) if (rho_to_sort is not None and "time" in rho_to_sort.dims) else (rho_to_sort if rho_to_sort is not None else rho_t)
-        if sorting_method == "vertically_flattened":
-            _vertically_sorted_ds, threed_sorted_ds = vertical_sort_density_by_flattening(
-                _rho_to_sort, dV, LxLy, test=test, z_min=z_min, Lz=Lz
-            )
-        elif sorting_method == "PDF":
-            _vertically_sorted_ds = vertical_sort_density_by_PDF(_rho_to_sort, Lz, nbins=1000)
-        else:
-            raise ValueError(f"Invalid sorting method: {sorting_method}")
+        # Use the fixed reference state computed from t=0
+        _vertically_sorted_ds = _vertically_sorted_ds_fixed
 
         # Create a temporary dataset with the density field for APE calculation
         ds_t_with_rho = ds_t.copy()
@@ -964,12 +980,6 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting
                 z0=local_z0,
             )
         elif ape_method == "precomputed_integral":
-            # Compute cumulative integrals for precomputed method
-            # ∫_0^z ρ(z') dz' = cumsum(ρ * dz)
-            _vertically_sorted_ds["rho_1d_sorted_cumulative_integral"] = (_vertically_sorted_ds.rho_1d_sorted * _vertically_sorted_ds.dz_1d_sorted).cumsum("z_1d_sorted")
-            # ∫_0^z dz' = cumsum(dz)
-            _vertically_sorted_ds["dz_1d_sorted_cumulative_integral"] = _vertically_sorted_ds.dz_1d_sorted.cumsum("z_1d_sorted")
-
             local_ape = vectorized_local_APE_precomputed_integral(
                 ds_t_with_rho, _vertically_sorted_ds,
                 verbose=verbose_level > 1,
