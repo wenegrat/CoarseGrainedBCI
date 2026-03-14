@@ -1024,6 +1024,95 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting
     return local_potential_energies_ds
 #---
 
+#+++ Rate-of-change-of-reference-density correction term (R)
+def calculate_drho_star_dt(rho_sorted):
+    """
+    Compute ∂ρ_*/∂t by differentiating the reference density profile in time.
+
+    Uses xarray's differentiate (centered finite differences) along the time axis.
+
+    Parameters
+    ----------
+    rho_sorted : xr.DataArray
+        2D array (time, z_1d_sorted) of the reference density profile,
+        e.g. local_potential_energies_ds.rho_sorted.
+
+    Returns
+    -------
+    xr.DataArray
+        2D array (time, z_1d_sorted) of ∂ρ_*/∂t.
+    """
+    Δt = rho_sorted.time.diff("time").sel(time=slice(None, None, 2))
+    Δρ = rho_sorted.diff("time").sel(time=slice(None, None, 2))
+    drho_star_dt = Δρ / Δt
+
+    return drho_star_dt
+#---
+
+#+++ Reference-tendency correction R
+def calculate_R_reference_tendency(z0, drho_star_dt, dz_sorted, z_name="z_aac"):
+    """
+    Compute the reference-tendency correction term
+
+        R = -(g/ρ₀) ∫_{z_*(ρ)}^{z} ∂ρ_*(z̃)/∂t dz̃
+
+    using the cumulative-integral method:
+
+        F(z̃, t) = ∫_{z_bottom}^{z̃} (∂ρ_*/∂t)(z̃', t) dz̃'   [cumulated from bottom]
+        R(x, y, z, t) = -(g/ρ₀) [F(z, t) - F(z₀(x,y,z,t), t)]
+
+    Pass z0 = full_local_pes.z0  to get the total R,
+    pass z0 = filt_local_pes.z0  to get the large-scale R_l.
+    The subfilter correction is then R_s = filter(R) - R_l.
+
+    Parameters
+    ----------
+    z0 : xr.DataArray
+        4D reference-height field (time, x, y, z), e.g. full_local_pes.z0
+        or filt_local_pes.z0.
+    drho_star_dt : xr.DataArray
+        2D array (time, z_1d_sorted) — ∂ρ_*/∂t from calculate_drho_star_dt().
+    dz_sorted : xr.DataArray
+        2D array (time, z_1d_sorted) — cell heights in sorted state,
+        e.g. local_potential_energies_ds.dz_sorted.
+    z_name : str
+        Name of the vertical coordinate in z0.
+
+    Returns
+    -------
+    xr.DataArray
+        4D field of R values (time, x, y, z), same shape and coordinates as z0.
+    """
+    # Cumulative integral F(z̃, t) = ∫_bottom^{z̃} ∂ρ_*/∂t dz̃
+    F = (drho_star_dt * dz_sorted).cumsum("z_1d_sorted")  # (time, z_1d_sorted)
+
+    z_sorted_vals = drho_star_dt.z_1d_sorted.values  # monotonically increasing physical z
+
+    R_list = []
+    for time in drho_star_dt.time:
+        z0_t = z0.sel(time=time)       # (x, y, z)
+        F_t = F.sel(time=time).values  # 1D, length nz_sorted
+
+        # Physical z of each grid cell, broadcast to full (x, y, z) shape
+        z_3d = (xr.zeros_like(z0_t) + z0_t[z_name]).values.ravel()
+        z0_flat = z0_t.values.ravel()
+
+        # Nearest-index lookup in the sorted z grid
+        iz  = np.clip(np.searchsorted(z_sorted_vals, z_3d),   0, len(F_t) - 1)
+        iz0 = np.clip(np.searchsorted(z_sorted_vals, z0_flat), 0, len(F_t) - 1)
+
+        R_flat = -(g / ρ0) * (F_t[iz] - F_t[iz0])
+        R_list.append(xr.DataArray(
+            R_flat.reshape(z0_t.shape),
+            dims=z0_t.dims,
+            coords=z0_t.coords,
+        ))
+
+    R = xr.concat(R_list, dim="time")
+    R["time"] = drho_star_dt.time
+    return R
+#---
+
 #+++ SFS flux tensor (general)
 def calculate_sfs_flux_tensor(a, b, filter, filter_dims=["x_caa", "y_aca"],
                               filtered_a=None, filtered_b=None):

@@ -11,6 +11,8 @@ from aux00_utils import load_dataset_and_grid, condense_velocities, integrate
 from aux01_pe_functions import (
     calculate_density_fields_from_buoyancy,
     local_potential_energies_timeseries,
+    calculate_drho_star_dt,
+    calculate_R_reference_tendency,
     calculate_cross_scale_ape_flux,
     calculate_sfs_ape_dissipation,
     calculate_ape_to_ke_exchange_term,
@@ -18,8 +20,8 @@ from aux01_pe_functions import (
 #---
 
 #+++ Configuration
-# filename = "output/kelvin_helmholtz_instability_128x1x512.nc"
-filename = "output/kelvin_helmholtz_instability_64x1x256.nc"
+filename = "output/kelvin_helmholtz_instability_128x1x512.nc"
+# filename = "output/kelvin_helmholtz_instability_64x1x256.nc"
 filter_length_scale = 0.8  # Length scale for filtering
 #---
 
@@ -95,6 +97,16 @@ ape_to_ke_exchange = calculate_ape_to_ke_exchange_term(ds_full["uᵢ"].sel(i=3),
     filter_dims=filtered_dimensions,
     filtered_w=ds_filt["ūᵢ"].sel(i=3),
     filtered_b=ds_filt["b̄"],)
+
+# Reference-tendency correction R
+# R   = -(g/ρ₀) ∫_{z*(ρ)}^{z}  ∂ρ_*/∂t dz̃   (total, using full z0)
+# R_l = -(g/ρ₀) ∫_{z*(ρ̄)}^{z} ∂ρ_*/∂t dz̃   (large-scale, using filtered z0)
+# R_s = filter(R) - R_l                        (subfilter)
+drho_star_dt = calculate_drho_star_dt(full_local_pes.rho_sorted)
+R_full  = calculate_R_reference_tendency(full_local_pes.z0,  drho_star_dt, full_local_pes.dz_sorted)
+R_l     = calculate_R_reference_tendency(filt_local_pes.z0,  drho_star_dt, full_local_pes.dz_sorted)
+R̄       = gaussian_filter.apply(R_full, dims=filtered_dimensions)
+R_s     = R̄ - R_l
 #---
 
 #+++ Calculate SFS APE time derivatives
@@ -111,8 +123,9 @@ int_dE_dt = integrate(dE_dt, dV)
 int_cross_scale_ape_flux = integrate(cross_scale_ape_flux.reindex(time=dE_dt.time), dV)
 int_sfs_ape_dissipation = integrate(sfs_ape_dissipation.reindex(time=dE_dt.time), dV)
 int_ape_to_ke_exchange = integrate(ape_to_ke_exchange.reindex(time=dE_dt.time), dV)
+int_R_s = integrate(R_s.reindex(time=dE_dt.time), dV)
 
-residual = -int_dE_dt - int_ape_to_ke_exchange + int_cross_scale_ape_flux - int_sfs_ape_dissipation
+residual = -int_dE_dt - int_ape_to_ke_exchange + int_cross_scale_ape_flux - int_sfs_ape_dissipation + int_R_s
 #---
 
 #+++ Save results
@@ -139,11 +152,13 @@ output_ds = xr.Dataset({
     "Π": cross_scale_ape_flux,
     "εₛ": sfs_ape_dissipation,
     "SFS KE->APE exchange": ape_to_ke_exchange,
+    "Rˢ": R_s,
     # Integrated budget terms
     "∫∂ₜ-Eaˢ dV": -int_dE_dt,
     "∫Π dV": int_cross_scale_ape_flux,
     "∫-εₛ dV": -int_sfs_ape_dissipation,
     "∫(SFS KE->APE) dV": -int_ape_to_ke_exchange, # Flip the sign to make plotting easier
+    "∫Rˢ dV": int_R_s,
     "residual": residual,
 })
 
@@ -160,7 +175,7 @@ print("="*60)
 import matplotlib.pyplot as plt
 fig, ax = plt.subplots(figsize=(10, 6), constrained_layout=True)
 
-integrated_vars = ["∫∂ₜ-Eaˢ dV", "∫Π dV", "∫-εₛ dV", "∫(SFS KE->APE) dV", "residual"]
+integrated_vars = ["∫∂ₜ-Eaˢ dV", "∫Π dV", "∫-εₛ dV", "∫(SFS KE->APE) dV", "∫Rˢ dV", "residual"]
 for var in integrated_vars:
     output_ds[var].dropna("time").plot.line(ax=ax, x="time", label=var)
     ax.legend()
