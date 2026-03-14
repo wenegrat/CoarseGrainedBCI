@@ -219,6 +219,47 @@ def calculate_large_scale_strain_tensor(u_i_bar, dimensions=("x_caa", "y_aca", "
     return (grad_u + grad_u_T) / 2
 #---
 
+#+++ Cross-scale KE flux
+def calculate_cross_scale_ke_flux(S, tau, index_dims=("i", "j")):
+    """
+    Compute the cross-scale KE flux Πℓ = -ρ₀ S̄ℓ : τ̄ℓ
+
+    Following Aluie et al. (2018, JPO) Eq. (7).  Πℓ > 0 means forward
+    (downscale) KE transfer; Πℓ < 0 means inverse (upscale) transfer.
+
+    The double contraction of two symmetric 3×3 tensors is
+
+        A : B = Σᵢⱼ Aⁱʲ Bⁱʲ
+              = Aˣˣ Bˣˣ + Aʸʸ Bʸʸ + Aᶻᶻ Bᶻᶻ
+                + 2 Aˣʸ Bˣʸ + 2 Aˣᶻ Bˣᶻ + 2 Aʸᶻ Bʸᶻ
+
+    Because both tensors are stored as full (i, j, ...) DataArrays with all
+    nine entries, the sum over both index dimensions gives the correct result
+    (the off-diagonal factor-of-2 arises automatically from the (i,j) + (j,i)
+    entries):
+
+        Πℓ = -ρ₀ * (S * τ).sum(["i", "j"])
+
+    Parameters
+    ----------
+    S : xr.DataArray
+        Large-scale strain rate tensor S̄ℓⁱʲ with dimensions (i, j, ...).
+        Typically from calculate_large_scale_strain_tensor().
+    tau : xr.DataArray
+        SFS stress tensor τ̄ℓⁱʲ with dimensions (i, j, ...).
+        Typically from calculate_sfs_stress_tensor().
+    index_dims : tuple of str
+        Names of the two tensor index dimensions to sum over.
+
+    Returns
+    -------
+    xr.DataArray
+        Cross-scale KE flux Πℓ [m² s⁻³], same spatial dimensions as S / tau
+        (the i and j dimensions are contracted away).
+    """
+    return -ρ0 * (S * tau).sum(list(index_dims))
+#---
+
 #+++ Calculate kinetic energy
 def local_KE(u, v, w):
     """

@@ -26,6 +26,7 @@ from aux02_ke_functions import (
     local_KE_vector, local_KE_l, local_KE_s,
     calculate_sfs_stress_tensor,
     calculate_large_scale_strain_tensor,
+    calculate_cross_scale_ke_flux,
 )
 #---
 
@@ -120,6 +121,17 @@ print(f"  Incompressibility check: max|∇·ū| = {max_div:.2e}  (mean diagonal 
 print("Done!")
 #---
 
+#+++ Calculate cross-scale KE flux
+print("\n" + "="*60)
+print("Calculating cross-scale KE flux...")
+
+# Πℓ = -ρ₀ S̄ℓ : τ̄ℓ = -ρ₀ Σᵢⱼ Sⁱʲ τⁱʲ   [m² s⁻³]
+Pi_ke = calculate_cross_scale_ke_flux(S, tau)
+Pi_ke.name = "Π_KE"
+
+print("Done!")
+#---
+
 #+++ Sanity check: (1/2) tr(τ) == KE_s
 xr.testing.assert_allclose(tau_trace_half, KE_s, rtol=1e-4)
 print("Sanity check passed: (1/2)tr(τ) = KE_s ✓")
@@ -135,6 +147,7 @@ int_KE     = integrate(KE,     dV)
 int_KE_l   = integrate(KE_l,   dV)
 int_KE_bar = integrate(KE_bar, dV)
 int_KE_s   = integrate(KE_s,   dV)
+int_Pi_ke  = integrate(Pi_ke,  dV)
 
 print("Done!")
 #---
@@ -151,11 +164,13 @@ output_ds = xr.Dataset({
     "KE_s":   KE_s,
     "τ":      tau,
     "S":      S,
+    "Π_KE":   Pi_ke,
     # Integrated scalars
     "∫KE dV":     int_KE,
     "∫KE_l dV":   int_KE_l,
     "∫KE_bar dV": int_KE_bar,
     "∫KE_s dV":   int_KE_s,
+    "∫Π_KE dV":   int_Pi_ke,
 })
 
 output_filename = filename.replace(".nc", "_sfs_ke_budget.nc")
@@ -169,9 +184,9 @@ print("Creating plots...")
 
 import matplotlib.pyplot as plt
 
-fig, axes = plt.subplots(1, 2, figsize=(14, 5), constrained_layout=True)
+fig, axes = plt.subplots(1, 3, figsize=(18, 5), constrained_layout=True)
 
-# Panel 1: absolute values
+# Panel 1: KE decomposition
 ax = axes[0]
 for var, label in [("∫KE dV", "KE (total)"), ("∫KE_bar dV", "K̄E (filtered)"),
                    ("∫KE_l dV", "KE_l (large-scale)"), ("∫KE_s dV", "KE_s (SFS)")]:
@@ -187,6 +202,15 @@ sfs_fraction = output_ds["∫KE_s dV"] / output_ds["∫KE_bar dV"]
 sfs_fraction.plot.line(ax=ax, x="time")
 ax.set_ylabel("KE_s / K̄E")
 ax.set_title("SFS fraction of filtered KE")
+ax.grid(True, alpha=0.3)
+
+# Panel 3: cross-scale KE flux (Π > 0: forward/downscale, Π < 0: inverse/upscale)
+ax = axes[2]
+output_ds["∫Π_KE dV"].plot.line(ax=ax, x="time", label="∫Π_KE dV")
+ax.axhline(0, color="k", linewidth=0.8, linestyle="--")
+ax.set_ylabel("Π_KE [m² s⁻³ × m³]")
+ax.set_title("Cross-scale KE flux (+ = forward, − = inverse)")
+ax.legend()
 ax.grid(True, alpha=0.3)
 
 plot_filename = output_filename.replace(".nc", ".png")
