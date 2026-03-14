@@ -1113,6 +1113,71 @@ def calculate_R_reference_tendency(z0, drho_star_dt, dz_sorted, z_name="z_aac"):
     return R
 #---
 
+#+++ SFS APE tendency
+def calculate_sfs_ape_tendency(subfilter_local_ape):
+    """
+    Compute ∂Eaˢ/∂t as a centred finite difference in time.
+
+    Parameters
+    ----------
+    subfilter_local_ape : xr.DataArray
+        4D subfilter APE field (time, x, y, z),
+        e.g. filter(full_local_pes.ape) - filt_local_pes.ape.
+
+    Returns
+    -------
+    xr.DataArray
+        4D tendency field on the staggered (mid-point) time grid.
+    """
+    Δt = subfilter_local_ape.time.diff("time").sel(time=slice(None, None, 2))
+    ΔE = subfilter_local_ape.diff("time").sel(time=slice(None, None, 2))
+    return ΔE / Δt
+#---
+
+#+++ SFS reference-tendency correction R_s
+def calculate_sfs_R_correction(full_rho_sorted, full_z0, filt_z0, full_dz_sorted,
+                                filter, filter_dims=["x_caa", "y_aca"], z_name="z_aac"):
+    """
+    Compute the subfilter reference-tendency correction
+
+        R_s = filter(R) - R_l
+
+    where:
+        R   = -(g/ρ₀) ∫_{z_*(ρ)}^{z}  ∂ρ_*/∂t dz̃   (total,      uses full z₀)
+        R_l = -(g/ρ₀) ∫_{z_*(ρ̄)}^{z} ∂ρ_*/∂t dz̃   (large-scale, uses filtered z₀)
+
+    Parameters
+    ----------
+    full_rho_sorted : xr.DataArray
+        2D reference density profile (time, z_1d_sorted),
+        e.g. full_local_pes.rho_sorted.
+    full_z0 : xr.DataArray
+        4D reference-height field using the full density (time, x, y, z),
+        e.g. full_local_pes.z0.
+    filt_z0 : xr.DataArray
+        4D reference-height field using the filtered density (time, x, y, z),
+        e.g. filt_local_pes.z0.
+    full_dz_sorted : xr.DataArray
+        2D cell heights in sorted state (time, z_1d_sorted),
+        e.g. full_local_pes.dz_sorted.
+    filter : gcm_filters.Filter
+        Filter object used for the spatial filtering operation.
+    filter_dims : list of str
+        Spatial dimensions along which to apply the filter.
+    z_name : str
+        Name of the vertical coordinate in z0.
+
+    Returns
+    -------
+    xr.DataArray
+        4D subfilter correction R_s (time, x, y, z).
+    """
+    drho_star_dt = calculate_drho_star_dt(full_rho_sorted)
+    R_full = calculate_R_reference_tendency(full_z0, drho_star_dt, full_dz_sorted, z_name=z_name)
+    R_l    = calculate_R_reference_tendency(filt_z0, drho_star_dt, full_dz_sorted, z_name=z_name)
+    return filter.apply(R_full, dims=filter_dims) - R_l
+#---
+
 #+++ SFS flux tensor (general)
 def calculate_sfs_flux_tensor(a, b, filter, filter_dims=["x_caa", "y_aca"],
                               filtered_a=None, filtered_b=None):

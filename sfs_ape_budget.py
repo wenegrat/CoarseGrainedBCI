@@ -11,8 +11,8 @@ from aux00_utils import load_dataset_and_grid, condense_velocities, integrate
 from aux01_pe_functions import (
     calculate_density_fields_from_buoyancy,
     local_potential_energies_timeseries,
-    calculate_drho_star_dt,
-    calculate_R_reference_tendency,
+    calculate_sfs_ape_tendency,
+    calculate_sfs_R_correction,
     calculate_cross_scale_ape_flux,
     calculate_sfs_ape_dissipation,
     calculate_ape_to_ke_exchange_term,
@@ -21,7 +21,7 @@ from aux01_pe_functions import (
 
 #+++ Configuration
 filename = "output/kelvin_helmholtz_instability_128x1x512.nc"
-# filename = "output/kelvin_helmholtz_instability_64x1x256.nc"
+filename = "output/kelvin_helmholtz_instability_64x1x256.nc"
 filter_length_scale = 0.8  # Length scale for filtering
 #---
 
@@ -98,21 +98,12 @@ ape_to_ke_exchange = calculate_ape_to_ke_exchange_term(ds_full["uᵢ"].sel(i=3),
     filtered_w=ds_filt["ūᵢ"].sel(i=3),
     filtered_b=ds_filt["b̄"],)
 
-# Reference-tendency correction R
-# R   = -(g/ρ₀) ∫_{z*(ρ)}^{z}  ∂ρ_*/∂t dz̃   (total, using full z0)
-# R_l = -(g/ρ₀) ∫_{z*(ρ̄)}^{z} ∂ρ_*/∂t dz̃   (large-scale, using filtered z0)
-# R_s = filter(R) - R_l                        (subfilter)
-drho_star_dt = calculate_drho_star_dt(full_local_pes.rho_sorted)
-R_full  = calculate_R_reference_tendency(full_local_pes.z0,  drho_star_dt, full_local_pes.dz_sorted)
-R_l     = calculate_R_reference_tendency(filt_local_pes.z0,  drho_star_dt, full_local_pes.dz_sorted)
-R̄       = gaussian_filter.apply(R_full, dims=filtered_dimensions)
-R_s     = R̄ - R_l
+R_s = calculate_sfs_R_correction(full_local_pes.rho_sorted, full_local_pes.z0, filt_local_pes.z0,
+                                  full_local_pes.dz_sorted, gaussian_filter, filter_dims=filtered_dimensions)
 #---
 
 #+++ Calculate SFS APE time derivatives
-Δt = subfilter_local_ape.time.diff("time").sel(time=slice(None, None, 2))
-ΔE = subfilter_local_ape.diff("time").sel(time=slice(None, None, 2))
-dE_dt = ΔE / Δt
+dE_dt = calculate_sfs_ape_tendency(subfilter_local_ape)
 #---
 
 #+++ Integrate and budget
