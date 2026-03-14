@@ -6,7 +6,7 @@ This module contains functions for calculating kinetic energy (KE).
 
 import numpy as np
 import xarray as xr
-from aux00_utils import integrate
+from aux00_utils import integrate, calculate_gradient
 
 # Physical constants
 ρ0 = 1025  # reference density [kg/m^3]
@@ -143,6 +143,80 @@ def calculate_sfs_stress_tensor(u_i, filter, filter_dims=["x_caa", "y_aca"],
     tau = filter.apply(u_i * u_j, dims=filter_dims) - filtered_u_i * u_j_bar
 
     return tau
+#---
+
+#+++ Velocity gradient tensor
+def calculate_velocity_gradient_tensor(u_i_bar, dimensions=("x_caa", "y_aca", "z_aac"),
+                                        index_dim="i"):
+    """
+    Compute the large-scale velocity gradient tensor ∂ūⁱ/∂xʲ
+
+    Each row i is the gradient of the i-th filtered velocity component, giving
+    a tensor of shape (i, j, ...) where index j runs over spatial directions.
+
+    Parameters
+    ----------
+    u_i_bar : xr.DataArray
+        Filtered velocity vector with index dimension (e.g. i=1,2,3 for ū, v̄, w̄).
+    dimensions : tuple of str
+        Ordered spatial coordinate names matching index values 1, 2, 3.
+    index_dim : str
+        Name of the velocity index dimension (default "i").
+
+    Returns
+    -------
+    xr.DataArray
+        Tensor ∂ūⁱ/∂xʲ with dimensions (i, j, ...).
+        Select a component via e.g. grad_u.sel(i=1, j=2) for ∂ū/∂y.
+    """
+    j_indices = list(u_i_bar[index_dim].values)
+    grad_components = []
+    for k in j_indices:
+        u_k = u_i_bar.sel({index_dim: k}, drop=True)
+        # calculate_gradient returns a vector along dimname="j"
+        grad_k = calculate_gradient(u_k, dimensions=dimensions, dimname="j", indices=j_indices)
+        grad_components.append(grad_k)
+
+    return xr.concat(
+        grad_components,
+        dim=xr.DataArray(j_indices, dims=index_dim, name=index_dim),
+    )
+#---
+
+#+++ Large-scale strain rate tensor
+def calculate_large_scale_strain_tensor(u_i_bar, dimensions=("x_caa", "y_aca", "z_aac"),
+                                         index_dim="i"):
+    """
+    Compute the large-scale strain rate tensor S̄ℓⁱʲ
+
+    S̄ℓ is the symmetric part of the velocity gradient tensor:
+
+        S̄ℓⁱʲ = (1/2)(∂ūⁱ/∂xʲ + ∂ūʲ/∂xⁱ)
+
+    For incompressible flow tr(S̄ℓ) = ∇·ū = 0.
+
+    Parameters
+    ----------
+    u_i_bar : xr.DataArray
+        Filtered velocity vector with index dimension (e.g. i=1,2,3 for ū, v̄, w̄).
+    dimensions : tuple of str
+        Ordered spatial coordinate names matching index values 1, 2, 3.
+    index_dim : str
+        Name of the velocity index dimension (default "i").
+
+    Returns
+    -------
+    xr.DataArray
+        Symmetric tensor S̄ℓⁱʲ with dimensions (i, j, ...).
+        Select a component via e.g. S.sel(i=1, j=2) for S̄ˣʸ.
+    """
+    grad_u = calculate_velocity_gradient_tensor(u_i_bar, dimensions=dimensions,
+                                                 index_dim=index_dim)
+
+    # Transpose: swap i ↔ j so that grad_u_T[i,j] = ∂ūʲ/∂xⁱ
+    grad_u_T = grad_u.rename({index_dim: "j", "j": index_dim})
+
+    return (grad_u + grad_u_T) / 2
 #---
 
 #+++ Calculate kinetic energy

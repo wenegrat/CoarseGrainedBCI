@@ -22,7 +22,11 @@ import numpy as np
 import xarray as xr
 import gcm_filters
 from aux00_utils import load_dataset_and_grid, condense_velocities, integrate
-from aux02_ke_functions import local_KE_vector, local_KE_l, local_KE_s, calculate_sfs_stress_tensor
+from aux02_ke_functions import (
+    local_KE_vector, local_KE_l, local_KE_s,
+    calculate_sfs_stress_tensor,
+    calculate_large_scale_strain_tensor,
+)
 #---
 
 #+++ Configuration
@@ -99,6 +103,23 @@ tau_trace_half.name = "KE_s (from τ trace)"
 print("Done!")
 #---
 
+#+++ Calculate large-scale strain rate tensor
+print("\n" + "="*60)
+print("Calculating large-scale strain rate tensor...")
+
+# S̄ℓⁱʲ = (1/2)(∂ūⁱ/∂xʲ + ∂ūʲ/∂xⁱ)   shape: (i, j, time, z, y, x)
+S = calculate_large_scale_strain_tensor(ds["ūᵢ"])
+S.name = "S"
+
+# Sanity check: incompressibility requires tr(S̄) = ∇·ū ≈ 0
+S_trace = S.sel(i=1, j=1) + S.sel(i=2, j=2) + S.sel(i=3, j=3)
+max_div = float(abs(S_trace).max())
+mean_diag = float((abs(S.sel(i=1, j=1)) + abs(S.sel(i=2, j=2)) + abs(S.sel(i=3, j=3))).mean() / 3)
+print(f"  Incompressibility check: max|∇·ū| = {max_div:.2e}  (mean diagonal magnitude: {mean_diag:.2e})")
+
+print("Done!")
+#---
+
 #+++ Sanity check: (1/2) tr(τ) == KE_s
 xr.testing.assert_allclose(tau_trace_half, KE_s, rtol=1e-4)
 print("Sanity check passed: (1/2)tr(τ) = KE_s ✓")
@@ -129,6 +150,7 @@ output_ds = xr.Dataset({
     "KE_bar": KE_bar,
     "KE_s":   KE_s,
     "τ":      tau,
+    "S":      S,
     # Integrated scalars
     "∫KE dV":     int_KE,
     "∫KE_l dV":   int_KE_l,
