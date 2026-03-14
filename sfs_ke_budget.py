@@ -26,6 +26,7 @@ from aux02_ke_functions import (
     local_KE_vector, local_KE_l, local_KE_s,
     calculate_sfs_stress_tensor,
     calculate_large_scale_strain_tensor,
+    calculate_sfs_ke_dissipation,
     calculate_cross_scale_ke_flux,
 )
 #---
@@ -121,6 +122,21 @@ print(f"  Incompressibility check: max|∇·ū| = {max_div:.2e}  (mean diagonal 
 print("Done!")
 #---
 
+#+++ Calculate SFS KE dissipation
+print("\n" + "="*60)
+print("Calculating SFS KE dissipation...")
+
+# The dissipation uses the FULL (unfiltered) strain rate so all scales contribute
+S_full = calculate_large_scale_strain_tensor(ds["uᵢ"])
+
+# ε<ℓ = 2ρ₀ν τ(S, S) = 2ρ₀ν Σᵢⱼ [ filter(Sⁱʲ Sⁱʲ) - filter(Sⁱʲ)² ]   [m² s⁻³]
+eps_sfs = calculate_sfs_ke_dissipation(S_full, ds.ν, gaussian_filter,
+                                        filter_dims=filtered_dimensions)
+eps_sfs.name = "ε<ℓ"
+
+print("Done!")
+#---
+
 #+++ Calculate cross-scale KE flux
 print("\n" + "="*60)
 print("Calculating cross-scale KE flux...")
@@ -147,7 +163,8 @@ int_KE     = integrate(KE,     dV)
 int_KE_l   = integrate(KE_l,   dV)
 int_KE_bar = integrate(KE_bar, dV)
 int_KE_s   = integrate(KE_s,   dV)
-int_Pi_ke  = integrate(Pi_ke,  dV)
+int_Pi_ke  = integrate(Pi_ke,   dV)
+int_eps_sfs = integrate(eps_sfs, dV)
 
 print("Done!")
 #---
@@ -165,12 +182,14 @@ output_ds = xr.Dataset({
     "τ":      tau,
     "S":      S,
     "Π_KE":   Pi_ke,
+    "ε<ℓ":    eps_sfs,
     # Integrated scalars
     "∫KE dV":     int_KE,
     "∫KE_l dV":   int_KE_l,
     "∫KE_bar dV": int_KE_bar,
     "∫KE_s dV":   int_KE_s,
     "∫Π_KE dV":   int_Pi_ke,
+    "∫ε<ℓ dV":    int_eps_sfs,
 })
 
 output_filename = filename.replace(".nc", "_sfs_ke_budget.nc")
@@ -204,12 +223,13 @@ ax.set_ylabel("KE_s / K̄E")
 ax.set_title("SFS fraction of filtered KE")
 ax.grid(True, alpha=0.3)
 
-# Panel 3: cross-scale KE flux (Π > 0: forward/downscale, Π < 0: inverse/upscale)
+# Panel 3: budget terms (cross-scale flux and SFS dissipation)
 ax = axes[2]
-output_ds["∫Π_KE dV"].plot.line(ax=ax, x="time", label="∫Π_KE dV")
+output_ds["∫Π_KE dV"].plot.line(ax=ax, x="time", label="∫Π_KE dV  (+ = forward cascade)")
+(-output_ds["∫ε<ℓ dV"]).plot.line(ax=ax, x="time", label="−∫ε<ℓ dV  (dissipation sink)")
 ax.axhline(0, color="k", linewidth=0.8, linestyle="--")
-ax.set_ylabel("Π_KE [m² s⁻³ × m³]")
-ax.set_title("Cross-scale KE flux (+ = forward, − = inverse)")
+ax.set_ylabel("[m² s⁻³ × m³]")
+ax.set_title("SFS KE budget terms")
 ax.legend()
 ax.grid(True, alpha=0.3)
 

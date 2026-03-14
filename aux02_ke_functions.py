@@ -219,6 +219,53 @@ def calculate_large_scale_strain_tensor(u_i_bar, dimensions=("x_caa", "y_aca", "
     return (grad_u + grad_u_T) / 2
 #---
 
+#+++ SFS KE dissipation
+def calculate_sfs_ke_dissipation(S, nu, filter, filter_dims=["x_caa", "y_aca"],
+                                  index_dims=("i", "j")):
+    """
+    Compute the SFS KE dissipation ε<ℓ = 2ρ₀ν τ(S, S)
+
+    The τ operator applied to the strain rate tensor yields a scalar via
+    double contraction:
+
+        τ(S, S) = Σᵢⱼ [ filter(Sⁱʲ Sⁱʲ) - filter(Sⁱʲ)² ]
+
+    which is the subfilter variance of the strain field.  Multiplied by
+    2ρ₀ν this gives the rate at which viscosity dissipates subfilter KE.
+
+    The structure mirrors calculate_sfs_ape_dissipation() in
+    aux01_pe_functions.py: filter(S²) and filter(S)² are each evaluated
+    across all (i,j) components in one call thanks to xarray broadcasting,
+    then the index dimensions are summed away.
+
+    Parameters
+    ----------
+    S : xr.DataArray
+        Strain rate tensor Sⁱʲ with dimensions (i, j, ...).
+        Should be computed from the *full* (unfiltered) velocity to capture
+        all scales; typically from calculate_large_scale_strain_tensor()
+        applied to the unfiltered velocity field.
+    nu : xr.DataArray or float
+        Kinematic viscosity ν [m² s⁻¹] (scalar or spatially varying field,
+        e.g. the eddy viscosity ds.ν from SmagorinskyLilly).
+    filter : gcm_filters.Filter
+        Filter object used for the spatial filtering operation.
+    filter_dims : list of str
+        Spatial dimensions along which to apply the filter.
+    index_dims : tuple of str
+        Names of the two tensor index dimensions to contract over.
+
+    Returns
+    -------
+    xr.DataArray
+        SFS KE dissipation ε<ℓ [m² s⁻³], same spatial dimensions as S
+        (the i and j index dimensions are contracted away).
+    """
+    S_bar   = filter.apply(S, dims=filter_dims)             # filter(Sⁱʲ)
+    tau_S_S = filter.apply(S * S, dims=filter_dims) - S_bar * S_bar  # τ(Sⁱʲ, Sⁱʲ)
+    return 2 * ρ0 * nu * tau_S_S.sum(list(index_dims))
+#---
+
 #+++ Cross-scale KE flux
 def calculate_cross_scale_ke_flux(S, tau, index_dims=("i", "j")):
     """
