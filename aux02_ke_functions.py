@@ -11,6 +11,42 @@ from aux00_utils import integrate, calculate_gradient
 # Physical constants
 ρ0 = 1025  # reference density [kg/m^3]
 
+#+++ KE decomposition
+def calculate_ke_decomposition(u_i, u_i_bar, filter, filter_dims=["x_caa", "y_aca"],
+                                index_dim="i"):
+    """
+    Decompose kinetic energy into large-scale and subfilter-scale components
+
+    Computes three KE fields:
+      - KE   = (1/2)|u|²      full-flow KE
+      - KE_l = (1/2)|ū|²      large-scale (filtered) KE
+      - KE_s = filter(KE) - KE_l   subfilter-scale (SFS) KE  ≥ 0
+
+    Parameters
+    ----------
+    u_i : xr.DataArray
+        Full (unfiltered) velocity vector with index dimension.
+    u_i_bar : xr.DataArray
+        Filtered velocity vector with index dimension.
+    filter : gcm_filters.Filter
+        Filter object used for the spatial filtering operation.
+    filter_dims : list of str
+        Spatial dimensions along which to apply the filter.
+    index_dim : str
+        Name of the vector index dimension (default "i").
+
+    Returns
+    -------
+    xr.Dataset
+        Dataset with variables KE, KE_l, KE_bar, KE_s.
+    """
+    KE     = local_KE_vector(u_i,     index_dim=index_dim)
+    KE_l   = local_KE_vector(u_i_bar, index_dim=index_dim)
+    KE_bar = filter.apply(KE, dims=filter_dims)
+    KE_s   = KE_bar - KE_l
+    return xr.Dataset({"KE": KE, "KE_l": KE_l, "KE_bar": KE_bar, "KE_s": KE_s})
+#---
+
 #+++ KE from condensed velocity tensor
 def local_KE_vector(u_i, index_dim="i"):
     """
@@ -30,31 +66,6 @@ def local_KE_vector(u_i, index_dim="i"):
         Local KE density: (1/2)|u|²  [m² s⁻²]
     """
     return (u_i**2).sum(index_dim) / 2
-
-
-def local_KE_l(u_i_bar, index_dim="i"):
-    """
-    Calculate large-scale KE density from the filtered velocity
-
-    Following Aluie et al. (2018, JPO), the large-scale KE is the KE of the
-    filtered velocity field, NOT the filtered KE:
-
-        KE_l = (1/2)|ū|²
-
-    Parameters
-    ----------
-    u_i_bar : xr.DataArray
-        Filtered velocity vector (same shape as u_i).
-    index_dim : str
-        Name of the vector index dimension.
-
-    Returns
-    -------
-    xr.DataArray
-        Large-scale KE density: (1/2)|ū|²  [m² s⁻²]
-    """
-    return (u_i_bar**2).sum(index_dim) / 2
-
 
 def local_KE_s(u_i, u_i_bar, filter, filter_dims=["x_caa", "y_aca"], index_dim="i"):
     """
@@ -94,7 +105,7 @@ def local_KE_s(u_i, u_i_bar, filter, filter_dims=["x_caa", "y_aca"], index_dim="
 
 #+++ SFS stress tensor
 def calculate_sfs_stress_tensor(u_i, filter, filter_dims=["x_caa", "y_aca"],
-                                 filtered_u_i=None, index_dim="i"):
+                                filtered_u_i=None, index_dim="i"):
     """
     Calculate the full 3×3 SFS stress tensor τ̄ℓⁱʲ(u, u)
 

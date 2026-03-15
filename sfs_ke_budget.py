@@ -1,29 +1,11 @@
 #!/usr/bin/env python
-"""
-Calculate SFS KE budget from Kelvin-Helmholtz simulation output
-
-Following the coarse-graining framework of Aluie et al. (2018, JPO) and
-Eyink & Aluie (2009), the filtered total KE decomposes as:
-
-    filter(KE) = KE_l + KE_s
-
-where:
-    KE     = (1/2)|u|²                 — local total KE
-    KE_l   = (1/2)|ū|²                 — large-scale KE (KE of filtered velocity)
-    KE_s   = filter(KE) - KE_l         — subfilter-scale (SFS) KE
-           = (1/2)[ filter(|u|²) - |ū|² ]
-           = (1/2) tr[τ(u,u)]          — half-trace of the SFS stress tensor
-
-KE_s ≥ 0 pointwise for non-negative filter kernels (Vreman et al. 1994).
-"""
-
 #+++ Imports
 import numpy as np
 import xarray as xr
 import gcm_filters
 from aux00_utils import load_dataset_and_grid, condense_velocities, integrate
 from aux02_ke_functions import (
-    local_KE_vector, local_KE_l, local_KE_s,
+    calculate_ke_decomposition,
     calculate_sfs_stress_tensor,
     calculate_large_scale_strain_tensor,
     calculate_sfs_ke_dissipation,
@@ -60,48 +42,26 @@ gaussian_filter = gcm_filters.Filter(
 ds = condense_velocities(ds, indices=[1, 2, 3])  # uᵢ with i dimension
 ds["ūᵢ"] = gaussian_filter.apply(ds["uᵢ"], dims=filtered_dimensions)
 
+ds_filt = ds[["dV", "ūᵢ"]].copy()
+ds_full = ds[["dV", "uᵢ"]].copy()
+
 print(f"Velocities filtered with length scale: {filter_length_scale}")
-#---
-
-#+++ Calculate KE fields
-print("\n" + "="*60)
-print("Calculating KE fields...")
-
-# Total KE at each point: KE = (1/2)|u|²
-KE = local_KE_vector(ds["uᵢ"])
-KE.name = "KE"
-
-# Large-scale KE: KE_l = (1/2)|ū|²
-KE_l = local_KE_l(ds["ūᵢ"])
-KE_l.name = "KE_l"
-
-# Filtered total KE: K̄E = filter((1/2)|u|²)
-KE_bar = gaussian_filter.apply(KE, dims=filtered_dimensions)
-KE_bar.name = "KE_bar"
-
-# SFS KE: KE_s = K̄E - KE_l = filter(KE) - (1/2)|ū|²
-KE_s = local_KE_s(ds["uᵢ"], ds["ūᵢ"], gaussian_filter, filter_dims=filtered_dimensions)
-KE_s.name = "KE_s"
-
-print("KE fields calculated: KE, KE_l, KE_bar, KE_s")
 #---
 
 #+++ Calculate SFS stress tensor
 print("\n" + "="*60)
 print("Calculating SFS stress tensor...")
 
-# τ̄ℓⁱʲ = filter(uⁱ uʲ) - ūⁱ ūʲ   shape: (i, j, time, z, y, x)
+# τⁱʲ = filter(uⁱ uʲ) - ūⁱ ūʲ   shape: (i, j, time, z, y, x)
 # Pre-pass filtered_u_i so the filter is not applied a second time
-tau = calculate_sfs_stress_tensor(ds["uᵢ"], gaussian_filter,
-                                   filter_dims=filtered_dimensions,
-                                   filtered_u_i=ds["ūᵢ"])
-tau.name = "τ"
+τ = calculate_sfs_stress_tensor(ds_full["uᵢ"], gaussian_filter,
+                                filter_dims=filtered_dimensions,
+                                filtered_u_i=ds_filt["ūᵢ"])
+τ.name = "τ"
 
 # Sanity check: trace/2 must equal KE_s pointwise
-tau_trace_half = tau.sel(i=1, j=1) + tau.sel(i=2, j=2) + tau.sel(i=3, j=3)
-tau_trace_half = tau_trace_half / 2
-tau_trace_half.name = "KE_s (from τ trace)"
-
+tau_trace = τ.sel(i=1, j=1) + τ.sel(i=2, j=2) + τ.sel(i=3, j=3)
+KE_s = tau_trace / 2
 print("Done!")
 #---
 
@@ -142,7 +102,7 @@ print("\n" + "="*60)
 print("Calculating cross-scale KE flux...")
 
 # Πℓ = -ρ₀ S̄ℓ : τ̄ℓ = -ρ₀ Σᵢⱼ Sⁱʲ τⁱʲ   [m² s⁻³]
-Pi_ke = calculate_cross_scale_ke_flux(S, tau)
+Pi_ke = calculate_cross_scale_ke_flux(S, τ)
 Pi_ke.name = "Π_KE"
 
 print("Done!")
@@ -159,10 +119,7 @@ print("Integrating KE fields...")
 
 dV = ds.Δx_caa * ds.Δy_aca * ds.Δz_aac
 
-int_KE     = integrate(KE,     dV)
-int_KE_l   = integrate(KE_l,   dV)
-int_KE_bar = integrate(KE_bar, dV)
-int_KE_s   = integrate(KE_s,   dV)
+int_KE_s   = integrate(ke_decomp.KE_s,   dV)
 int_Pi_ke  = integrate(Pi_ke,   dV)
 int_eps_sfs = integrate(eps_sfs, dV)
 
@@ -175,11 +132,11 @@ print("Saving results...")
 
 output_ds = xr.Dataset({
     # Local fields
-    "KE":     KE,
-    "KE_l":   KE_l,
-    "KE_bar": KE_bar,
-    "KE_s":   KE_s,
-    "τ":      tau,
+    "KE":     ke_decomp.KE,
+    "KE_l":   ke_decomp.KE_l,
+    "KE_bar": ke_decomp.KE_bar,
+    "KE_s":   ke_decomp.KE_s,
+    "τ":      τ,
     "S":      S,
     "Π_KE":   Pi_ke,
     "ε<ℓ":    eps_sfs,
