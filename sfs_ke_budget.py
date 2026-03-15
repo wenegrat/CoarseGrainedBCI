@@ -151,13 +151,13 @@ sfs_ke_budget_terms = xr.Dataset({
     "∂ₜ SFS KE": dKE_dt,
     "Π_KE":   cross_scale_ke_flux,
     "εₛ":    sfs_ke_dissipation,
-    "SFS KE->APE exchange": ape_to_ke_exchange,
+    "SFS APE->KE exchange": ape_to_ke_exchange,
     # Integrated scalars
-    "∫SFS KE dV":       int_sfs_ke_density,
-    "∫∂ₜ SFS KE dV":   int_dKE_dt,
-    "∫Π_KE dV":     int_cross_scale_ke_flux,
-    "∫εₛ dV":      int_sfs_ke_dissipation,
-    "∫(SFS KE->APE) dV": int_ape_to_ke_exchange,
+    "∫SFS KE dV":         int_sfs_ke_density,
+    "∫-∂ₜ SFS KE dV":     -int_dKE_dt,
+    "∫Π_KE dV":           int_cross_scale_ke_flux,
+    "∫-εₛ dV":           -int_sfs_ke_dissipation,
+    "∫(SFS APE->KE) dV":  int_ape_to_ke_exchange,
     "residual": residual,
 })
 
@@ -167,5 +167,21 @@ print(f"\nResults saved to: {output_filename}")
 #---
 
 #+++ Plot integrated KE decomposition
+print("\n" + "="*60)
+print("Creating plots...")
+print("="*60)
 
+import matplotlib.pyplot as plt
+fig, ax = plt.subplots(figsize=(10, 6), constrained_layout=True)
+
+integrated_vars = ["∫-∂ₜ SFS KE dV", "∫Π_KE dV", "∫-εₛ dV", "∫(SFS APE->KE) dV", "residual"]
+for var in integrated_vars:
+    sfs_ke_budget_terms[var].dropna("time").plot.line(ax=ax, x="time", label=var)
+    ax.legend()
+ax.set_ylabel("Budget Terms [W or J s⁻¹]")
+ax.set_title("Integrated SFS KE Budget Terms")
+ax.grid(True, alpha=0.3)
+plot_filename = output_filename.replace(".nc", ".png")
+fig.savefig(plot_filename, dpi=150, bbox_inches="tight")
+print(f"Budget timeseries plot saved to: {plot_filename}")
 #---
