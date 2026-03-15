@@ -93,7 +93,10 @@ sfs_ape_dissipation = calculate_sfs_ape_dissipation(ds_full.ρ, full_local_pes.u
     filter_dims=filtered_dimensions,
     filtered_density=ds_filt.ρ̄,)
 
-ape_to_ke_exchange = calculate_ape_to_ke_exchange_term(ds_full["uᵢ"].sel(i=3), ds_full.b, gaussian_filter,
+ape_to_ke_exchange = calculate_ape_to_ke_exchange_term(
+    ds_full["uᵢ"].sel(i=3),   # full w
+    ds_full.b,                # full buoyancy
+    gaussian_filter,
     filter_dims=filtered_dimensions,
     filtered_w=ds_filt["ūᵢ"].sel(i=3),
     filtered_b=ds_filt["b̄"],)
@@ -111,8 +114,8 @@ dV = ds.Δx_caa * ds.Δy_aca * ds.Δz_aac
 
 int_dE_dt = integrate(dE_dt, dV)
 
-int_cross_scale_ape_flux = integrate(cross_scale_ape_flux.reindex(time=dE_dt.time), dV)
 int_sfs_ape_dissipation = integrate(sfs_ape_dissipation.reindex(time=dE_dt.time), dV)
+int_cross_scale_ape_flux = integrate(cross_scale_ape_flux.reindex(time=dE_dt.time), dV)
 int_ape_to_ke_exchange = integrate(ape_to_ke_exchange.reindex(time=dE_dt.time), dV)
 int_R_s = integrate(R_s.reindex(time=dE_dt.time), dV)
 
