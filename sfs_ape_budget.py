@@ -106,27 +106,29 @@ R_s = calculate_sfs_R_correction(full_local_pes.rho_sorted, full_local_pes.z0, f
 #---
 
 #+++ Calculate SFS APE time derivatives
-dE_dt = calculate_sfs_ape_tendency(subfilter_local_ape)
+dAPE_dt = calculate_sfs_ape_tendency(subfilter_local_ape)
 #---
 
 #+++ Integrate and budget
-dV = ds.Δx_caa * ds.Δy_aca * ds.Δz_aac
+print("\n" + "="*60)
+print("Integrating SFS APE budget terms...")
 
-int_dE_dt = integrate(dE_dt, dV)
+dV = ds_full.dV
+int_dAPE_dt = integrate(dAPE_dt, dV)
 
-int_sfs_ape_dissipation = integrate(sfs_ape_dissipation.reindex(time=dE_dt.time), dV)
-int_cross_scale_ape_flux = integrate(cross_scale_ape_flux.reindex(time=dE_dt.time), dV)
-int_ape_to_ke_exchange = integrate(ape_to_ke_exchange.reindex(time=dE_dt.time), dV)
-int_R_s = integrate(R_s.reindex(time=dE_dt.time), dV)
+int_sfs_ape_dissipation = integrate(sfs_ape_dissipation.reindex(time=dAPE_dt.time), dV)
+int_cross_scale_ape_flux = integrate(cross_scale_ape_flux.reindex(time=dAPE_dt.time), dV)
+int_ape_to_ke_exchange = integrate(ape_to_ke_exchange.reindex(time=dAPE_dt.time), dV)
+int_R_s = integrate(R_s.reindex(time=dAPE_dt.time), dV)
 
-residual = -int_dE_dt - int_ape_to_ke_exchange + int_cross_scale_ape_flux - int_sfs_ape_dissipation + int_R_s
+residual = -int_dAPE_dt - int_ape_to_ke_exchange + int_cross_scale_ape_flux - int_sfs_ape_dissipation + int_R_s
 #---
 
 #+++ Save results
 print("\n" + "="*60)
 print("Saving results...")
 
-output_ds = xr.Dataset({
+sfs_ape_budget_terms = xr.Dataset({
     # Density fields
     "ρ": ds_full.ρ,
     "ρ̄": ds_filt.ρ̄,
@@ -142,13 +144,13 @@ output_ds = xr.Dataset({
     "Ēa(ρ, z)": full_local_ape_filtered,
     "Eaˢ(ρ, z)": subfilter_local_ape,
     # Local budget terms
-    "∂ₜ-Eaˢ": -dE_dt,
+    "∂ₜ-Eaˢ": -dAPE_dt,
     "Π_ape": cross_scale_ape_flux,
     "εₛ": sfs_ape_dissipation,
     "SFS KE->APE exchange": ape_to_ke_exchange,
     "Rˢ": R_s,
     # Integrated budget terms
-    "∫∂ₜ-Eaˢ dV": -int_dE_dt,
+    "∫∂ₜ-Eaˢ dV": -int_dAPE_dt,
     "∫Π dV": int_cross_scale_ape_flux,
     "∫-εₛ dV": -int_sfs_ape_dissipation,
     "∫(SFS KE->APE) dV": -int_ape_to_ke_exchange, # Flip the sign to make plotting easier
@@ -157,7 +159,7 @@ output_ds = xr.Dataset({
 })
 
 output_filename = filename.replace(".nc", "_sfs_ape_budget.nc")
-output_ds.to_netcdf(output_filename)
+sfs_ape_budget_terms.to_netcdf(output_filename)
 print(f"\nResults saved to: {output_filename}")
 #---
 
@@ -171,7 +173,7 @@ fig, ax = plt.subplots(figsize=(10, 6), constrained_layout=True)
 
 integrated_vars = ["∫∂ₜ-Eaˢ dV", "∫Π dV", "∫-εₛ dV", "∫(SFS KE->APE) dV", "∫Rˢ dV", "residual"]
 for var in integrated_vars:
-    output_ds[var].dropna("time").plot.line(ax=ax, x="time", label=var)
+    sfs_ape_budget_terms[var].dropna("time").plot.line(ax=ax, x="time", label=var)
     ax.legend()
 ax.set_ylabel("Budget Terms [W or J s⁻¹]")
 ax.set_title("Integrated SFS APE Budget Terms")

@@ -241,6 +241,27 @@ def calculate_sfs_ke_dissipation(S, ν, filter, filter_dims=["x_caa", "y_aca"],
     return 2 * ν * tau_S_S.sum(list(index_dims))
 #---
 
+#+++ SFS KE tendency
+def calculate_sfs_ke_tendency(sfs_ke_density):
+    """
+    Compute ∂KE_s/∂t as a centred finite difference in time.
+
+    Parameters
+    ----------
+    sfs_ke_density : xr.DataArray
+        4D subfilter KE field (time, x, y, z),
+        e.g. sfs_stress_tensor_trace / 2.
+
+    Returns
+    -------
+    xr.DataArray
+        4D tendency field on the staggered (mid-point) time grid.
+    """
+    Δt = sfs_ke_density.time.diff("time").sel(time=slice(None, None, 2))
+    ΔKE = sfs_ke_density.diff("time").sel(time=slice(None, None, 2))
+    return ΔKE / Δt
+#---
+
 #+++ Cross-scale KE flux
 def calculate_cross_scale_ke_flux(τ, S̄, index_dims=("i", "j")):
     """

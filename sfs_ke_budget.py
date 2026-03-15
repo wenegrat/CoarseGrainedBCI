@@ -10,6 +10,7 @@ from aux02_ke_functions import (
     calculate_strain_tensor,
     calculate_sfs_ke_dissipation,
     calculate_cross_scale_ke_flux,
+    calculate_sfs_ke_tendency,
 )
 #---
 
@@ -114,18 +115,28 @@ ape_to_ke_exchange = calculate_ape_to_ke_exchange_term(
 print("Done!")
 #---
 
+#+++ Calculate SFS KE tendency
+print("\n" + "="*60)
+print("Calculating SFS KE tendency...")
+
+# ∂KE_s/∂t   centred finite difference, staggered time grid
+dKE_dt = calculate_sfs_ke_tendency(sfs_ke_density)
+print("Done!")
+#---
+
 #+++ Integrate
 print("\n" + "="*60)
 print("Integrating SFS KE budget terms...")
 
-dV = ds.Δx_caa * ds.Δy_aca * ds.Δz_aac
+dV = ds_full.dV
+int_dKE_dt = integrate(dKE_dt, dV)
 
-int_ape_to_ke_exchange = integrate(ape_to_ke_exchange, dV)
-int_sfs_ke_density   = integrate(sfs_ke_density,   dV)
-int_cross_scale_ke_flux  = integrate(cross_scale_ke_flux,   dV)
-int_sfs_ke_dissipation = integrate(sfs_ke_dissipation, dV)
+int_ape_to_ke_exchange = integrate(ape_to_ke_exchange.reindex(time=dKE_dt.time), dV)
+int_sfs_ke_density   = integrate(sfs_ke_density.reindex(time=dKE_dt.time), dV)
+int_cross_scale_ke_flux  = integrate(cross_scale_ke_flux.reindex(time=dKE_dt.time), dV)
+int_sfs_ke_dissipation = integrate(sfs_ke_dissipation.reindex(time=dKE_dt.time), dV)
 
-residual = -int_ape_to_ke_exchange + int_cross_scale_ke_flux - int_sfs_ke_dissipation
+residual = -int_dKE_dt + int_ape_to_ke_exchange + int_cross_scale_ke_flux - int_sfs_ke_dissipation
 
 print("Done!")
 #---
@@ -134,21 +145,24 @@ print("Done!")
 print("\n" + "="*60)
 print("Saving results...")
 
-output_ds = xr.Dataset({
+sfs_ke_budget_terms = xr.Dataset({
     # Local fields
-    "KE":     sfs_ke_density,
+    "SFS KE":     sfs_ke_density,
+    "∂ₜ SFS KE": dKE_dt,
     "Π_KE":   cross_scale_ke_flux,
-    "ε<ℓ":    sfs_ke_dissipation,
+    "εₛ":    sfs_ke_dissipation,
     "SFS KE->APE exchange": ape_to_ke_exchange,
     # Integrated scalars
-    "∫KE dV":     int_sfs_ke_density,
-    "∫Π_KE dV":   int_cross_scale_ke_flux,
-    "∫ε<ℓ dV":    int_sfs_ke_dissipation,
+    "∫SFS KE dV":       int_sfs_ke_density,
+    "∫∂ₜ SFS KE dV":   int_dKE_dt,
+    "∫Π_KE dV":     int_cross_scale_ke_flux,
+    "∫εₛ dV":      int_sfs_ke_dissipation,
+    "∫(SFS KE->APE) dV": int_ape_to_ke_exchange,
     "residual": residual,
 })
 
 output_filename = filename.replace(".nc", "_sfs_ke_budget.nc")
-output_ds.to_netcdf(output_filename)
+sfs_ke_budget_terms.to_netcdf(output_filename)
 print(f"\nResults saved to: {output_filename}")
 #---
 
