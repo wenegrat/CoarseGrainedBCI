@@ -4,6 +4,7 @@ import numpy as np
 import xarray as xr
 import gcm_filters
 from aux00_utils import load_dataset_and_grid, condense_velocities, integrate
+from aux01_pe_functions import calculate_ape_to_ke_exchange_term
 from aux02_ke_functions import (
     calculate_sfs_stress_tensor,
     calculate_strain_tensor,
@@ -96,15 +97,35 @@ sfs_ke_dissipation = calculate_sfs_ke_dissipation(strain_rate_tensor, ds.ν, gau
 print("Done!")
 #---
 
+#+++ Calculate SFS APE to KE exchange term
+print("\n" + "="*60)
+print("Calculating SFS KE->APE exchange term...")
+
+# For SFS KE, use the vertical velocity (w component, i=3) and buoyancy fields.
+# Filtered fields for collapsed/filtered form.
+ape_to_ke_exchange = calculate_ape_to_ke_exchange_term(
+    ds_full["uᵢ"].sel(i=3),   # full w
+    ds_full.b,                # full buoyancy
+    gaussian_filter,
+    filter_dims=filtered_dimensions,
+    filtered_w=ds_filt["ūᵢ"].sel(i=3),
+    filtered_b=ds_filt["b̄"]
+)
+print("Done!")
+#---
+
 #+++ Integrate
 print("\n" + "="*60)
 print("Integrating SFS KE budget terms...")
 
 dV = ds.Δx_caa * ds.Δy_aca * ds.Δz_aac
 
+int_ape_to_ke_exchange = integrate(ape_to_ke_exchange, dV)
 int_sfs_ke_density   = integrate(sfs_ke_density,   dV)
 int_cross_scale_ke_flux  = integrate(cross_scale_ke_flux,   dV)
 int_sfs_ke_dissipation = integrate(sfs_ke_dissipation, dV)
+
+residual = -int_ape_to_ke_exchange + int_cross_scale_ke_flux - int_sfs_ke_dissipation
 
 print("Done!")
 #---
@@ -115,21 +136,15 @@ print("Saving results...")
 
 output_ds = xr.Dataset({
     # Local fields
-    "KE":     ke_decomp.KE,
-    "KE_l":   ke_decomp.KE_l,
-    "KE_bar": ke_decomp.KE_bar,
-    "KE_s":   ke_decomp.KE_s,
-    "τ":      τ,
-    "S":      S,
-    "Π_KE":   Pi_ke,
-    "ε<ℓ":    eps_sfs,
+    "KE":     sfs_ke_density,
+    "Π_KE":   cross_scale_ke_flux,
+    "ε<ℓ":    sfs_ke_dissipation,
+    "SFS KE->APE exchange": ape_to_ke_exchange,
     # Integrated scalars
-    "∫KE dV":     int_KE,
-    "∫KE_l dV":   int_KE_l,
-    "∫KE_bar dV": int_KE_bar,
-    "∫KE_s dV":   int_KE_s,
-    "∫Π_KE dV":   int_Pi_ke,
-    "∫ε<ℓ dV":    int_eps_sfs,
+    "∫KE dV":     int_sfs_ke_density,
+    "∫Π_KE dV":   int_cross_scale_ke_flux,
+    "∫ε<ℓ dV":    int_sfs_ke_dissipation,
+    "residual": residual,
 })
 
 output_filename = filename.replace(".nc", "_sfs_ke_budget.nc")
@@ -138,42 +153,5 @@ print(f"\nResults saved to: {output_filename}")
 #---
 
 #+++ Plot integrated KE decomposition
-print("\n" + "="*60)
-print("Creating plots...")
 
-import matplotlib.pyplot as plt
-
-fig, axes = plt.subplots(1, 3, figsize=(18, 5), constrained_layout=True)
-
-# Panel 1: KE decomposition
-ax = axes[0]
-for var, label in [("∫KE dV", "KE (total)"), ("∫KE_bar dV", "K̄E (filtered)"),
-                   ("∫KE_l dV", "KE_l (large-scale)"), ("∫KE_s dV", "KE_s (SFS)")]:
-    output_ds[var].plot.line(ax=ax, x="time", label=label)
-ax.set_ylabel("KE [m² s⁻² × m³]")
-ax.set_title("Volume-integrated KE decomposition")
-ax.legend()
-ax.grid(True, alpha=0.3)
-
-# Panel 2: SFS fraction KE_s / K̄E
-ax = axes[1]
-sfs_fraction = output_ds["∫KE_s dV"] / output_ds["∫KE_bar dV"]
-sfs_fraction.plot.line(ax=ax, x="time")
-ax.set_ylabel("KE_s / K̄E")
-ax.set_title("SFS fraction of filtered KE")
-ax.grid(True, alpha=0.3)
-
-# Panel 3: budget terms (cross-scale flux and SFS dissipation)
-ax = axes[2]
-output_ds["∫Π_KE dV"].plot.line(ax=ax, x="time", label="∫Π_KE dV  (+ = forward cascade)")
-(-output_ds["∫ε<ℓ dV"]).plot.line(ax=ax, x="time", label="−∫ε<ℓ dV  (dissipation sink)")
-ax.axhline(0, color="k", linewidth=0.8, linestyle="--")
-ax.set_ylabel("[m² s⁻³ × m³]")
-ax.set_title("SFS KE budget terms")
-ax.legend()
-ax.grid(True, alpha=0.3)
-
-plot_filename = output_filename.replace(".nc", ".png")
-fig.savefig(plot_filename, dpi=150, bbox_inches="tight")
-print(f"KE decomposition plot saved to: {plot_filename}")
 #---
