@@ -11,42 +11,6 @@ from aux00_utils import integrate, calculate_gradient
 # Physical constants
 ρ0 = 1025  # reference density [kg/m^3]
 
-#+++ KE decomposition
-def calculate_ke_decomposition(u_i, u_i_bar, filter, filter_dims=["x_caa", "y_aca"],
-                                index_dim="i"):
-    """
-    Decompose kinetic energy into large-scale and subfilter-scale components
-
-    Computes three KE fields:
-      - KE   = (1/2)|u|²      full-flow KE
-      - KE_l = (1/2)|ū|²      large-scale (filtered) KE
-      - KE_s = filter(KE) - KE_l   subfilter-scale (SFS) KE  ≥ 0
-
-    Parameters
-    ----------
-    u_i : xr.DataArray
-        Full (unfiltered) velocity vector with index dimension.
-    u_i_bar : xr.DataArray
-        Filtered velocity vector with index dimension.
-    filter : gcm_filters.Filter
-        Filter object used for the spatial filtering operation.
-    filter_dims : list of str
-        Spatial dimensions along which to apply the filter.
-    index_dim : str
-        Name of the vector index dimension (default "i").
-
-    Returns
-    -------
-    xr.Dataset
-        Dataset with variables KE, KE_l, KE_bar, KE_s.
-    """
-    KE     = local_KE_vector(u_i,     index_dim=index_dim)
-    KE_l   = local_KE_vector(u_i_bar, index_dim=index_dim)
-    KE_bar = filter.apply(KE, dims=filter_dims)
-    KE_s   = KE_bar - KE_l
-    return xr.Dataset({"KE": KE, "KE_l": KE_l, "KE_bar": KE_bar, "KE_s": KE_s})
-#---
-
 #+++ KE from condensed velocity tensor
 def local_KE_vector(u_i, index_dim="i"):
     """
@@ -195,7 +159,7 @@ def calculate_velocity_gradient_tensor(u_i_bar, dimensions=("x_caa", "y_aca", "z
 #---
 
 #+++ Large-scale strain rate tensor
-def calculate_large_scale_strain_tensor(u_i_bar, dimensions=("x_caa", "y_aca", "z_aac"),
+def calculate_strain_tensor(u_i_bar, dimensions=("x_caa", "y_aca", "z_aac"),
                                          index_dim="i"):
     """
     Compute the large-scale strain rate tensor S̄ℓⁱʲ
@@ -254,7 +218,7 @@ def calculate_sfs_ke_dissipation(S, nu, filter, filter_dims=["x_caa", "y_aca"],
     S : xr.DataArray
         Strain rate tensor Sⁱʲ with dimensions (i, j, ...).
         Should be computed from the *full* (unfiltered) velocity to capture
-        all scales; typically from calculate_large_scale_strain_tensor()
+        all scales; typically from calculate_strain_tensor()
         applied to the unfiltered velocity field.
     nu : xr.DataArray or float
         Kinematic viscosity ν [m² s⁻¹] (scalar or spatially varying field,
@@ -302,7 +266,7 @@ def calculate_cross_scale_ke_flux(S, tau, index_dims=("i", "j")):
     ----------
     S : xr.DataArray
         Large-scale strain rate tensor S̄ℓⁱʲ with dimensions (i, j, ...).
-        Typically from calculate_large_scale_strain_tensor().
+        Typically from calculate_strain_tensor().
     tau : xr.DataArray
         SFS stress tensor τ̄ℓⁱʲ with dimensions (i, j, ...).
         Typically from calculate_sfs_stress_tensor().

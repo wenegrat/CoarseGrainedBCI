@@ -5,9 +5,8 @@ import xarray as xr
 import gcm_filters
 from aux00_utils import load_dataset_and_grid, condense_velocities, integrate
 from aux02_ke_functions import (
-    calculate_ke_decomposition,
     calculate_sfs_stress_tensor,
-    calculate_large_scale_strain_tensor,
+    calculate_strain_tensor,
     calculate_sfs_ke_dissipation,
     calculate_cross_scale_ke_flux,
 )
@@ -65,35 +64,17 @@ KE_s = tau_trace / 2
 print("Done!")
 #---
 
-#+++ Calculate large-scale strain rate tensor
+#+++ Calculate strain rate tensor of the filtered flow
 print("\n" + "="*60)
-print("Calculating large-scale strain rate tensor...")
-
-# S̄ℓⁱʲ = (1/2)(∂ūⁱ/∂xʲ + ∂ūʲ/∂xⁱ)   shape: (i, j, time, z, y, x)
-S = calculate_large_scale_strain_tensor(ds["ūᵢ"])
-S.name = "S"
-
-# Sanity check: incompressibility requires tr(S̄) = ∇·ū ≈ 0
-S_trace = S.sel(i=1, j=1) + S.sel(i=2, j=2) + S.sel(i=3, j=3)
-max_div = float(abs(S_trace).max())
-mean_diag = float((abs(S.sel(i=1, j=1)) + abs(S.sel(i=2, j=2)) + abs(S.sel(i=3, j=3))).mean() / 3)
-print(f"  Incompressibility check: max|∇·ū| = {max_div:.2e}  (mean diagonal magnitude: {mean_diag:.2e})")
-
+print("Calculating strain rate tensor of the filtered flow...")
+S̄ = calculate_strain_tensor(ds_filt["ūᵢ"])
 print("Done!")
 #---
 
-#+++ Calculate SFS KE dissipation
+#+++ Calculate strain tensor of the full (unfiltered) flow
 print("\n" + "="*60)
-print("Calculating SFS KE dissipation...")
-
-# The dissipation uses the FULL (unfiltered) strain rate so all scales contribute
-S_full = calculate_large_scale_strain_tensor(ds["uᵢ"])
-
-# ε<ℓ = 2ρ₀ν τ(S, S) = 2ρ₀ν Σᵢⱼ [ filter(Sⁱʲ Sⁱʲ) - filter(Sⁱʲ)² ]   [m² s⁻³]
-eps_sfs = calculate_sfs_ke_dissipation(S_full, ds.ν, gaussian_filter,
-                                        filter_dims=filtered_dimensions)
-eps_sfs.name = "ε<ℓ"
-
+print("Calculating strain tensor for the full (unfiltered) flow...")
+S = calculate_strain_tensor(ds_full["uᵢ"])
 print("Done!")
 #---
 
@@ -106,12 +87,20 @@ Pi_ke = calculate_cross_scale_ke_flux(S, τ)
 Pi_ke.name = "Π_KE"
 
 print("Done!")
+pause
 #---
 
-#+++ Sanity check: (1/2) tr(τ) == KE_s
-xr.testing.assert_allclose(tau_trace_half, KE_s, rtol=1e-4)
-print("Sanity check passed: (1/2)tr(τ) = KE_s ✓")
+#+++ Calculate SFS KE dissipation
+print("\n" + "="*60)
+print("Calculating SFS KE dissipation...")
+
+# ε<ℓ = 2ρ₀ν τ(S, S) = 2ρ₀ν Σᵢⱼ [ filter(Sⁱʲ Sⁱʲ) - filter(Sⁱʲ)² ]   [m² s⁻³]
+eps_sfs = calculate_sfs_ke_dissipation(S_full, ds.ν, gaussian_filter, filter_dims=filtered_dimensions)
+eps_sfs.name = "ε<ℓ"
+
+print("Done!")
 #---
+
 
 #+++ Integrate
 print("\n" + "="*60)
@@ -119,7 +108,7 @@ print("Integrating KE fields...")
 
 dV = ds.Δx_caa * ds.Δy_aca * ds.Δz_aac
 
-int_KE_s   = integrate(ke_decomp.KE_s,   dV)
+int_KE_s   = integrate(KE_s,   dV)
 int_Pi_ke  = integrate(Pi_ke,   dV)
 int_eps_sfs = integrate(eps_sfs, dV)
 
