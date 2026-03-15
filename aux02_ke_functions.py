@@ -300,7 +300,7 @@ def calculate_cross_scale_ke_flux(τ, S̄, index_dims=("i", "j")):
         Cross-scale KE flux Πℓ [m² s⁻³], same spatial dimensions as S̄ / τ
         (the i and j dimensions are contracted away).
     """
-    return -ρ0 * (τ * S̄).sum(list(index_dims))
+    return -(τ * S̄).sum(*index_dims)
 #---
 
 #+++ Calculate kinetic energy
