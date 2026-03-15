@@ -140,7 +140,7 @@ output_ds = xr.Dataset({
     "Eaˢ(ρ, z)": subfilter_local_ape,
     # Local budget terms
     "∂ₜ-Eaˢ": -dE_dt,
-    "Π": cross_scale_ape_flux,
+    "Π_ape": cross_scale_ape_flux,
     "εₛ": sfs_ape_dissipation,
     "SFS KE->APE exchange": ape_to_ke_exchange,
     "Rˢ": R_s,

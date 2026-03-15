@@ -40,9 +40,10 @@ gaussian_filter = gcm_filters.Filter(
 
 ds = condense_velocities(ds, indices=[1, 2, 3])  # uᵢ with i dimension
 ds["ūᵢ"] = gaussian_filter.apply(ds["uᵢ"], dims=filtered_dimensions)
+ds["b̄"] = gaussian_filter.apply(ds["b"], dims=filtered_dimensions)
 
-ds_filt = ds[["dV", "ūᵢ"]].copy()
-ds_full = ds[["dV", "uᵢ"]].copy()
+ds_full = ds[["b", "dV", "uᵢ"]].copy()
+ds_filt = ds[["b̄", "dV", "ūᵢ"]].copy()
 
 print(f"Velocities filtered with length scale: {filter_length_scale}")
 #---
@@ -53,28 +54,20 @@ print("Calculating SFS stress tensor...")
 
 # τⁱʲ = filter(uⁱ uʲ) - ūⁱ ūʲ   shape: (i, j, time, z, y, x)
 # Pre-pass filtered_u_i so the filter is not applied a second time
-τ = calculate_sfs_stress_tensor(ds_full["uᵢ"], gaussian_filter,
-                                filter_dims=filtered_dimensions,
-                                filtered_u_i=ds_filt["ūᵢ"])
-τ.name = "τ"
+sfs_stress_tensor = calculate_sfs_stress_tensor(ds_full["uᵢ"], gaussian_filter,
+                                                filter_dims=filtered_dimensions,
+                                                filtered_u_i=ds_filt["ūᵢ"])
 
 # Sanity check: trace/2 must equal KE_s pointwise
-tau_trace = τ.sel(i=1, j=1) + τ.sel(i=2, j=2) + τ.sel(i=3, j=3)
-KE_s = tau_trace / 2
+sfs_stress_tensor_trace = sfs_stress_tensor.sel(i=1, j=1) + sfs_stress_tensor.sel(i=2, j=2) + sfs_stress_tensor.sel(i=3, j=3)
+sfs_ke_density = sfs_stress_tensor_trace / 2
 print("Done!")
 #---
 
 #+++ Calculate strain rate tensor of the filtered flow
 print("\n" + "="*60)
 print("Calculating strain rate tensor of the filtered flow...")
-S̄ = calculate_strain_tensor(ds_filt["ūᵢ"])
-print("Done!")
-#---
-
-#+++ Calculate strain tensor of the full (unfiltered) flow
-print("\n" + "="*60)
-print("Calculating strain tensor for the full (unfiltered) flow...")
-S = calculate_strain_tensor(ds_full["uᵢ"])
+strain_rate_tensor_l = calculate_strain_tensor(ds_filt["ūᵢ"])
 print("Done!")
 #---
 
@@ -82,12 +75,16 @@ print("Done!")
 print("\n" + "="*60)
 print("Calculating cross-scale KE flux...")
 
-# Πℓ = -ρ₀ S̄ℓ : τ̄ℓ = -ρ₀ Σᵢⱼ Sⁱʲ τⁱʲ   [m² s⁻³]
-Pi_ke = calculate_cross_scale_ke_flux(S, τ)
-Pi_ke.name = "Π_KE"
-
+# Πℓ = -ρ₀ τⁱʲ : S̄ⁱʲ  [m² s⁻³]
+cross_scale_ke_flux = calculate_cross_scale_ke_flux(sfs_stress_tensor, strain_rate_tensor_l)
 print("Done!")
-pause
+#---
+
+#+++ Calculate strain tensor of the full (unfiltered) flow
+print("\n" + "="*60)
+print("Calculating strain tensor for the full (unfiltered) flow...")
+strain_rate_tensor = calculate_strain_tensor(ds_full["uᵢ"])
+print("Done!")
 #---
 
 #+++ Calculate SFS KE dissipation
@@ -95,22 +92,19 @@ print("\n" + "="*60)
 print("Calculating SFS KE dissipation...")
 
 # ε<ℓ = 2ρ₀ν τ(S, S) = 2ρ₀ν Σᵢⱼ [ filter(Sⁱʲ Sⁱʲ) - filter(Sⁱʲ)² ]   [m² s⁻³]
-eps_sfs = calculate_sfs_ke_dissipation(S_full, ds.ν, gaussian_filter, filter_dims=filtered_dimensions)
-eps_sfs.name = "ε<ℓ"
-
+sfs_ke_dissipation = calculate_sfs_ke_dissipation(strain_rate_tensor, ds.ν, gaussian_filter, filter_dims=filtered_dimensions)
 print("Done!")
 #---
 
-
 #+++ Integrate
 print("\n" + "="*60)
-print("Integrating KE fields...")
+print("Integrating SFS KE budget terms...")
 
 dV = ds.Δx_caa * ds.Δy_aca * ds.Δz_aac
 
-int_KE_s   = integrate(KE_s,   dV)
-int_Pi_ke  = integrate(Pi_ke,   dV)
-int_eps_sfs = integrate(eps_sfs, dV)
+int_sfs_ke_density   = integrate(sfs_ke_density,   dV)
+int_cross_scale_ke_flux  = integrate(cross_scale_ke_flux,   dV)
+int_sfs_ke_dissipation = integrate(sfs_ke_dissipation, dV)
 
 print("Done!")
 #---

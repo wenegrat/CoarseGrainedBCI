@@ -195,10 +195,10 @@ def calculate_strain_tensor(u_i_bar, dimensions=("x_caa", "y_aca", "z_aac"),
 #---
 
 #+++ SFS KE dissipation
-def calculate_sfs_ke_dissipation(S, nu, filter, filter_dims=["x_caa", "y_aca"],
+def calculate_sfs_ke_dissipation(S, ν, filter, filter_dims=["x_caa", "y_aca"],
                                   index_dims=("i", "j")):
     """
-    Compute the SFS KE dissipation ε<ℓ = 2ρ₀ν τ(S, S)
+    Compute the SFS KE dissipation ε<ℓ = 2ν τ(S, S)
 
     The τ operator applied to the strain rate tensor yields a scalar via
     double contraction:
@@ -206,7 +206,7 @@ def calculate_sfs_ke_dissipation(S, nu, filter, filter_dims=["x_caa", "y_aca"],
         τ(S, S) = Σᵢⱼ [ filter(Sⁱʲ Sⁱʲ) - filter(Sⁱʲ)² ]
 
     which is the subfilter variance of the strain field.  Multiplied by
-    2ρ₀ν this gives the rate at which viscosity dissipates subfilter KE.
+    2ν this gives the rate at which viscosity dissipates subfilter KE.
 
     The structure mirrors calculate_sfs_ape_dissipation() in
     aux01_pe_functions.py: filter(S²) and filter(S)² are each evaluated
@@ -220,7 +220,7 @@ def calculate_sfs_ke_dissipation(S, nu, filter, filter_dims=["x_caa", "y_aca"],
         Should be computed from the *full* (unfiltered) velocity to capture
         all scales; typically from calculate_strain_tensor()
         applied to the unfiltered velocity field.
-    nu : xr.DataArray or float
+    ν : xr.DataArray or float
         Kinematic viscosity ν [m² s⁻¹] (scalar or spatially varying field,
         e.g. the eddy viscosity ds.ν from SmagorinskyLilly).
     filter : gcm_filters.Filter
@@ -236,13 +236,13 @@ def calculate_sfs_ke_dissipation(S, nu, filter, filter_dims=["x_caa", "y_aca"],
         SFS KE dissipation ε<ℓ [m² s⁻³], same spatial dimensions as S
         (the i and j index dimensions are contracted away).
     """
-    S_bar   = filter.apply(S, dims=filter_dims)             # filter(Sⁱʲ)
-    tau_S_S = filter.apply(S * S, dims=filter_dims) - S_bar * S_bar  # τ(Sⁱʲ, Sⁱʲ)
-    return 2 * ρ0 * nu * tau_S_S.sum(list(index_dims))
+    S̄   = filter.apply(S, dims=filter_dims) # filter(Sⁱʲ)
+    tau_S_S = filter.apply(S * S, dims=filter_dims) - S̄ * S̄ # τ(Sⁱʲ, Sⁱʲ) = filter(S²) - filter(S)²
+    return 2 * ν * tau_S_S.sum(list(index_dims))
 #---
 
 #+++ Cross-scale KE flux
-def calculate_cross_scale_ke_flux(S, tau, index_dims=("i", "j")):
+def calculate_cross_scale_ke_flux(τ, S̄, index_dims=("i", "j")):
     """
     Compute the cross-scale KE flux Πℓ = -ρ₀ S̄ℓ : τ̄ℓ
 
@@ -264,22 +264,22 @@ def calculate_cross_scale_ke_flux(S, tau, index_dims=("i", "j")):
 
     Parameters
     ----------
-    S : xr.DataArray
+    τ : xr.DataArray
+        SFS stress tensor τⁱʲ with dimensions (i, j, ...).
+        Typically from calculate_sfs_stress_tensor().
+    S̄ : xr.DataArray
         Large-scale strain rate tensor S̄ℓⁱʲ with dimensions (i, j, ...).
         Typically from calculate_strain_tensor().
-    tau : xr.DataArray
-        SFS stress tensor τ̄ℓⁱʲ with dimensions (i, j, ...).
-        Typically from calculate_sfs_stress_tensor().
     index_dims : tuple of str
         Names of the two tensor index dimensions to sum over.
 
     Returns
     -------
     xr.DataArray
-        Cross-scale KE flux Πℓ [m² s⁻³], same spatial dimensions as S / tau
+        Cross-scale KE flux Πℓ [m² s⁻³], same spatial dimensions as S̄ / τ
         (the i and j dimensions are contracted away).
     """
-    return -ρ0 * (S * tau).sum(list(index_dims))
+    return -ρ0 * (τ * S̄).sum(list(index_dims))
 #---
 
 #+++ Calculate kinetic energy
