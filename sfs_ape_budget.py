@@ -144,18 +144,18 @@ sfs_ape_budget_terms = xr.Dataset({
     "Ēa(ρ, z)": full_local_ape_filtered,
     "Eaˢ(ρ, z)": subfilter_local_ape,
     # Local budget terms
-    "∂ₜ-Eaˢ": -dAPE_dt,
-    "Π_ape": cross_scale_ape_flux,
-    "εₛ": sfs_ape_dissipation,
+    "∂ₜ SFS APE": dAPE_dt,
+    "Π_APE": cross_scale_ape_flux,
+    "χₛ": sfs_ape_dissipation,
     "SFS KE->APE exchange": ape_to_ke_exchange,
     "Rˢ": R_s,
     # Integrated budget terms
-    "∫∂ₜ-Eaˢ dV": -int_dAPE_dt,
-    "∫Π dV": int_cross_scale_ape_flux,
-    "∫-εₛ dV": -int_sfs_ape_dissipation,
+    "∫-∂ₜ SFS APE dV": -int_dAPE_dt,
+    "∫Π_APE dV": int_cross_scale_ape_flux,
+    "∫-χₛ dV": -int_sfs_ape_dissipation,
     "∫(SFS KE->APE) dV": -int_ape_to_ke_exchange, # Flip the sign to make plotting easier
     "∫Rˢ dV": int_R_s,
-    "residual": residual,
+    "residual_APE": residual,
 })
 
 output_filename = filename.replace(".nc", "_sfs_ape_budget.nc")
@@ -171,9 +171,24 @@ print("="*60)
 import matplotlib.pyplot as plt
 fig, ax = plt.subplots(figsize=(10, 6), constrained_layout=True)
 
-integrated_vars = ["∫∂ₜ-Eaˢ dV", "∫Π dV", "∫-εₛ dV", "∫(SFS KE->APE) dV", "∫Rˢ dV", "residual"]
-for var in integrated_vars:
-    sfs_ape_budget_terms[var].dropna("time").plot.line(ax=ax, x="time", label=var)
+# Colors shared with sfs_ke_budget.py — keep analogous terms the same colour
+budget_colors = {
+    "tendency":   "C0",
+    "flux":       "C1",
+    "dissipation":"C2",
+    "exchange":   "C3",
+    "residual":   "k",
+}
+integrated_vars = {
+    "∫-∂ₜ SFS APE dV":    budget_colors["tendency"],
+    "∫Π_APE dV":           budget_colors["flux"],
+    "∫-χₛ dV":             budget_colors["dissipation"],
+    "∫(SFS KE->APE) dV":   budget_colors["exchange"],
+    "∫Rˢ dV":              "C4",
+    "residual_APE":         budget_colors["residual"],
+}
+for var, color in integrated_vars.items():
+    sfs_ape_budget_terms[var].dropna("time").plot.line(ax=ax, x="time", label=var, color=color)
     ax.legend()
 ax.set_ylabel("Budget Terms [W or J s⁻¹]")
 ax.set_title("Integrated SFS APE Budget Terms")
