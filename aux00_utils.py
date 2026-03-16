@@ -134,6 +134,7 @@ class DaskParallelFilter:
         self._filter  = filter_obj
         self._chunk   = chunk_size
         self._workers = n_workers or os.cpu_count()
+        print(f"  Using {self._workers} CPU workers")
 
     def apply(self, da, dims):
         if "time" in da.dims and da.sizes.get("time", 1) > 1:

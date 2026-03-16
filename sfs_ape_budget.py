@@ -21,9 +21,11 @@ from aux01_pe_functions import (
 #---
 
 #+++ Configuration
-filename = "output/kelvin_helmholtz_instability_128x1x512.nc"
+filename = "output/kelvin_helmholtz_instability_256x64x256.nc"
+# filename = "output/kelvin_helmholtz_instability_128x1x512.nc"
 # filename = "output/kelvin_helmholtz_instability_64x1x256.nc"
 filter_length_scale = 0.8  # Length scale for filtering
+n_workers = 10             # CPU workers for parallel filtering / APE sorting
 #---
 
 #+++ Load data and grid
@@ -47,7 +49,7 @@ gaussian_filter = DaskParallelFilter(gcm_filters.Filter(
     dx_min=float(min(ds.Δx_caa.min(), ds.Δy_aca.min())),
     filter_shape=gcm_filters.FilterShape.GAUSSIAN,
     grid_type=gcm_filters.GridType.REGULAR,
-))
+), n_workers=n_workers)
 
 t0 = time.time()
 ds["b̄"] = gaussian_filter.apply(ds.b, dims=filtered_dimensions) # An overbar denotes a filtering operation
@@ -76,11 +78,11 @@ print("\n" + "="*60)
 print("Calculating local APE...")
 
 t0 = time.time()
-full_local_pes = local_potential_energies_timeseries(ds_full, density_name="ρ", rho_to_sort=ds_full.ρ, ape_method="precomputed_integral", use_numpy_version=True)
+full_local_pes = local_potential_energies_timeseries(ds_full, density_name="ρ", rho_to_sort=ds_full.ρ, ape_method="precomputed_integral", use_numpy_version=True, n_workers=n_workers)
 print(f"  full_local_pes  ({time.time()-t0:.1f}s)")
 
 t0 = time.time()
-filt_local_pes = local_potential_energies_timeseries(ds_filt, density_name="ρ̄", rho_to_sort=ds_full.ρ, ape_method="precomputed_integral", use_numpy_version=True)
+filt_local_pes = local_potential_energies_timeseries(ds_filt, density_name="ρ̄", rho_to_sort=ds_full.ρ, ape_method="precomputed_integral", use_numpy_version=True, n_workers=n_workers)
 print(f"  filt_local_pes  ({time.time()-t0:.1f}s)")
 #---
 
