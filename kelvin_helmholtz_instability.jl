@@ -90,6 +90,13 @@ simulation = Simulation(model, Δt=0.01, stop_time=params.stop_time)
 walltime_per_timestep = StepDuration(with_prefix=false)
 walltime = Walltime()
 
+Δx = minimum_xspacing(grid)
+
+ε = KineticEnergyEquation.DissipationRate(model)
+ε̄ = Average(ε, dims=(1, 2)) |> Field
+η = (params.ν^3 / ε̄) ^ (1/4)
+
+
 progress(simulation) = @info (PercentageProgress(with_prefix=false, with_units=false)
                               + walltime
                               + TimeStep()
@@ -97,6 +104,7 @@ progress(simulation) = @info (PercentageProgress(with_prefix=false, with_units=f
                               + "Diffusive CFL = " * DiffusiveCFLNumber(with_prefix=false)
                               + MaxUVelocity()
                               + "step dur = " * walltime_per_timestep
+                              + (sim -> @sprintf("Kolmogorov length/Δx = %.2f", minimum(η) / Δx))
                               )(simulation)
 simulation.callbacks[:progress] = Callback(progress, IterationInterval(20))
 #---
@@ -124,10 +132,6 @@ pe = ρ₀ * PotentialEnergyEquation.PotentialEnergy(model)
 PE = Integral(pe)
 
 vorticity = Field(∂z(u) - ∂x(w))
-
-ε = KineticEnergyEquation.DissipationRate(model)
-ε̄ = Average(ε, dims=(1, 2)) |> Field
-η = (params.ν^3 / ε̄) ^ (1/4)
 
 outputs = (; ω=vorticity, b, pe, PE, u=u_center, v=v_center, w=w_center, ε̄)
 
