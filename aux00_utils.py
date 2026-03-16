@@ -130,7 +130,7 @@ class DaskParallelFilter:
 
     All attributes other than `apply` are forwarded to the wrapped filter.
     """
-    def __init__(self, filter_obj, chunk_size=3, n_workers=None):
+    def __init__(self, filter_obj, chunk_size=1, n_workers=None):
         self._filter  = filter_obj
         self._chunk   = chunk_size
         self._workers = n_workers or os.cpu_count()

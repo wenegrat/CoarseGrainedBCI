@@ -25,7 +25,7 @@ filename = "output/kelvin_helmholtz_instability_256x64x256.nc"
 # filename = "output/kelvin_helmholtz_instability_128x1x512.nc"
 # filename = "output/kelvin_helmholtz_instability_64x1x256.nc"
 filter_length_scale = 0.8  # Length scale for filtering
-n_workers = 10             # CPU workers for parallel filtering / APE sorting
+n_workers = 16             # CPU workers for parallel filtering / APE sorting
 #---
 
 #+++ Load data and grid
