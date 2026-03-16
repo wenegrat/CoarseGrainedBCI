@@ -5,6 +5,7 @@ using CairoMakie
 using Printf
 using CUDA: has_cuda_gpu
 using Oceananigans.Architectures: on_architecture
+using Oceanostics: ProgressMessengers, PotentialEnergyEquation, KineticEnergyEquation
 
 include("utils.jl")
 
@@ -23,11 +24,11 @@ params = (
 #+++ Create grid
 if has_cuda_gpu()
     arch = GPU()
-    Nz = 1024
-    x_aspect_ratio = 2  # Δx / Δz ratio
-    y_aspect_ratio = 8  # Δy / Δz ratio
-    ν = 1e-4
-    κ = 1e-4
+    Nz = 512
+    x_aspect_ratio = 1  # Δx / Δz ratio
+    y_aspect_ratio = 1  # Δy / Δz ratio
+    ν = 5e-4
+    κ = 5e-4
 else
     arch = CPU()
     Nz = 256
@@ -84,7 +85,6 @@ set!(model, u=uᵢ, b=bᵢ, w=wᵢ)
 simulation = Simulation(model, Δt=0.01, stop_time=params.stop_time)
 
 #+++ Add progress messenger
-using Oceanostics.ProgressMessengers
 walltime_per_timestep = StepDuration(with_prefix=false)
 walltime = Walltime()
 
@@ -116,7 +116,6 @@ u_center = @at (Center, Center, Center) u
 v_center = @at (Center, Center, Center) v
 w_center = @at (Center, Center, Center) w
 
-using Oceanostics: PotentialEnergyEquation
 ρ₀ = 1025 # kg/ m^3
 pe = ρ₀ * PotentialEnergyEquation.PotentialEnergy(model)
 
@@ -124,7 +123,11 @@ PE = Integral(pe)
 
 vorticity = Field(∂z(u) - ∂x(w))
 
-outputs = (; ω=vorticity, b, pe, PE, u=u_center, v=v_center, w=w_center)
+ε = KineticEnergyEquation.DissipationRate(model)
+ε̄ = Average(ε, dims=(1, 2))
+η = (params.ν^3 / ε̄) ^ (1/4)
+
+outputs = (; ω=vorticity, b, pe, PE, u=u_center, v=v_center, w=w_center, ε̄)
 
 using NCDatasets
 output_filename = "output/kelvin_helmholtz_instability_$(params.Nx)x$(params.Ny)x$(params.Nz)"
