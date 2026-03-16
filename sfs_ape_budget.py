@@ -4,6 +4,7 @@ Calculate SFS APE budget from Kelvin-Helmholtz simulation output
 """
 
 #+++ Imports
+import os
 import numpy as np
 import xarray as xr
 import gcm_filters
@@ -19,9 +20,33 @@ from aux01_pe_functions import (
 )
 #---
 
+#+++ Dask-parallel filter wrapper
+class _DaskParallelFilter:
+    """
+    Thin proxy around gcm_filters.Filter that automatically chunks the input
+    along the time dimension and computes with a thread pool, giving ~N×
+    speedup where N is the number of available cores.
+
+    All attributes other than `apply` are forwarded to the wrapped filter.
+    """
+    def __init__(self, filter_obj, chunk_size=3, n_workers=None):
+        self._filter   = filter_obj
+        self._chunk    = chunk_size
+        self._workers  = n_workers or os.cpu_count()
+
+    def apply(self, da, dims):
+        if "time" in da.dims and da.sizes.get("time", 1) > 1:
+            lazy = self._filter.apply(da.chunk({"time": self._chunk}), dims=dims)
+            return lazy.compute(scheduler="threads", num_workers=self._workers)
+        return self._filter.apply(da, dims=dims)
+
+    def __getattr__(self, name):
+        return getattr(self._filter, name)
+#---
+
 #+++ Configuration
 filename = "output/kelvin_helmholtz_instability_128x1x512.nc"
-filename = "output/kelvin_helmholtz_instability_64x1x256.nc"
+# filename = "output/kelvin_helmholtz_instability_64x1x256.nc"
 filter_length_scale = 0.8  # Length scale for filtering
 #---
 
@@ -40,12 +65,12 @@ print("Filtering buoyancy field...")
 
 filtered_dimensions = ["x_caa", "y_aca"]
 filter_scale = filter_length_scale * np.sqrt(12)
-gaussian_filter = gcm_filters.Filter(
+gaussian_filter = _DaskParallelFilter(gcm_filters.Filter(
     filter_scale=filter_scale,
     dx_min=float(min(ds.Δx_caa.min(), ds.Δy_aca.min())),
     filter_shape=gcm_filters.FilterShape.GAUSSIAN,
     grid_type=gcm_filters.GridType.REGULAR,
-)
+))
 
 ds["b̄"] = gaussian_filter.apply(ds.b, dims=filtered_dimensions) # An overbar denotes a filtering operation
 
@@ -87,7 +112,8 @@ subfilter_local_ape = full_local_ape_filtered - filt_local_pes.ape
 #+++ Calculate budget terms
 cross_scale_ape_flux = calculate_cross_scale_ape_flux(ds_full.ρ, ds_full["uᵢ"], filt_local_pes.upsilon, gaussian_filter,
     filter_dims=filtered_dimensions,
-    filtered_density=ds_filt.ρ̄,)
+    filtered_density=ds_filt.ρ̄,
+    filtered_velocity_vector=ds_filt["ūᵢ"],)
 
 sfs_ape_dissipation = calculate_sfs_ape_dissipation(ds_full.ρ, full_local_pes.upsilon, filt_local_pes.upsilon, ds.κ, gaussian_filter,
     filter_dims=filtered_dimensions,
