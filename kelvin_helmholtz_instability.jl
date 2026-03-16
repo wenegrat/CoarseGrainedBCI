@@ -5,7 +5,8 @@ using CairoMakie
 using Printf
 using CUDA: has_cuda_gpu
 using Oceananigans.Architectures: on_architecture
-using Oceanostics: ProgressMessengers, PotentialEnergyEquation, KineticEnergyEquation
+using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation
+using Oceanostics.ProgressMessengers
 
 include("utils.jl")
 
@@ -30,16 +31,17 @@ if has_cuda_gpu()
     ν = 5e-4
     κ = 5e-4
 else
+    @warn "No CUDA GPU detected. Running on CPU with a coarse grid and high aspect ratio."
+
     arch = CPU()
     Nz = 256
     x_aspect_ratio = 4   # Δx / Δz ratio
     y_aspect_ratio = Inf # Δy / Δz ratio
     ν = 2e-3
     κ = 2e-3
-
-    @info "No CUDA GPU detected"
-    @info "Cell aspect ratio: Δx/Δz = $(x_aspect_ratio)"
 end
+
+@info "Cell aspect ratio: Δx/Δz = $(x_aspect_ratio), Δy/Δz = $(y_aspect_ratio)"
 
 # Calculate horizontal resolutions based on aspect ratios
 Nx = round(Int, Nz * (params.Lx / params.Lz) / x_aspect_ratio)
@@ -124,7 +126,7 @@ PE = Integral(pe)
 vorticity = Field(∂z(u) - ∂x(w))
 
 ε = KineticEnergyEquation.DissipationRate(model)
-ε̄ = Average(ε, dims=(1, 2))
+ε̄ = Average(ε, dims=(1, 2)) |> Field
 η = (params.ν^3 / ε̄) ^ (1/4)
 
 outputs = (; ω=vorticity, b, pe, PE, u=u_center, v=v_center, w=w_center, ε̄)
