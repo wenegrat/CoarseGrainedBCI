@@ -4,11 +4,10 @@ Calculate SFS APE budget from Kelvin-Helmholtz simulation output
 """
 
 #+++ Imports
-import os
 import numpy as np
 import xarray as xr
 import gcm_filters
-from aux00_utils import load_dataset_and_grid, condense_velocities, integrate
+from aux00_utils import load_dataset_and_grid, condense_velocities, integrate, DaskParallelFilter
 from aux01_pe_functions import (
     calculate_density_fields_from_buoyancy,
     local_potential_energies_timeseries,
@@ -18,30 +17,6 @@ from aux01_pe_functions import (
     calculate_sfs_ape_dissipation,
     calculate_ape_to_ke_exchange_term,
 )
-#---
-
-#+++ Dask-parallel filter wrapper
-class _DaskParallelFilter:
-    """
-    Thin proxy around gcm_filters.Filter that automatically chunks the input
-    along the time dimension and computes with a thread pool, giving ~N×
-    speedup where N is the number of available cores.
-
-    All attributes other than `apply` are forwarded to the wrapped filter.
-    """
-    def __init__(self, filter_obj, chunk_size=3, n_workers=None):
-        self._filter   = filter_obj
-        self._chunk    = chunk_size
-        self._workers  = n_workers or os.cpu_count()
-
-    def apply(self, da, dims):
-        if "time" in da.dims and da.sizes.get("time", 1) > 1:
-            lazy = self._filter.apply(da.chunk({"time": self._chunk}), dims=dims)
-            return lazy.compute(scheduler="threads", num_workers=self._workers)
-        return self._filter.apply(da, dims=dims)
-
-    def __getattr__(self, name):
-        return getattr(self._filter, name)
 #---
 
 #+++ Configuration
@@ -65,7 +40,7 @@ print("Filtering buoyancy field...")
 
 filtered_dimensions = ["x_caa", "y_aca"]
 filter_scale = filter_length_scale * np.sqrt(12)
-gaussian_filter = _DaskParallelFilter(gcm_filters.Filter(
+gaussian_filter = DaskParallelFilter(gcm_filters.Filter(
     filter_scale=filter_scale,
     dx_min=float(min(ds.Δx_caa.min(), ds.Δy_aca.min())),
     filter_shape=gcm_filters.FilterShape.GAUSSIAN,
