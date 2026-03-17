@@ -15,8 +15,13 @@ from aux02_ke_functions import (
 #---
 
 #+++ Configuration
-# filename = "output/kelvin_helmholtz_instability_128x1x512.nc"
-filename = "output/kelvin_helmholtz_instability_64x1x256.nc"
+import argparse
+parser = argparse.ArgumentParser(description="Calculate SFS KE budget from Kelvin-Helmholtz simulation output")
+parser.add_argument("filename", nargs="?",
+                    default="output/kelvin_helmholtz_instability_64x1x256.nc",
+                    help="Path to simulation NetCDF file")
+args = parser.parse_args()
+filename = args.filename
 filter_length_scale = 0.8  # Length scale for filtering
 #---
 
