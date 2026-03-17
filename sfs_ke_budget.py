@@ -17,8 +17,7 @@ from aux02_ke_functions import (
 #+++ Configuration
 import argparse
 parser = argparse.ArgumentParser(description="Calculate SFS KE budget from Kelvin-Helmholtz simulation output")
-parser.add_argument("filename", nargs="?",
-                    default="output/kelvin_helmholtz_instability_64x1x256.nc",
+parser.add_argument("--filename", default="output/kelvin_helmholtz_instability_64x1x256.nc",
                     help="Path to simulation NetCDF file")
 args = parser.parse_args()
 filename = args.filename
