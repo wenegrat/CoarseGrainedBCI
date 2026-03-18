@@ -25,7 +25,7 @@ from aux01_ape_functions import (
     ρ0,
 )
 from aux00_utils import integrate
-from ape_plots import plot_energy_timeseries, plot_potential_energies
+from aux03_plotting import plot_energy_timeseries, plot_potential_energies
 from matplotlib import pyplot as plt
 import pynanigans as pn
 import gcm_filters

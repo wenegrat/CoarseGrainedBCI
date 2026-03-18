@@ -23,7 +23,7 @@ from aux01_pe_functions import (
     calculate_sfs_ape_dissipation,
     calculate_ape_to_ke_exchange_term,
 )
-from ape_plots import plot_dataset_variables
+from aux03_plotting import plot_dataset_variables
 #---
 
 #+++ Configuration
