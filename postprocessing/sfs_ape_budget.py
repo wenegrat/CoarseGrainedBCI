@@ -5,6 +5,7 @@ Calculate SFS APE budget from Kelvin-Helmholtz simulation output
 
 #+++ Imports
 import os
+from pathlib import Path
 import time
 import numpy as np
 import xarray as xr
@@ -29,7 +30,8 @@ parser.add_argument("--filename", default="output/kelvin_helmholtz_instability_1
 parser.add_argument("--n-workers", type=int, default=18,
                     help="Number of CPU workers for parallel filtering / APE sorting")
 args = parser.parse_args()
-filename = args.filename
+REPO_ROOT = Path(__file__).resolve().parent.parent
+filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 filter_length_scale = 0.8  # Length scale for filtering
 n_workers = args.n_workers
 #---
@@ -228,7 +230,7 @@ for var, color in integrated_vars.items():
 ax.set_ylabel("Budget Terms [W or J s⁻¹]")
 ax.set_title("Integrated SFS APE Budget Terms")
 ax.grid(True, alpha=0.3)
-plot_filename = os.path.join("figures", os.path.basename(output_filename).replace(".nc", ".png"))
+plot_filename = str(REPO_ROOT / "figures" / os.path.basename(output_filename).replace(".nc", ".png"))
 fig.savefig(plot_filename, dpi=150, bbox_inches="tight")
 print(f"Budget timeseries plot saved to: {plot_filename}  ({time.time()-t0:.1f}s)")
 #---
