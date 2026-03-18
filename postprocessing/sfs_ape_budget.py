@@ -11,6 +11,7 @@ import numpy as np
 import xarray as xr
 import gcm_filters
 from aux00_utils import load_dataset_and_grid, condense_velocities, integrate, DaskParallelFilter
+from aux03_plotting import budget_colors
 from aux01_pe_functions import (
     calculate_density_fields_from_buoyancy,
     local_potential_energies_timeseries,
@@ -209,14 +210,6 @@ t0 = time.time()
 import matplotlib.pyplot as plt
 fig, ax = plt.subplots(figsize=(10, 6), constrained_layout=True)
 
-# Colors shared with sfs_ke_budget.py — keep analogous terms the same colour
-budget_colors = {
-    "tendency":   "C0",
-    "flux":       "C1",
-    "dissipation":"C2",
-    "exchange":   "C3",
-    "residual":   "k",
-}
 integrated_vars = {
     "∫-∂ₜ SFS APE dV":    budget_colors["tendency"],
     "∫Π_APE dV":           budget_colors["flux"],

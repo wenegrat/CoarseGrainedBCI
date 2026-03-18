@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import xarray as xr
 import matplotlib.pyplot as plt
+from aux03_plotting import budget_colors
 #---
 
 #+++ Configuration
@@ -45,13 +46,6 @@ for var in ke_local_vars:
 #+++ Plot integrated KE and APE budgets
 print("\nPlotting integrated KE and APE budgets...")
 
-budget_colors = {
-    "tendency":    "C0",
-    "flux":        "C1",
-    "dissipation": "C2",
-    "exchange":    "C3",
-    "residual":    "k",
-}
 ke_integrated_vars = {
     "∫-∂ₜ SFS KE dV":   budget_colors["tendency"],
     "∫Π_KE dV":          budget_colors["flux"],

@@ -6,6 +6,13 @@ This module contains visualization functions for energy timeseries data.
 
 import matplotlib.pyplot as plt
 
+budget_colors = {
+    "tendency":    "C0",
+    "flux":        "C1",
+    "dissipation": "C2",
+    "exchange":    "C3",
+    "residual":    "k",
+}
 
 #+++ Plot energy timeseries
 def plot_energy_timeseries(ds, APE=None, TPE=None, RPE=None, KE=None):
