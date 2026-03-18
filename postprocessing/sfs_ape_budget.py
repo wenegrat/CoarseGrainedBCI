@@ -184,7 +184,7 @@ sfs_ape_budget_terms = xr.Dataset({
     "∂ₜ SFS APE": dAPE_dt,
     "Π_APE": cross_scale_ape_flux,
     "χₛ": sfs_ape_dissipation,
-    "SFS KE->APE exchange": ape_to_ke_exchange,
+    "SFS KE->APE exchange": -ape_to_ke_exchange,
     "Rˢ": R_s,
     # Integrated budget terms
     "∫-∂ₜ SFS APE dV": -int_dAPE_dt,
