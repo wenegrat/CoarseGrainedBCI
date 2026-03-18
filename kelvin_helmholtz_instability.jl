@@ -5,6 +5,8 @@ using CairoMakie
 using Printf
 using CUDA: has_cuda_gpu
 using Oceananigans.Architectures: on_architecture
+using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation
+using Oceanostics.ProgressMessengers
 
 include("utils.jl")
 
@@ -23,22 +25,23 @@ params = (
 #+++ Create grid
 if has_cuda_gpu()
     arch = GPU()
-    Nz = 1024
-    x_aspect_ratio = 2  # Δx / Δz ratio
-    y_aspect_ratio = 8  # Δy / Δz ratio
-    ν = 1e-4
-    κ = 1e-4
+    Nz = 512
+    x_aspect_ratio = 1  # Δx / Δz ratio
+    y_aspect_ratio = 1  # Δy / Δz ratio
+    ν = 5e-4
+    κ = 5e-4
 else
+    @warn "No CUDA GPU detected. Running on CPU with a coarse grid and high aspect ratio."
+
     arch = CPU()
     Nz = 256
     x_aspect_ratio = 4   # Δx / Δz ratio
     y_aspect_ratio = Inf # Δy / Δz ratio
     ν = 2e-3
     κ = 2e-3
-
-    @info "No CUDA GPU detected"
-    @info "Cell aspect ratio: Δx/Δz = $(x_aspect_ratio)"
 end
+
+@info "Cell aspect ratio: Δx/Δz = $(x_aspect_ratio), Δy/Δz = $(y_aspect_ratio)"
 
 # Calculate horizontal resolutions based on aspect ratios
 Nx = round(Int, Nz * (params.Lx / params.Lz) / x_aspect_ratio)
@@ -84,9 +87,15 @@ set!(model, u=uᵢ, b=bᵢ, w=wᵢ)
 simulation = Simulation(model, Δt=0.01, stop_time=params.stop_time)
 
 #+++ Add progress messenger
-using Oceanostics.ProgressMessengers
 walltime_per_timestep = StepDuration(with_prefix=false)
 walltime = Walltime()
+
+Δx = minimum_xspacing(grid)
+
+ε = KineticEnergyEquation.DissipationRate(model)
+ε̄ = Average(ε, dims=(1, 2)) |> Field
+η = (params.ν^3 / ε̄) ^ (1/4)
+
 
 progress(simulation) = @info (PercentageProgress(with_prefix=false, with_units=false)
                               + walltime
@@ -95,6 +104,7 @@ progress(simulation) = @info (PercentageProgress(with_prefix=false, with_units=f
                               + "Diffusive CFL = " * DiffusiveCFLNumber(with_prefix=false)
                               + MaxUVelocity()
                               + "step dur = " * walltime_per_timestep
+                              + (sim -> @sprintf("Kolmogorov length/Δx = %.2f", minimum(η) / Δx))
                               )(simulation)
 simulation.callbacks[:progress] = Callback(progress, IterationInterval(20))
 #---
@@ -116,7 +126,6 @@ u_center = @at (Center, Center, Center) u
 v_center = @at (Center, Center, Center) v
 w_center = @at (Center, Center, Center) w
 
-using Oceanostics: PotentialEnergyEquation
 ρ₀ = 1025 # kg/ m^3
 pe = ρ₀ * PotentialEnergyEquation.PotentialEnergy(model)
 
@@ -124,7 +133,7 @@ PE = Integral(pe)
 
 vorticity = Field(∂z(u) - ∂x(w))
 
-outputs = (; ω=vorticity, b, pe, PE, u=u_center, v=v_center, w=w_center)
+outputs = (; ω=vorticity, b, pe, PE, u=u_center, v=v_center, w=w_center, ε̄)
 
 using NCDatasets
 output_filename = "output/kelvin_helmholtz_instability_$(params.Nx)x$(params.Ny)x$(params.Nz)"

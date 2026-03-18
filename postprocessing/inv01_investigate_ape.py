@@ -7,6 +7,8 @@ and calculates the APE using the sorting method following Winters et al. (1995)
 and the approaches used in CrossScaleAPE notebooks.
 """
 
+import os
+from pathlib import Path
 import numpy as np
 import xarray as xr
 import scipy.integrate as integrate
@@ -25,7 +27,7 @@ from aux01_ape_functions import (
     ρ0,
 )
 from aux00_utils import integrate
-from ape_plots import plot_energy_timeseries, plot_potential_energies
+from aux03_plotting import plot_energy_timeseries, plot_potential_energies
 from matplotlib import pyplot as plt
 import pynanigans as pn
 import gcm_filters
@@ -44,7 +46,8 @@ def timeit(func):
     return wrapper
 
 # File path to the simulation output
-filename = "output/kelvin_helmholtz_instability_64x1x64.nc"
+REPO_ROOT = Path(__file__).resolve().parent.parent
+filename = str(REPO_ROOT / "output/kelvin_helmholtz_instability_64x1x64.nc")
 ds = load_dataset_and_grid(filename)
 ds = calculate_density_fields_from_buoyancy(ds, compute_density_z=True)
 

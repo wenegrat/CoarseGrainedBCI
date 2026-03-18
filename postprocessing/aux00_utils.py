@@ -1,3 +1,4 @@
+import os
 import time
 from functools import wraps
 import numpy as np
@@ -118,4 +119,29 @@ def calculate_gradient(scalar, output_name="grad_scalar", dimensions=("x_caa", "
         aux_ds[str(i+1)] = da
     aux_ds = condense(aux_ds, list(aux_ds.data_vars.keys()), output_name, dimname=dimname, indices=indices)
     return aux_ds[output_name]
+#---
+
+#+++ Dask-parallel filter wrapper
+class DaskParallelFilter:
+    """
+    Thin proxy around gcm_filters.Filter that automatically chunks the input
+    along the time dimension and computes with a thread pool, giving ~N×
+    speedup where N is the number of available cores.
+
+    All attributes other than `apply` are forwarded to the wrapped filter.
+    """
+    def __init__(self, filter_obj, chunk_size=1, n_workers=None):
+        self._filter  = filter_obj
+        self._chunk   = chunk_size
+        self._workers = n_workers or os.cpu_count()
+        print(f"  Using {self._workers} CPU workers")
+
+    def apply(self, da, dims):
+        if "time" in da.dims and da.sizes.get("time", 1) > 1:
+            lazy = self._filter.apply(da.chunk({"time": self._chunk}), dims=dims)
+            return lazy.compute(scheduler="threads", num_workers=self._workers)
+        return self._filter.apply(da, dims=dims)
+
+    def __getattr__(self, name):
+        return getattr(self._filter, name)
 #---
