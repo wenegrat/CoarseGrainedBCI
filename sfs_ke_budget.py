@@ -3,7 +3,7 @@
 import numpy as np
 import xarray as xr
 import gcm_filters
-from aux00_utils import load_dataset_and_grid, condense_velocities, integrate
+from aux00_utils import load_dataset_and_grid, condense_velocities, integrate, DaskParallelFilter
 from aux01_pe_functions import calculate_ape_to_ke_exchange_term
 from aux02_ke_functions import (
     calculate_sfs_stress_tensor,
@@ -17,10 +17,13 @@ from aux02_ke_functions import (
 #+++ Configuration
 import argparse
 parser = argparse.ArgumentParser(description="Calculate SFS KE budget from Kelvin-Helmholtz simulation output")
-parser.add_argument("--filename", default="output/kelvin_helmholtz_instability_64x1x256.nc",
+parser.add_argument("--filename", default="output/kelvin_helmholtz_instability_128x1x256.nc",
                     help="Path to simulation NetCDF file")
+parser.add_argument("--n-workers", type=int, default=18,
+                    help="Number of CPU workers for parallel filtering")
 args = parser.parse_args()
 filename = args.filename
+n_workers = args.n_workers
 filter_length_scale = 0.8  # Length scale for filtering
 #---
 
@@ -37,12 +40,12 @@ print("Filtering velocity field...")
 
 filtered_dimensions = ["x_caa", "y_aca"]
 filter_scale = filter_length_scale * np.sqrt(12)
-gaussian_filter = gcm_filters.Filter(
+gaussian_filter = DaskParallelFilter(gcm_filters.Filter(
     filter_scale=filter_scale,
     dx_min=float(min(ds.Δx_caa.min(), ds.Δy_aca.min())),
     filter_shape=gcm_filters.FilterShape.GAUSSIAN,
     grid_type=gcm_filters.GridType.REGULAR,
-)
+), n_workers=n_workers)
 
 ds = condense_velocities(ds, indices=[1, 2, 3])  # uᵢ with i dimension
 ds["ūᵢ"] = gaussian_filter.apply(ds["uᵢ"], dims=filtered_dimensions)
@@ -136,7 +139,6 @@ dV = ds_full.dV
 int_dKE_dt = integrate(dKE_dt, dV)
 
 int_ape_to_ke_exchange = integrate(ape_to_ke_exchange.reindex(time=dKE_dt.time), dV)
-int_sfs_ke_density   = integrate(sfs_ke_density.reindex(time=dKE_dt.time), dV)
 int_cross_scale_ke_flux  = integrate(cross_scale_ke_flux.reindex(time=dKE_dt.time), dV)
 int_sfs_ke_dissipation = integrate(sfs_ke_dissipation.reindex(time=dKE_dt.time), dV)
 
@@ -150,18 +152,18 @@ print("\n" + "="*60)
 print("Saving results...")
 
 sfs_ke_budget_terms = xr.Dataset({
-    # Local fields
-    "SFS KE":     sfs_ke_density,
+    # Local KE fields
+    "KE_of_sfs_flow": sfs_ke_density,
+    # Local budget terms
     "∂ₜ SFS KE": dKE_dt,
-    "Π_KE":   cross_scale_ke_flux,
-    "εₛ":    sfs_ke_dissipation,
+    "Π_KE": cross_scale_ke_flux,
+    "εₛ": sfs_ke_dissipation,
     "SFS APE->KE exchange": ape_to_ke_exchange,
-    # Integrated scalars
-    "∫SFS KE dV":         int_sfs_ke_density,
-    "∫-∂ₜ SFS KE dV":     -int_dKE_dt,
-    "∫Π_KE dV":           int_cross_scale_ke_flux,
-    "∫-εₛ dV":           -int_sfs_ke_dissipation,
-    "∫(SFS APE->KE) dV":  int_ape_to_ke_exchange,
+    # Integrated budget terms
+    "∫-∂ₜ SFS KE dV": -int_dKE_dt,
+    "∫Π_KE dV": int_cross_scale_ke_flux,
+    "∫-εₛ dV": -int_sfs_ke_dissipation,
+    "∫(SFS APE->KE) dV": int_ape_to_ke_exchange,
     "residual_KE": residual,
 })
 
