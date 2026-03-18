@@ -4,6 +4,7 @@ Calculate SFS APE budget from Kelvin-Helmholtz simulation output
 """
 
 #+++ Imports
+import os
 import time
 import numpy as np
 import xarray as xr
@@ -227,7 +228,7 @@ for var, color in integrated_vars.items():
 ax.set_ylabel("Budget Terms [W or J s⁻¹]")
 ax.set_title("Integrated SFS APE Budget Terms")
 ax.grid(True, alpha=0.3)
-plot_filename = output_filename.replace(".nc", ".png")
+plot_filename = os.path.join("figures", os.path.basename(output_filename).replace(".nc", ".png"))
 fig.savefig(plot_filename, dpi=150, bbox_inches="tight")
 print(f"Budget timeseries plot saved to: {plot_filename}  ({time.time()-t0:.1f}s)")
 #---

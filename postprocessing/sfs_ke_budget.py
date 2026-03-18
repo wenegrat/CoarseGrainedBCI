@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 #+++ Imports
+import os
 import numpy as np
 import xarray as xr
 import gcm_filters
@@ -201,7 +202,7 @@ for var, color in integrated_vars.items():
 ax.set_ylabel("Budget Terms [W or J s⁻¹]")
 ax.set_title("Integrated SFS KE Budget Terms")
 ax.grid(True, alpha=0.3)
-plot_filename = output_filename.replace(".nc", ".png")
+plot_filename = os.path.join("figures", os.path.basename(output_filename).replace(".nc", ".png"))
 fig.savefig(plot_filename, dpi=150, bbox_inches="tight")
 print(f"Budget timeseries plot saved to: {plot_filename}")
 #---
