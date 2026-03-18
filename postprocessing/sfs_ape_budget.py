@@ -194,6 +194,7 @@ sfs_ape_budget_terms = xr.Dataset({
     "∫Rˢ dV": int_R_s,
     "residual_APE": residual,
 })
+sfs_ape_budget_terms = sfs_ape_budget_terms.reindex(time=dAPE_dt.time)
 
 output_filename = filename.replace(".nc", "_sfs_ape_budget.nc")
 sfs_ape_budget_terms.to_netcdf(output_filename)

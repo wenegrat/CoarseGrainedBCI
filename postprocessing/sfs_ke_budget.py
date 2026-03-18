@@ -169,6 +169,7 @@ sfs_ke_budget_terms = xr.Dataset({
     "∫(SFS APE->KE) dV": int_ape_to_ke_exchange,
     "residual_KE": residual,
 })
+sfs_ke_budget_terms = sfs_ke_budget_terms.reindex(time=dKE_dt.time)
 
 output_filename = filename.replace(".nc", "_sfs_ke_budget.nc")
 sfs_ke_budget_terms.to_netcdf(output_filename)
