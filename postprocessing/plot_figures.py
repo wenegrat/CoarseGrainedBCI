@@ -42,6 +42,54 @@ for var in ke_local_vars:
     print(f"  Saved {plot_filename}")
 #---
 
+#+++ Plot integrated KE and APE budgets
+print("\nPlotting integrated KE and APE budgets...")
+
+budget_colors = {
+    "tendency":    "C0",
+    "flux":        "C1",
+    "dissipation": "C2",
+    "exchange":    "C3",
+    "residual":    "k",
+}
+ke_integrated_vars = {
+    "∫-∂ₜ SFS KE dV":   budget_colors["tendency"],
+    "∫Π_KE dV":          budget_colors["flux"],
+    "∫-εₛ dV":           budget_colors["dissipation"],
+    "∫(SFS APE->KE) dV": budget_colors["exchange"],
+    "residual_KE":        budget_colors["residual"],
+}
+ape_integrated_vars = {
+    "∫-∂ₜ SFS APE dV":   budget_colors["tendency"],
+    "∫Π_APE dV":          budget_colors["flux"],
+    "∫-χₛ dV":            budget_colors["dissipation"],
+    "∫(SFS KE->APE) dV":  budget_colors["exchange"],
+    "∫Rˢ dV":             "C4",
+    "residual_APE":        budget_colors["residual"],
+}
+
+fig, (ax_ke, ax_ape) = plt.subplots(2, 1, figsize=(10, 10), constrained_layout=True)
+
+for var, color in ke_integrated_vars.items():
+    ds_ke[var].dropna("time").plot.line(ax=ax_ke, x="time", label=var, color=color)
+ax_ke.legend()
+ax_ke.set_ylabel("Budget Terms [W or J s⁻¹]")
+ax_ke.set_title("Integrated SFS KE Budget Terms")
+ax_ke.grid(True, alpha=0.3)
+
+for var, color in ape_integrated_vars.items():
+    ds_ape[var].dropna("time").plot.line(ax=ax_ape, x="time", label=var, color=color)
+ax_ape.legend()
+ax_ape.set_ylabel("Budget Terms [W or J s⁻¹]")
+ax_ape.set_title("Integrated SFS APE Budget Terms")
+ax_ape.grid(True, alpha=0.3)
+
+plot_filename = str(REPO_ROOT / "figures" / os.path.basename(filename).replace(".nc", "_sfs_budgets.png"))
+fig.savefig(plot_filename, dpi=150, bbox_inches="tight")
+plt.close()
+print(f"  Saved {plot_filename}")
+#---
+
 #+++ Plot local APE budget terms
 print("\nPlotting local APE budget terms...")
 
