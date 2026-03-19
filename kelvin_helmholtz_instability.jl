@@ -14,7 +14,7 @@ include("utils.jl")
 params = (
     Lx = 10,
     Ly = 5,
-    Lz = 10,
+    Lz = 14,
     Ri = 0.1,
     h = 1/4,
     perturbation_amplitude = 0.01,
@@ -25,11 +25,11 @@ params = (
 #+++ Create grid
 if has_cuda_gpu()
     arch = GPU()
-    Nz = 2048
+    Nz = 4096
     x_aspect_ratio = 1   # Δx / Δz ratio
     y_aspect_ratio = Inf # Δy / Δz ratio
-    ν = 1e-4
-    κ = 1e-4
+    ν = 5e-5
+    κ = 5e-5
 else
     @warn "No CUDA GPU detected. Running on CPU with a coarse grid and high aspect ratio."
 
