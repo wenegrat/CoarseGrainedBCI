@@ -25,11 +25,11 @@ params = (
 #+++ Create grid
 if has_cuda_gpu()
     arch = GPU()
-    Nz = 512
-    x_aspect_ratio = 1  # Δx / Δz ratio
-    y_aspect_ratio = 1  # Δy / Δz ratio
-    ν = 5e-4
-    κ = 5e-4
+    Nz = 2048
+    x_aspect_ratio = 1   # Δx / Δz ratio
+    y_aspect_ratio = Inf # Δy / Δz ratio
+    ν = 1e-4
+    κ = 1e-4
 else
     @warn "No CUDA GPU detected. Running on CPU with a coarse grid and high aspect ratio."
 
