@@ -11,6 +11,7 @@ import numpy as np
 import xarray as xr
 import gcm_filters
 from aux00_utils import load_dataset_and_grid, condense_velocities, integrate, DaskParallelFilter
+from aux03_plotting import budget_colors
 from aux01_pe_functions import (
     calculate_density_fields_from_buoyancy,
     local_potential_energies_timeseries,
@@ -184,7 +185,7 @@ sfs_ape_budget_terms = xr.Dataset({
     "∂ₜ SFS APE": dAPE_dt,
     "Π_APE": cross_scale_ape_flux,
     "χₛ": sfs_ape_dissipation,
-    "SFS KE->APE exchange": ape_to_ke_exchange,
+    "SFS KE->APE exchange": -ape_to_ke_exchange,
     "Rˢ": R_s,
     # Integrated budget terms
     "∫-∂ₜ SFS APE dV": -int_dAPE_dt,
@@ -194,6 +195,7 @@ sfs_ape_budget_terms = xr.Dataset({
     "∫Rˢ dV": int_R_s,
     "residual_APE": residual,
 })
+sfs_ape_budget_terms = sfs_ape_budget_terms.reindex(time=dAPE_dt.time)
 
 output_filename = filename.replace(".nc", "_sfs_ape_budget.nc")
 sfs_ape_budget_terms.to_netcdf(output_filename)
@@ -208,14 +210,6 @@ t0 = time.time()
 import matplotlib.pyplot as plt
 fig, ax = plt.subplots(figsize=(10, 6), constrained_layout=True)
 
-# Colors shared with sfs_ke_budget.py — keep analogous terms the same colour
-budget_colors = {
-    "tendency":   "C0",
-    "flux":       "C1",
-    "dissipation":"C2",
-    "exchange":   "C3",
-    "residual":   "k",
-}
 integrated_vars = {
     "∫-∂ₜ SFS APE dV":    budget_colors["tendency"],
     "∫Π_APE dV":           budget_colors["flux"],

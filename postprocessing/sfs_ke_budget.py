@@ -6,6 +6,7 @@ import numpy as np
 import xarray as xr
 import gcm_filters
 from aux00_utils import load_dataset_and_grid, condense_velocities, integrate, DaskParallelFilter
+from aux03_plotting import budget_colors
 from aux01_pe_functions import calculate_ape_to_ke_exchange_term
 from aux02_ke_functions import (
     calculate_sfs_stress_tensor,
@@ -169,6 +170,7 @@ sfs_ke_budget_terms = xr.Dataset({
     "∫(SFS APE->KE) dV": int_ape_to_ke_exchange,
     "residual_KE": residual,
 })
+sfs_ke_budget_terms = sfs_ke_budget_terms.reindex(time=dKE_dt.time)
 
 output_filename = filename.replace(".nc", "_sfs_ke_budget.nc")
 sfs_ke_budget_terms.to_netcdf(output_filename)
@@ -183,14 +185,6 @@ print("="*60)
 import matplotlib.pyplot as plt
 fig, ax = plt.subplots(figsize=(10, 6), constrained_layout=True)
 
-# Colors shared with sfs_ape_budget.py — keep analogous terms the same colour
-budget_colors = {
-    "tendency":   "C0",
-    "flux":       "C1",
-    "dissipation":"C2",
-    "exchange":   "C3",
-    "residual":   "k",
-}
 integrated_vars = {
     "∫-∂ₜ SFS KE dV":    budget_colors["tendency"],
     "∫Π_KE dV":           budget_colors["flux"],
