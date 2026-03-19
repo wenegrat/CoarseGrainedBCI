@@ -30,7 +30,7 @@ from aux03_plotting import plot_dataset_variables
 
 #+++ Configuration
 REPO_ROOT = Path(__file__).resolve().parent.parent
-filename = str(REPO_ROOT / "output/kelvin_helmholtz_instability_64x1x256.nc")
+filename = str(REPO_ROOT / "output/khi_64x1x256.nc")
 filter_length_scale = 0.8  # Length scale for filtering
 #---
 

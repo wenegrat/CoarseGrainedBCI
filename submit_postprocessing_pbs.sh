@@ -25,10 +25,10 @@ export JULIA_DEPOT_PATH="$WORK/.julia"
 export JULIA_CPU_TARGET="generic"
 juliaup default 1.12
 
-time /glade/u/home/tomasc/miniconda3/envs/py313/bin/python -u postprocessing/sfs_ape_budget.py --filename output/kelvin_helmholtz_instability_512x256x512.nc --n-workers 18 2>&1 | tee logs/sfs_ape_budget.out
+time /glade/u/home/tomasc/miniconda3/envs/py313/bin/python -u postprocessing/sfs_ape_budget.py --filename output/khi_512x256x512.nc --n-workers 18 2>&1 | tee logs/sfs_ape_budget.out
 qstat -f $PBS_JOBID >> logs/sfs_ape_budget.log
 qstat -f $PBS_JOBID >> logs/sfs_ape_budget.out
 
-time /glade/u/home/tomasc/miniconda3/envs/py313/bin/python -u postprocessing/sfs_ke_budget.py --filename output/kelvin_helmholtz_instability_512x256x512.nc 2>&1 | tee logs/sfs_ke_budget.out
+time /glade/u/home/tomasc/miniconda3/envs/py313/bin/python -u postprocessing/sfs_ke_budget.py --filename output/khi_512x256x512.nc 2>&1 | tee logs/sfs_ke_budget.out
 qstat -f $PBS_JOBID >> logs/sfs_ke_budget.log
 qstat -f $PBS_JOBID >> logs/sfs_ke_budget.out
