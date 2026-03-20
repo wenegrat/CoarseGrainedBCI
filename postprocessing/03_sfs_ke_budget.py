@@ -38,9 +38,9 @@ ds = load_dataset_and_grid(filename)
 print(f"Dataset loaded: {len(ds.time)} time steps")
 #---
 
-#+++ Filter velocity field
+#+++ Load filtered fields
 print("\n" + "="*60)
-print("Filtering velocity field...")
+print("Loading pre-filtered fields...")
 
 filtered_dimensions = ["x_caa", "y_aca"]
 filter_scale = filter_length_scale * np.sqrt(12)
@@ -52,13 +52,12 @@ gaussian_filter = DaskParallelFilter(gcm_filters.Filter(
 ), n_workers=n_workers)
 
 ds = condense_velocities(ds, indices=[1, 2, 3])  # uᵢ with i dimension
-ds["ūᵢ"] = gaussian_filter.apply(ds["uᵢ"], dims=filtered_dimensions)
-ds["b̄"] = gaussian_filter.apply(ds["b"], dims=filtered_dimensions)
-
 ds_full = ds[["b", "dV", "uᵢ"]].copy()
-ds_filt = ds[["b̄", "dV", "ūᵢ"]].copy()
 
-print(f"Velocities filtered with length scale: {filter_length_scale}")
+filtered_filename = filename.replace(".nc", "_filtered_velocities.nc")
+ds_filt = xr.open_dataset(filtered_filename, decode_times=False)
+
+print(f"Pre-filtered fields loaded from: {filtered_filename}")
 #---
 
 #+++ Calculate SFS stress tensor
