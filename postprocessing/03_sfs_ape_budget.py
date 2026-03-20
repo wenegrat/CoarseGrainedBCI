@@ -47,9 +47,9 @@ print(f"Dataset loaded: {len(ds.time)} time steps  ({time.time()-t0:.1f}s)")
 # ds = ds.sel(time=slice(20, 81))
 #---
 
-#+++ Filter buoyancy field
+#+++ Load filtered fields
 print("\n" + "="*60)
-print("Filtering buoyancy field...")
+print("Loading pre-filtered fields...")
 
 filtered_dimensions = ["x_caa", "y_aca"]
 filter_scale = filter_length_scale * np.sqrt(12)
@@ -60,17 +60,16 @@ gaussian_filter = DaskParallelFilter(gcm_filters.Filter(
     grid_type=gcm_filters.GridType.REGULAR,
 ), n_workers=n_workers)
 
-t0 = time.time()
-ds["b̄"] = gaussian_filter.apply(ds.b, dims=filtered_dimensions) # An overbar denotes a filtering operation
-print(f"  b̄ filtered  ({time.time()-t0:.1f}s)")
-
 ds = condense_velocities(ds, indices=[1, 2, 3]) # Condense velocity components into tensor form
-t0 = time.time()
-ds["ūᵢ"] = gaussian_filter.apply(ds["uᵢ"], dims=filtered_dimensions)
-print(f"  ūᵢ filtered  ({time.time()-t0:.1f}s)")
-
-ds_filt = ds[["b̄", "dV", "LxLy", "ūᵢ"]].copy()
 ds_full = ds[["b", "dV", "LxLy", "uᵢ"]].copy()
+
+filtered_filename = filename.replace(".nc", "_filtered_velocities.nc")
+t0 = time.time()
+ds_filt = xr.open_dataset(filtered_filename, decode_times=False).sel(
+    filter_length_scale=filter_length_scale, method="nearest").drop_vars("filter_length_scale")
+ds_filt["LxLy"] = ds["LxLy"]  # grid variable not stored in filtered file
+ds_filt.attrs.update(ds.attrs)  # grid attributes (z_min, Lz, …) not stored in filtered file
+print(f"  Pre-filtered fields loaded from: {filtered_filename}  ({time.time()-t0:.1f}s)")
 #---
 
 #+++ Calculate density fields
