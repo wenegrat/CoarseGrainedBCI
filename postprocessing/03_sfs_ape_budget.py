@@ -10,6 +10,7 @@ import time
 import numpy as np
 import xarray as xr
 import gcm_filters
+from dask.diagnostics.progress import ProgressBar
 from aux00_utils import load_dataset_and_grid, condense_velocities, integrate, DaskParallelFilter
 from aux03_plotting import budget_colors
 from aux01_pe_functions import (
@@ -29,11 +30,10 @@ parser = argparse.ArgumentParser(description="Calculate SFS APE budget from Kelv
 parser.add_argument("--filename", default="output/khi_128x1x256.nc",
                     help="Path to simulation NetCDF file")
 parser.add_argument("--n-workers", type=int, default=18,
-                    help="Number of CPU workers for parallel filtering / APE sorting")
+                    help="Number of CPU workers for APE sorting")
 args = parser.parse_args()
 REPO_ROOT = Path(__file__).resolve().parent.parent
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
-filter_length_scale = 0.8  # Length scale for filtering
 n_workers = args.n_workers
 #---
 
@@ -42,9 +42,8 @@ print("\n" + "="*60)
 print("Loading data and grid...")
 t0 = time.time()
 ds = load_dataset_and_grid(filename)
+ds = ds.chunk({"time": 1})
 print(f"Dataset loaded: {len(ds.time)} time steps  ({time.time()-t0:.1f}s)")
-
-# ds = ds.sel(time=slice(20, 81))
 #---
 
 #+++ Load filtered fields
@@ -52,162 +51,167 @@ print("\n" + "="*60)
 print("Loading pre-filtered fields...")
 
 filtered_dimensions = ["x_caa", "y_aca"]
-filter_scale = filter_length_scale * np.sqrt(12)
-gaussian_filter = DaskParallelFilter(gcm_filters.Filter(
-    filter_scale=filter_scale,
-    dx_min=float(min(ds.Δx_caa.min(), ds.Δy_aca.min())),
-    filter_shape=gcm_filters.FilterShape.GAUSSIAN,
-    grid_type=gcm_filters.GridType.REGULAR,
-), n_workers=n_workers)
+dx_min = float(min(ds.Δx_caa.min(), ds.Δy_aca.min()))
 
-ds = condense_velocities(ds, indices=[1, 2, 3]) # Condense velocity components into tensor form
+ds = condense_velocities(ds, indices=[1, 2, 3])
 ds_full = ds[["b", "dV", "LxLy", "uᵢ"]].copy()
 
 filtered_filename = filename.replace(".nc", "_filtered_velocities.nc")
 t0 = time.time()
-ds_filt = xr.open_dataset(filtered_filename, decode_times=False).sel(
-    filter_length_scale=filter_length_scale, method="nearest").drop_vars("filter_length_scale")
-ds_filt["LxLy"] = ds["LxLy"]  # grid variable not stored in filtered file
-ds_filt.attrs.update(ds.attrs)  # grid attributes (z_min, Lz, …) not stored in filtered file
+ds_filt = xr.open_dataset(filtered_filename, decode_times=False).chunk({"time": 1})
+filter_length_scales = ds_filt.filter_length_scale.values
 print(f"  Pre-filtered fields loaded from: {filtered_filename}  ({time.time()-t0:.1f}s)")
+print(f"  Filter length scales: {filter_length_scales}")
 #---
 
-#+++ Calculate density fields
+#+++ Calculate scale-independent fields
 print("\n" + "="*60)
-print("Calculating density fields...")
+print("Calculating scale-independent fields...")
+
 t0 = time.time()
 ds_full = calculate_density_fields_from_buoyancy(ds_full, buoyancy_name="b", density_name="ρ")
-ds_filt = calculate_density_fields_from_buoyancy(ds_filt, buoyancy_name="b̄", density_name="ρ̄")
-print(f"Density fields calculated: ρ, Z, ρ̄  ({time.time()-t0:.1f}s)")
-#---
-
-#+++ Calculate local APE using precomputed_integral method
-print("\n" + "="*60)
-print("Calculating local APE...")
+print(f"  ρ calculated  ({time.time()-t0:.1f}s)")
 
 t0 = time.time()
-full_local_pes = local_potential_energies_timeseries(ds_full, density_name="ρ", rho_to_sort=ds_full.ρ, ape_method="precomputed_integral", use_numpy_version=True, n_workers=n_workers)
+full_local_pes = local_potential_energies_timeseries(ds_full, density_name="ρ", rho_to_sort=ds_full.ρ,
+                                                     ape_method="precomputed_integral",
+                                                     use_numpy_version=True, n_workers=n_workers)
 print(f"  full_local_pes  ({time.time()-t0:.1f}s)")
-
-t0 = time.time()
-filt_local_pes = local_potential_energies_timeseries(ds_filt, density_name="ρ̄", rho_to_sort=ds_full.ρ, ape_method="precomputed_integral", use_numpy_version=True, n_workers=n_workers)
-print(f"  filt_local_pes  ({time.time()-t0:.1f}s)")
 #---
 
-#+++ Filter local APE
+#+++ Loop over filter scales and calculate budget terms
 print("\n" + "="*60)
-print("Filtering local APE...")
-
-t0 = time.time()
-full_local_ape_filtered = gaussian_filter.apply(full_local_pes.ape, dims=filtered_dimensions)
-subfilter_local_ape = full_local_ape_filtered - filt_local_pes.ape
-print(f"Local APE filtered with length scale: {filter_length_scale}  ({time.time()-t0:.1f}s)")
-#---
-
-#+++ Calculate budget terms
-print("\n" + "="*60)
-print("Calculating budget terms...")
-
-t0 = time.time()
-cross_scale_ape_flux = calculate_cross_scale_ape_flux(ds_full.ρ, ds_full["uᵢ"], filt_local_pes.upsilon, gaussian_filter,
-    filter_dims=filtered_dimensions,
-    filtered_density=ds_filt.ρ̄,
-    filtered_velocity_vector=ds_filt["ūᵢ"],)
-print(f"  cross_scale_ape_flux  ({time.time()-t0:.1f}s)")
-
-t0 = time.time()
-sfs_ape_dissipation = calculate_sfs_ape_dissipation(ds_full.ρ, full_local_pes.upsilon, filt_local_pes.upsilon, ds.κ, gaussian_filter,
-    filter_dims=filtered_dimensions,
-    filtered_density=ds_filt.ρ̄,)
-print(f"  sfs_ape_dissipation  ({time.time()-t0:.1f}s)")
-
-t0 = time.time()
-ape_to_ke_exchange = calculate_ape_to_ke_exchange_term(
-    ds_full["uᵢ"].sel(i=3),   # full w
-    ds_full.b,                # full buoyancy
-    gaussian_filter,
-    filter_dims=filtered_dimensions,
-    filtered_w=ds_filt["ūᵢ"].sel(i=3),
-    filtered_b=ds_filt["b̄"],)
-print(f"  ape_to_ke_exchange  ({time.time()-t0:.1f}s)")
-
-t0 = time.time()
-R_s = calculate_sfs_R_correction(full_local_pes.rho_sorted, full_local_pes.z0, filt_local_pes.z0,
-                                  full_local_pes.dz_sorted, gaussian_filter, filter_dims=filtered_dimensions)
-print(f"  R_s  ({time.time()-t0:.1f}s)")
-#---
-
-#+++ Calculate SFS APE time derivatives
-t0 = time.time()
-dAPE_dt = calculate_sfs_ape_tendency(subfilter_local_ape)
-print(f"  dAPE_dt  ({time.time()-t0:.1f}s)")
-#---
-
-#+++ Integrate and budget
-print("\n" + "="*60)
-print("Integrating SFS APE budget terms...")
-t0 = time.time()
+print("Calculating budget terms for each filter scale...")
 
 dV = ds_full.dV
-int_dAPE_dt = integrate(dAPE_dt, dV)
+budget_list = []
 
-int_sfs_ape_dissipation = integrate(sfs_ape_dissipation.reindex(time=dAPE_dt.time), dV)
-int_cross_scale_ape_flux = integrate(cross_scale_ape_flux.reindex(time=dAPE_dt.time), dV)
-int_ape_to_ke_exchange = integrate(ape_to_ke_exchange.reindex(time=dAPE_dt.time), dV)
-int_R_s = integrate(R_s.reindex(time=dAPE_dt.time), dV)
+for ℓ in filter_length_scales:
+    print(f"\n--- filter_length_scale = {ℓ:.4f} ---")
 
-residual = -int_dAPE_dt - int_ape_to_ke_exchange + int_cross_scale_ape_flux - int_sfs_ape_dissipation + int_R_s
-print(f"Integration done  ({time.time()-t0:.1f}s)")
+    gaussian_filter = DaskParallelFilter(gcm_filters.Filter(
+        filter_scale=ℓ * np.sqrt(12),
+        dx_min=dx_min,
+        filter_shape=gcm_filters.FilterShape.GAUSSIAN,
+        grid_type=gcm_filters.GridType.REGULAR,
+    ), n_workers=n_workers)
+
+    ds_filt_ℓ = ds_filt.sel(filter_length_scale=ℓ).drop_vars("filter_length_scale")
+    ds_filt_ℓ["LxLy"] = ds["LxLy"]
+    ds_filt_ℓ.attrs.update(ds.attrs)
+
+    t0 = time.time()
+    ds_filt_ℓ = calculate_density_fields_from_buoyancy(ds_filt_ℓ, buoyancy_name="b̄", density_name="ρ̄")
+    print(f"  ρ̄ calculated  ({time.time()-t0:.1f}s)")
+
+    t0 = time.time()
+    filt_local_pes = local_potential_energies_timeseries(ds_filt_ℓ, density_name="ρ̄",
+                                                         rho_to_sort=ds_full.ρ,
+                                                         ape_method="precomputed_integral",
+                                                         use_numpy_version=True, n_workers=n_workers)
+    print(f"  filt_local_pes  ({time.time()-t0:.1f}s)")
+
+    t0 = time.time()
+    full_local_ape_filtered = gaussian_filter.apply(full_local_pes.ape, dims=filtered_dimensions)
+    subfilter_local_ape = full_local_ape_filtered - filt_local_pes.ape
+    print(f"  local APE filtered  ({time.time()-t0:.1f}s)")
+
+    t0 = time.time()
+    cross_scale_ape_flux = calculate_cross_scale_ape_flux(
+        ds_full.ρ, ds_full["uᵢ"], filt_local_pes.upsilon, gaussian_filter,
+        filter_dims=filtered_dimensions,
+        filtered_density=ds_filt_ℓ.ρ̄,
+        filtered_velocity_vector=ds_filt_ℓ["ūᵢ"],)
+    print(f"  cross_scale_ape_flux  ({time.time()-t0:.1f}s)")
+
+    t0 = time.time()
+    sfs_ape_dissipation = calculate_sfs_ape_dissipation(
+        ds_full.ρ, full_local_pes.upsilon, filt_local_pes.upsilon, ds.κ, gaussian_filter,
+        filter_dims=filtered_dimensions,
+        filtered_density=ds_filt_ℓ.ρ̄,)
+    print(f"  sfs_ape_dissipation  ({time.time()-t0:.1f}s)")
+
+    t0 = time.time()
+    ape_to_ke_exchange = calculate_ape_to_ke_exchange_term(
+        ds_full["uᵢ"].sel(i=3),
+        ds_full.b,
+        gaussian_filter,
+        filter_dims=filtered_dimensions,
+        filtered_w=ds_filt_ℓ["ūᵢ"].sel(i=3),
+        filtered_b=ds_filt_ℓ["b̄"],)
+    print(f"  ape_to_ke_exchange  ({time.time()-t0:.1f}s)")
+
+    t0 = time.time()
+    R_s = calculate_sfs_R_correction(full_local_pes.rho_sorted, full_local_pes.z0, filt_local_pes.z0,
+                                      full_local_pes.dz_sorted, gaussian_filter,
+                                      filter_dims=filtered_dimensions)
+    print(f"  R_s  ({time.time()-t0:.1f}s)")
+
+    dAPE_dt = calculate_sfs_ape_tendency(subfilter_local_ape)
+
+    int_dAPE_dt              = integrate(dAPE_dt, dV)
+    int_sfs_ape_dissipation  = integrate(sfs_ape_dissipation.reindex(time=dAPE_dt.time), dV)
+    int_cross_scale_ape_flux = integrate(cross_scale_ape_flux.reindex(time=dAPE_dt.time), dV)
+    int_ape_to_ke_exchange   = integrate(ape_to_ke_exchange.reindex(time=dAPE_dt.time), dV)
+    int_R_s                  = integrate(R_s.reindex(time=dAPE_dt.time), dV)
+    residual = -int_dAPE_dt - int_ape_to_ke_exchange + int_cross_scale_ape_flux - int_sfs_ape_dissipation + int_R_s
+
+    budget_ℓ = xr.Dataset({
+        # Density fields
+        "ρ̄": ds_filt_ℓ.ρ̄,
+        # Reference heights
+        "z₀(ρ)": full_local_pes.z0,
+        "z₀(ρ̄)": filt_local_pes.z0,
+        # Buoyancy displacement potentials
+        "Υ": full_local_pes.upsilon,
+        "Υˡ": filt_local_pes.upsilon,
+        # Local APE fields
+        "Ea(ρ, z)": full_local_pes.ape,
+        "Ea(ρ̄, z)": filt_local_pes.ape,
+        "Ēa(ρ, z)": full_local_ape_filtered,
+        "Eaˢ(ρ, z)": subfilter_local_ape,
+        # Local budget terms
+        "∂ₜ SFS APE": dAPE_dt,
+        "Π_APE": cross_scale_ape_flux,
+        "χₛ": sfs_ape_dissipation,
+        "SFS KE->APE exchange": -ape_to_ke_exchange,
+        "Rˢ": R_s,
+        # Integrated budget terms
+        "∫-∂ₜ SFS APE dV": -int_dAPE_dt,
+        "∫Π_APE dV": int_cross_scale_ape_flux,
+        "∫-χₛ dV": -int_sfs_ape_dissipation,
+        "∫(SFS KE->APE) dV": -int_ape_to_ke_exchange,
+        "∫Rˢ dV": int_R_s,
+        "residual_APE": residual,
+    }).reindex(time=dAPE_dt.time)
+
+    budget_list.append(budget_ℓ)
+
+sfs_ape_budget_terms = xr.concat(budget_list,
+                                  dim=xr.DataArray(filter_length_scales,
+                                                   dims="filter_length_scale",
+                                                   name="filter_length_scale"))
+# Scale-independent fields don't need filter_length_scale dimension
+sfs_ape_budget_terms["ρ"] = ds_full.ρ
+print("\nDone!")
 #---
 
 #+++ Save results
 print("\n" + "="*60)
 print("Saving results...")
-t0 = time.time()
-
-sfs_ape_budget_terms = xr.Dataset({
-    # Density fields
-    "ρ": ds_full.ρ,
-    "ρ̄": ds_filt.ρ̄,
-    # Reference heights
-    "z₀(ρ)": full_local_pes.z0,
-    "z₀(ρ̄)": filt_local_pes.z0,
-    # Buoyancy displacement potentials
-    "Υ": full_local_pes.upsilon,
-    "Υˡ": filt_local_pes.upsilon,
-    # Local APE fields
-    "Ea(ρ, z)": full_local_pes.ape,
-    "Ea(ρ̄, z)": filt_local_pes.ape,
-    "Ēa(ρ, z)": full_local_ape_filtered,
-    "Eaˢ(ρ, z)": subfilter_local_ape,
-    # Local budget terms
-    "∂ₜ SFS APE": dAPE_dt,
-    "Π_APE": cross_scale_ape_flux,
-    "χₛ": sfs_ape_dissipation,
-    "SFS KE->APE exchange": -ape_to_ke_exchange,
-    "Rˢ": R_s,
-    # Integrated budget terms
-    "∫-∂ₜ SFS APE dV": -int_dAPE_dt,
-    "∫Π_APE dV": int_cross_scale_ape_flux,
-    "∫-χₛ dV": -int_sfs_ape_dissipation,
-    "∫(SFS KE->APE) dV": -int_ape_to_ke_exchange, # Flip the sign to make plotting easier
-    "∫Rˢ dV": int_R_s,
-    "residual_APE": residual,
-})
-sfs_ape_budget_terms = sfs_ape_budget_terms.reindex(time=dAPE_dt.time)
 
 output_filename = filename.replace(".nc", "_sfs_ape_budget.nc")
-sfs_ape_budget_terms.to_netcdf(output_filename)
-print(f"Results saved to: {output_filename}  ({time.time()-t0:.1f}s)")
+with ProgressBar():
+    sfs_ape_budget_terms.to_netcdf(output_filename)
+print(f"\nResults saved to: {output_filename}")
 #---
 
 #+++ Plot integrated budget terms
 print("\n" + "="*60)
 print("Creating plots...")
-t0 = time.time()
+print("="*60)
 
 import matplotlib.pyplot as plt
-fig, ax = plt.subplots(figsize=(10, 6), constrained_layout=True)
 
 integrated_vars = {
     "∫-∂ₜ SFS APE dV":    budget_colors["tendency"],
@@ -217,13 +221,19 @@ integrated_vars = {
     "∫Rˢ dV":              "C4",
     "residual_APE":         budget_colors["residual"],
 }
-for var, color in integrated_vars.items():
-    sfs_ape_budget_terms[var].dropna("time").plot.line(ax=ax, x="time", label=var, color=color)
+
+for ℓ in filter_length_scales:
+    fig, ax = plt.subplots(figsize=(10, 6), constrained_layout=True)
+    for var, color in integrated_vars.items():
+        sfs_ape_budget_terms[var].sel(filter_length_scale=ℓ).dropna("time").plot.line(
+            ax=ax, x="time", label=var, color=color)
     ax.legend()
-ax.set_ylabel("Budget Terms [W or J s⁻¹]")
-ax.set_title("Integrated SFS APE Budget Terms")
-ax.grid(True, alpha=0.3)
-plot_filename = str(REPO_ROOT / "figures" / os.path.basename(output_filename).replace(".nc", ".png"))
-fig.savefig(plot_filename, dpi=150, bbox_inches="tight")
-print(f"Budget timeseries plot saved to: {plot_filename}  ({time.time()-t0:.1f}s)")
+    ax.set_ylabel("Budget Terms [W or J s⁻¹]")
+    ax.set_title(f"Integrated SFS APE Budget Terms  (ℓ = {ℓ:.4f})")
+    ax.grid(True, alpha=0.3)
+    plot_filename = str(REPO_ROOT / "figures" / os.path.basename(output_filename).replace(
+        ".nc", f"_l{ℓ:.4f}.png"))
+    fig.savefig(plot_filename, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Plot saved to: {plot_filename}")
 #---
