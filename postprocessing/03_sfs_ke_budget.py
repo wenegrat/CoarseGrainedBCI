@@ -5,7 +5,8 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 import gcm_filters
-from aux00_utils import load_dataset_and_grid, condense_velocities, integrate, DaskParallelFilter
+from dask.diagnostics.progress import ProgressBar
+from aux00_utils import load_dataset_and_grid, condense_velocities, integrate
 from aux03_plotting import budget_colors
 from aux01_pe_functions import calculate_ape_to_ke_exchange_term
 from aux02_ke_functions import (
@@ -22,18 +23,16 @@ import argparse
 parser = argparse.ArgumentParser(description="Calculate SFS KE budget from Kelvin-Helmholtz simulation output")
 parser.add_argument("--filename", default="output/khi_128x1x256.nc",
                     help="Path to simulation NetCDF file")
-parser.add_argument("--n-workers", type=int, default=18,
-                    help="Number of CPU workers for parallel filtering")
 args = parser.parse_args()
 REPO_ROOT = Path(__file__).resolve().parent.parent
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
-n_workers = args.n_workers
 #---
 
 #+++ Load data and grid
 print("\n" + "="*60)
 print("Loading data and grid...")
 ds = load_dataset_and_grid(filename)
+ds = ds.chunk({"time": 1})
 print(f"Dataset loaded: {len(ds.time)} time steps")
 #---
 
@@ -48,7 +47,7 @@ ds = condense_velocities(ds, indices=[1, 2, 3])  # uᵢ with i dimension
 ds_full = ds[["b", "dV", "uᵢ"]].copy()
 
 filtered_filename = filename.replace(".nc", "_filtered_velocities.nc")
-ds_filt = xr.open_dataset(filtered_filename, decode_times=False)
+ds_filt = xr.open_dataset(filtered_filename, decode_times=False).chunk({"time": 1})
 filter_length_scales = ds_filt.filter_length_scale.values
 
 print(f"Pre-filtered fields loaded from: {filtered_filename}")
@@ -72,12 +71,12 @@ budget_list = []
 for ℓ in filter_length_scales:
     print(f"\n--- filter_length_scale = {ℓ:.4f} ---")
 
-    gaussian_filter = DaskParallelFilter(gcm_filters.Filter(
+    gaussian_filter = gcm_filters.Filter(
         filter_scale=ℓ * np.sqrt(12),
         dx_min=dx_min,
         filter_shape=gcm_filters.FilterShape.GAUSSIAN,
         grid_type=gcm_filters.GridType.REGULAR,
-    ), n_workers=n_workers)
+    )
 
     ds_filt_ℓ = ds_filt.sel(filter_length_scale=ℓ)
 
@@ -152,7 +151,8 @@ print("\n" + "="*60)
 print("Saving results...")
 
 output_filename = filename.replace(".nc", "_sfs_ke_budget.nc")
-sfs_ke_budget_terms.to_netcdf(output_filename)
+with ProgressBar():
+    sfs_ke_budget_terms.to_netcdf(output_filename)
 print(f"\nResults saved to: {output_filename}")
 #---
 
