@@ -7,7 +7,7 @@ import numpy as np
 import xarray as xr
 import gcm_filters
 from dask.diagnostics.progress import ProgressBar
-from aux00_utils import load_dataset_and_grid, condense_velocities, integrate, DaskParallelFilter
+from aux00_utils import load_dataset_and_grid, condense_velocities, integrate
 from aux01_pe_functions import (
     calculate_density_fields_from_buoyancy,
     local_potential_energies_timeseries,
@@ -25,12 +25,9 @@ import argparse
 parser = argparse.ArgumentParser(description="Calculate cross-scale KE and APE transfer terms")
 parser.add_argument("--filename", default="output/khi_128x1x256.nc",
                     help="Path to simulation NetCDF file")
-parser.add_argument("--n-workers", type=int, default=18,
-                    help="Number of CPU workers for APE sorting")
 args = parser.parse_args()
 REPO_ROOT = Path(__file__).resolve().parent.parent
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
-n_workers = args.n_workers
 #---
 
 #+++ Load data and grid
@@ -84,12 +81,12 @@ transfer_list = []
 for ℓ in filter_length_scales:
     print(f"\n--- filter_length_scale = {ℓ:.4f} ---")
 
-    gaussian_filter = DaskParallelFilter(gcm_filters.Filter(
+    gaussian_filter = gcm_filters.Filter(
         filter_scale=ℓ * np.sqrt(12),
         dx_min=dx_min,
         filter_shape=gcm_filters.FilterShape.GAUSSIAN,
         grid_type=gcm_filters.GridType.REGULAR,
-    ), n_workers=n_workers)
+    )
 
     ds_filt_ℓ = ds_filt.sel(filter_length_scale=ℓ).drop_vars("filter_length_scale")
     ds_filt_ℓ["LxLy"] = ds["LxLy"]
@@ -113,7 +110,7 @@ for ℓ in filter_length_scales:
     filt_local_pes = local_potential_energies_timeseries(ds_filt_ℓ, density_name="ρ̄",
                                                          rho_to_sort=ds_full.ρ,
                                                          ape_method="precomputed_integral",
-                                                         use_numpy_version=True, n_workers=n_workers)
+                                                         use_numpy_version=True)
     # Π_APE = -(filter(ρuᵢ) - ρ̄ūᵢ) · ∇Υˡ
     Π_APE = calculate_cross_scale_ape_flux(ds_full.ρ, ds_full["uᵢ"], filt_local_pes.upsilon,
                                             gaussian_filter, filter_dims=filtered_dimensions,
