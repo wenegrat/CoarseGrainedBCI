@@ -11,7 +11,7 @@ import numpy as np
 import xarray as xr
 import gcm_filters
 from dask.diagnostics.progress import ProgressBar
-from aux00_utils import load_dataset_and_grid, condense_velocities, integrate, DaskParallelFilter
+from aux00_utils import load_dataset_and_grid, condense_velocities, integrate
 from aux03_plotting import budget_colors
 from aux01_pe_functions import (
     calculate_density_fields_from_buoyancy,
@@ -29,7 +29,7 @@ parser = argparse.ArgumentParser(description="Calculate SFS APE budget from Kelv
 parser.add_argument("--filename", default="output/khi_128x1x256.nc",
                     help="Path to simulation NetCDF file")
 parser.add_argument("--n-workers", type=int, default=18,
-                    help="Number of CPU workers for APE sorting")
+                    help="Number of CPU workers for APE sorting (ThreadPoolExecutor)")
 args = parser.parse_args()
 REPO_ROOT = Path(__file__).resolve().parent.parent
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
@@ -91,12 +91,12 @@ budget_list = []
 for ℓ in filter_length_scales:
     print(f"\n--- filter_length_scale = {ℓ:.4f} ---")
 
-    gaussian_filter = DaskParallelFilter(gcm_filters.Filter(
+    gaussian_filter = gcm_filters.Filter(
         filter_scale=ℓ * np.sqrt(12),
         dx_min=dx_min,
         filter_shape=gcm_filters.FilterShape.GAUSSIAN,
         grid_type=gcm_filters.GridType.REGULAR,
-    ), n_workers=n_workers)
+    )
 
     ds_filt_ℓ = ds_filt.sel(filter_length_scale=ℓ).drop_vars("filter_length_scale")
     ds_filt_ℓ["LxLy"] = ds["LxLy"]

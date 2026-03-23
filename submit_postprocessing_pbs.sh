@@ -29,7 +29,7 @@ time /glade/u/home/tomasc/miniconda3/envs/py313/bin/python -u postprocessing/01_
 qstat -f $PBS_JOBID >> logs/01_filter_fields_2916x1x4096.log
 qstat -f $PBS_JOBID >> logs/01_filter_fields_2916x1x4096.out
 
-time /glade/u/home/tomasc/miniconda3/envs/py313/bin/python -u postprocessing/02_energy_transfer.py --filename output/khi_2916x1x4096.nc 2>&1 | tee logs/02_energy_transfer_2916x1x4096.out
+time /glade/u/home/tomasc/miniconda3/envs/py313/bin/python -u postprocessing/02_energy_transfer.py --filename output/khi_2916x1x4096.nc --n-workers 18 2>&1 | tee logs/02_energy_transfer_2916x1x4096.out
 qstat -f $PBS_JOBID >> logs/02_energy_transfer_2916x1x4096.log
 qstat -f $PBS_JOBID >> logs/02_energy_transfer_2916x1x4096.out
 
@@ -37,6 +37,6 @@ qstat -f $PBS_JOBID >> logs/02_energy_transfer_2916x1x4096.out
 # qstat -f $PBS_JOBID >> logs/03_sfs_ke_budget_2916x1x4096.log
 # qstat -f $PBS_JOBID >> logs/03_sfs_ke_budget_2916x1x4096.out
 
-# time /glade/u/home/tomasc/miniconda3/envs/py313/bin/python -u postprocessing/04_sfs_ape_budget.py --filename output/khi_2916x1x4096.nc 2>&1 | tee logs/04_sfs_ape_budget_2916x1x4096.out
+# time /glade/u/home/tomasc/miniconda3/envs/py313/bin/python -u postprocessing/04_sfs_ape_budget.py --filename output/khi_2916x1x4096.nc --n-workers 18 2>&1 | tee logs/04_sfs_ape_budget_2916x1x4096.out
 # qstat -f $PBS_JOBID >> logs/04_sfs_ape_budget_2916x1x4096.log
 # qstat -f $PBS_JOBID >> logs/04_sfs_ape_budget_2916x1x4096.out
