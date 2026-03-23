@@ -18,7 +18,6 @@ from aux01_pe_functions import (
     local_potential_energies_timeseries,
     calculate_sfs_ape_tendency,
     calculate_sfs_R_correction,
-    calculate_cross_scale_ape_flux,
     calculate_sfs_ape_dissipation,
     calculate_ape_to_ke_exchange_term,
 )
@@ -83,6 +82,9 @@ print(f"  full_local_pes  ({time.time()-t0:.1f}s)")
 print("\n" + "="*60)
 print("Calculating budget terms for each filter scale...")
 
+energy_transfer_filename = filename.replace(".nc", "_energy_transfer.nc")
+energy_transfer = xr.open_dataset(energy_transfer_filename, decode_timedelta=False).chunk({"time": 1})
+
 dV = ds_full.dV
 budget_list = []
 
@@ -117,14 +119,6 @@ for ℓ in filter_length_scales:
     print(f"  local APE filtered  ({time.time()-t0:.1f}s)")
 
     t0 = time.time()
-    cross_scale_ape_flux = calculate_cross_scale_ape_flux(
-        ds_full.ρ, ds_full["uᵢ"], filt_local_pes.upsilon, gaussian_filter,
-        filter_dims=filtered_dimensions,
-        filtered_density=ds_filt_ℓ.ρ̄,
-        filtered_velocity_vector=ds_filt_ℓ["ūᵢ"],)
-    print(f"  cross_scale_ape_flux  ({time.time()-t0:.1f}s)")
-
-    t0 = time.time()
     sfs_ape_dissipation = calculate_sfs_ape_dissipation(
         ds_full.ρ, full_local_pes.upsilon, filt_local_pes.upsilon, ds.κ, gaussian_filter,
         filter_dims=filtered_dimensions,
@@ -151,10 +145,16 @@ for ℓ in filter_length_scales:
 
     int_dAPE_dt              = integrate(dAPE_dt, dV)
     int_sfs_ape_dissipation  = integrate(sfs_ape_dissipation.reindex(time=dAPE_dt.time), dV)
-    int_cross_scale_ape_flux = integrate(cross_scale_ape_flux.reindex(time=dAPE_dt.time), dV)
     int_ape_to_ke_exchange   = integrate(ape_to_ke_exchange.reindex(time=dAPE_dt.time), dV)
     int_R_s                  = integrate(R_s.reindex(time=dAPE_dt.time), dV)
-    residual = -int_dAPE_dt - int_ape_to_ke_exchange + int_cross_scale_ape_flux - int_sfs_ape_dissipation + int_R_s
+
+    Π_APE_ℓ     = energy_transfer["Π_APE"].sel(filter_length_scale=ℓ)
+    int_Π_APE_ℓ = energy_transfer["∫Π_APE dV"].sel(filter_length_scale=ℓ)
+    residual = (-int_dAPE_dt
+                - int_ape_to_ke_exchange
+                + int_Π_APE_ℓ.reindex(time=dAPE_dt.time)
+                - int_sfs_ape_dissipation
+                + int_R_s)
 
     budget_ℓ = xr.Dataset({
         # Density fields
@@ -172,13 +172,13 @@ for ℓ in filter_length_scales:
         "Eaˢ(ρ, z)": subfilter_local_ape,
         # Local budget terms
         "∂ₜ SFS APE": dAPE_dt,
-        "Π_APE": cross_scale_ape_flux,
+        "Π_APE": Π_APE_ℓ,
         "χₛ": sfs_ape_dissipation,
         "SFS KE->APE exchange": -ape_to_ke_exchange,
         "Rˢ": R_s,
         # Integrated budget terms
         "∫-∂ₜ SFS APE dV": -int_dAPE_dt,
-        "∫Π_APE dV": int_cross_scale_ape_flux,
+        "∫Π_APE dV": int_Π_APE_ℓ,
         "∫-χₛ dV": -int_sfs_ape_dissipation,
         "∫(SFS KE->APE) dV": -int_ape_to_ke_exchange,
         "∫Rˢ dV": int_R_s,

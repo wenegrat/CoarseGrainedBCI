@@ -13,7 +13,6 @@ from aux02_ke_functions import (
     calculate_sfs_stress_tensor,
     calculate_strain_tensor,
     calculate_sfs_ke_dissipation,
-    calculate_cross_scale_ke_flux,
     calculate_sfs_ke_tendency,
 )
 #---
@@ -65,6 +64,9 @@ print("Done!")
 print("\n" + "="*60)
 print("Calculating budget terms for each filter scale...")
 
+energy_transfer_filename = filename.replace(".nc", "_energy_transfer.nc")
+energy_transfer = xr.open_dataset(energy_transfer_filename, decode_timedelta=False).chunk({"time": 1})
+
 dV = ds_full.dV
 budget_list = []
 
@@ -90,13 +92,6 @@ for ℓ in filter_length_scales:
                                + sfs_stress_tensor.sel(i=3, j=3))
     sfs_ke_density = sfs_stress_tensor_trace / 2
 
-    print("  Strain rate tensor of filtered flow...")
-    strain_rate_tensor_l = calculate_strain_tensor(ds_filt_ℓ["ūᵢ"])
-
-    # Πℓ = -ρ₀ τⁱʲ : S̄ⁱʲ  [m² s⁻³]
-    print("  Cross-scale KE flux...")
-    cross_scale_ke_flux = calculate_cross_scale_ke_flux(sfs_stress_tensor, strain_rate_tensor_l)
-
     # ε<ℓ = 2ρ₀ν τ(S, S) = 2ρ₀ν Σᵢⱼ [ filter(Sⁱʲ Sⁱʲ) - filter(Sⁱʲ)² ]   [m² s⁻³]
     print("  SFS KE dissipation...")
     sfs_ke_dissipation = calculate_sfs_ke_dissipation(strain_rate_tensor, ds.ν, gaussian_filter,
@@ -115,23 +110,28 @@ for ℓ in filter_length_scales:
     # ∂KE_s/∂t   centred finite difference, staggered time grid
     dKE_dt = calculate_sfs_ke_tendency(sfs_ke_density)
 
-    int_dKE_dt           = integrate(dKE_dt, dV)
+    int_dKE_dt             = integrate(dKE_dt, dV)
     int_ape_to_ke_exchange = integrate(ape_to_ke_exchange.reindex(time=dKE_dt.time), dV)
-    int_cross_scale_ke_flux  = integrate(cross_scale_ke_flux.reindex(time=dKE_dt.time), dV)
     int_sfs_ke_dissipation = integrate(sfs_ke_dissipation.reindex(time=dKE_dt.time), dV)
-    residual = -int_dKE_dt + int_ape_to_ke_exchange + int_cross_scale_ke_flux - int_sfs_ke_dissipation
+
+    Π_KE_ℓ       = energy_transfer["Π_KE"].sel(filter_length_scale=ℓ)
+    int_Π_KE_ℓ   = energy_transfer["∫Π_KE dV"].sel(filter_length_scale=ℓ)
+    residual = (-int_dKE_dt
+                + int_Π_KE_ℓ.reindex(time=dKE_dt.time)
+                + int_ape_to_ke_exchange
+                - int_sfs_ke_dissipation)
 
     budget_ℓ = xr.Dataset({
         # Local KE fields
         "KE_of_sfs_flow": sfs_ke_density,
         # Local budget terms
         "∂ₜ SFS KE": dKE_dt,
-        "Π_KE": cross_scale_ke_flux,
+        "Π_KE": Π_KE_ℓ,
         "εₛ": sfs_ke_dissipation,
         "SFS APE->KE exchange": ape_to_ke_exchange,
         # Integrated budget terms
         "∫-∂ₜ SFS KE dV": -int_dKE_dt,
-        "∫Π_KE dV": int_cross_scale_ke_flux,
+        "∫Π_KE dV": int_Π_KE_ℓ,
         "∫-εₛ dV": -int_sfs_ke_dissipation,
         "∫(SFS APE->KE) dV": int_ape_to_ke_exchange,
         "residual_KE": residual,
