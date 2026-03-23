@@ -151,17 +151,6 @@ simulation.output_writers[:fields] =
                  global_attributes = params,
                  overwrite_existing = true)
 
-output_filename_2d = "output/khi_$(params.Nx)x$(params.Ny)x$(params.Nz)_2d.nc"
-simulation.output_writers[:twod_fields] =
-NetCDFWriter(model, outputs,
-            schedule = TimeInterval(2),
-            filename = output_filename_2d,
-            array_type = Array{Float32},
-            indices = (:, 1, :),
-            global_attributes = params,
-            overwrite_existing = true)
-
-
 @info "Output will be saved to: $(output_filename).nc"
 #---
 
@@ -173,7 +162,7 @@ run!(simulation)
 #+++ Load and plot results
 @info "Creating animation..."
 
-filepath = simulation.output_writers[:twod_fields].filepath
+filepath = simulation.output_writers[:fields].filepath
 
 ω_timeseries = FieldTimeSeries(filepath, "ω", architecture=CPU())
 b_timeseries = FieldTimeSeries(filepath, "b", architecture=CPU())
