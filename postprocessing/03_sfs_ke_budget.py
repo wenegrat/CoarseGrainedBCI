@@ -114,12 +114,9 @@ for ℓ in filter_length_scales:
     int_ape_to_ke_exchange = integrate(ape_to_ke_exchange.reindex(time=dKE_dt.time), dV)
     int_sfs_ke_dissipation = integrate(sfs_ke_dissipation.reindex(time=dKE_dt.time), dV)
 
-    Π_KE_ℓ       = energy_transfer["Π_KE"].sel(filter_length_scale=ℓ)
-    int_Π_KE_ℓ   = energy_transfer["∫Π_KE dV"].sel(filter_length_scale=ℓ)
-    residual = (-int_dKE_dt
-                + int_Π_KE_ℓ.reindex(time=dKE_dt.time)
-                + int_ape_to_ke_exchange
-                - int_sfs_ke_dissipation)
+    Π_KE_ℓ     = energy_transfer["Π_KE"].sel(filter_length_scale=ℓ)
+    int_Π_KE_ℓ = energy_transfer["∫Π_KE dV"].sel(filter_length_scale=ℓ)
+    residual   = -int_dKE_dt + int_Π_KE_ℓ.reindex(time=dKE_dt.time) + int_ape_to_ke_exchange - int_sfs_ke_dissipation
 
     budget_ℓ = xr.Dataset({
         # Local KE fields
@@ -139,10 +136,9 @@ for ℓ in filter_length_scales:
 
     budget_list.append(budget_ℓ)
 
-sfs_ke_budget_terms = xr.concat(budget_list,
-                                 dim=xr.DataArray(filter_length_scales,
-                                                  dims="filter_length_scale",
-                                                  name="filter_length_scale"))
+sfs_ke_budget_terms = xr.concat(budget_list, dim=xr.DataArray(filter_length_scales,
+                                                              dims="filter_length_scale",
+                                                              name="filter_length_scale"))
 print("\nDone!")
 #---
 
@@ -165,10 +161,10 @@ import matplotlib.pyplot as plt
 
 integrated_vars = {
     "∫-∂ₜ SFS KE dV":    budget_colors["tendency"],
-    "∫Π_KE dV":           budget_colors["flux"],
-    "∫-εₛ dV":            budget_colors["dissipation"],
-    "∫(SFS APE->KE) dV":  budget_colors["exchange"],
-    "residual_KE":         budget_colors["residual"],
+    "∫Π_KE dV":          budget_colors["flux"],
+    "∫-εₛ dV":           budget_colors["dissipation"],
+    "∫(SFS APE->KE) dV": budget_colors["exchange"],
+    "residual_KE":       budget_colors["residual"],
 }
 
 for ℓ in filter_length_scales:

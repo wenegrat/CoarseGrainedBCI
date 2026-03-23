@@ -137,24 +137,20 @@ for ℓ in filter_length_scales:
 
     t0 = time.time()
     R_s = calculate_sfs_R_correction(full_local_pes.rho_sorted, full_local_pes.z0, filt_local_pes.z0,
-                                      full_local_pes.dz_sorted, gaussian_filter,
-                                      filter_dims=filtered_dimensions)
+                                     full_local_pes.dz_sorted, gaussian_filter,
+                                     filter_dims=filtered_dimensions)
     print(f"  R_s  ({time.time()-t0:.1f}s)")
 
     dAPE_dt = calculate_sfs_ape_tendency(subfilter_local_ape)
 
-    int_dAPE_dt              = integrate(dAPE_dt, dV)
-    int_sfs_ape_dissipation  = integrate(sfs_ape_dissipation.reindex(time=dAPE_dt.time), dV)
-    int_ape_to_ke_exchange   = integrate(ape_to_ke_exchange.reindex(time=dAPE_dt.time), dV)
-    int_R_s                  = integrate(R_s.reindex(time=dAPE_dt.time), dV)
+    int_dAPE_dt             = integrate(dAPE_dt, dV)
+    int_sfs_ape_dissipation = integrate(sfs_ape_dissipation.reindex(time=dAPE_dt.time), dV)
+    int_ape_to_ke_exchange  = integrate(ape_to_ke_exchange.reindex(time=dAPE_dt.time), dV)
+    int_R_s                 = integrate(R_s.reindex(time=dAPE_dt.time), dV)
 
     Π_APE_ℓ     = energy_transfer["Π_APE"].sel(filter_length_scale=ℓ)
     int_Π_APE_ℓ = energy_transfer["∫Π_APE dV"].sel(filter_length_scale=ℓ)
-    residual = (-int_dAPE_dt
-                - int_ape_to_ke_exchange
-                + int_Π_APE_ℓ.reindex(time=dAPE_dt.time)
-                - int_sfs_ape_dissipation
-                + int_R_s)
+    residual    = -int_dAPE_dt - int_ape_to_ke_exchange + int_Π_APE_ℓ.reindex(time=dAPE_dt.time) - int_sfs_ape_dissipation + int_R_s
 
     budget_ℓ = xr.Dataset({
         # Density fields
@@ -187,10 +183,9 @@ for ℓ in filter_length_scales:
 
     budget_list.append(budget_ℓ)
 
-sfs_ape_budget_terms = xr.concat(budget_list,
-                                  dim=xr.DataArray(filter_length_scales,
-                                                   dims="filter_length_scale",
-                                                   name="filter_length_scale"))
+sfs_ape_budget_terms = xr.concat(budget_list, dim=xr.DataArray(filter_length_scales,
+                                                               dims="filter_length_scale",
+                                                               name="filter_length_scale"))
 # Scale-independent fields don't need filter_length_scale dimension
 sfs_ape_budget_terms["ρ"] = ds_full.ρ
 print("\nDone!")
