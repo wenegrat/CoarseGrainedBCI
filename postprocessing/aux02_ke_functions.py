@@ -6,7 +6,12 @@ This module contains functions for calculating kinetic energy (KE).
 
 import numpy as np
 import xarray as xr
-from aux00_utils import integrate, calculate_gradient
+from aux00_utils import (integrate, calculate_gradient,
+                         condense_velocities, condense_uw_velocities,
+                         make_gaussian_filter, filter_fields)
+from aux01_pe_functions import (calculate_density_fields_from_buoyancy,
+                                local_potential_energies_timeseries,
+                                calculate_cross_scale_ape_flux)
 
 # Physical constants
 ρ0 = 1025  # reference density [kg/m^3]
@@ -384,4 +389,93 @@ def integrated_KE_timeseries(ds, verbose=False, u_name="u", v_name="v", w_name="
                       dV_name=dV_name, x_dim=x_dim, y_dim=y_dim, z_dim=z_dim)
     if verbose: print("\nDone!")
     return KE
+#---
+
+#+++ Cross-scale energy transfer pipeline
+def calculate_energy_transfer(ds, filter_length_scales, filter_in_2d=True,
+                               ds_filt=None, n_workers=18):
+    """Calculate cross-scale KE and APE transfer terms at each filter scale.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        Full (unfiltered) simulation dataset. Must contain velocity components
+        (u,v,w or u,w), buoyancy b, and grid variables dV, LxLy.
+    filter_length_scales : array-like
+        Physical length scales at which to compute the transfer terms.
+    filter_in_2d : bool
+        If True, filter in x and y (3D). If False, filter in x only (xz).
+    ds_filt : xr.Dataset, optional
+        Pre-computed filtered fields (ūᵢ, b̄) indexed by filter_length_scale.
+        If None, filter_fields() is called internally.
+    n_workers : int
+        Number of threads for APE sorting (ThreadPoolExecutor).
+
+    Returns
+    -------
+    xr.Dataset
+        Dataset with Π_KE, Π_APE, ∫Π_KE dV, ∫Π_APE dV indexed by
+        filter_length_scale.
+    """
+    filtered_dimensions = ["x_caa", "y_aca"]
+    tensor_dimensions   = ("x_caa", "y_aca", "z_aac") if filter_in_2d else ("x_caa", "z_aac")
+
+    if ds_filt is None:
+        ds_filt = filter_fields(ds, filter_length_scales, filter_in_2d)
+
+    if filter_in_2d:
+        ds = condense_velocities(ds, indices=(1, 2, 3))
+    else:
+        ds = condense_uw_velocities(ds, indices=(1, 3))
+    ds_full = ds[["b", "dV", "LxLy", "uᵢ"]].copy()
+
+    ds_full = calculate_density_fields_from_buoyancy(ds_full, buoyancy_name="b", density_name="ρ")
+    strain_rate_tensor = calculate_strain_tensor(ds_full["uᵢ"], dimensions=tensor_dimensions)
+
+    dV = ds_full.dV
+    transfer_list = []
+
+    for ℓ in filter_length_scales:
+        print(f"\n--- filter_length_scale = {ℓ:.4f} ---")
+        gaussian_filter = make_gaussian_filter(ℓ, ds, filter_in_2d)
+
+        ds_filt_ℓ = ds_filt.sel(filter_length_scale=ℓ).drop_vars("filter_length_scale")
+        ds_filt_ℓ["LxLy"] = ds["LxLy"]
+        ds_filt_ℓ.attrs.update(ds.attrs)
+
+        # --- KE cross-scale transfer ---
+        # τⁱʲ = filter(uⁱuʲ) - ūⁱūʲ
+        sfs_stress_tensor = calculate_sfs_stress_tensor(ds_full["uᵢ"], gaussian_filter,
+                                                        filter_dims=filtered_dimensions,
+                                                        filtered_u_i=ds_filt_ℓ["ūᵢ"])
+        strain_rate_tensor_l = calculate_strain_tensor(ds_filt_ℓ["ūᵢ"], dimensions=tensor_dimensions)
+        # Π_KE = -τⁱʲ : S̄ⁱʲ
+        Π_KE = calculate_cross_scale_ke_flux(sfs_stress_tensor, strain_rate_tensor_l)
+
+        # --- APE cross-scale transfer ---
+        # Compute ρ̄ and the large-scale reference state z₀(ρ̄) → Υˡ
+        ds_filt_ℓ = calculate_density_fields_from_buoyancy(ds_filt_ℓ, buoyancy_name="b̄", density_name="ρ̄")
+        filt_local_pes = local_potential_energies_timeseries(ds_filt_ℓ, density_name="ρ̄",
+                                                             rho_to_sort=ds_full.ρ,
+                                                             ape_method="precomputed_integral",
+                                                             use_numpy_version=True, n_workers=n_workers)
+        # Π_APE = -(filter(ρuᵢ) - ρ̄ūᵢ) · ∇Υˡ
+        Π_APE = calculate_cross_scale_ape_flux(ds_full.ρ, ds_full["uᵢ"], filt_local_pes.upsilon,
+                                               gaussian_filter, filter_dims=filtered_dimensions,
+                                               filtered_density=ds_filt_ℓ.ρ̄,
+                                               filtered_velocity_vector=ds_filt_ℓ["ūᵢ"])
+
+        int_Π_KE  = integrate(Π_KE, dV)
+        int_Π_APE = integrate(Π_APE, dV)
+
+        transfer_list.append(xr.Dataset({
+            "Π_KE":       Π_KE,
+            "Π_APE":      Π_APE,
+            "∫Π_KE dV":  int_Π_KE,
+            "∫Π_APE dV": int_Π_APE,
+        }))
+
+    scale_coord = xr.DataArray(filter_length_scales, dims="filter_length_scale",
+                               name="filter_length_scale")
+    return xr.concat(transfer_list, dim=scale_coord)
 #---
