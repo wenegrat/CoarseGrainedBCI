@@ -80,6 +80,10 @@ def condense(ds, vlist, varname, dimname="i", indices=(1, 2, 3)):
 def condense_velocities(ds, dimname="i", indices=(1, 2, 3)):
     """Condense velocity components into tensor form"""
     return condense(ds, ["u", "v", "w"], "uᵢ", dimname=dimname, indices=indices)
+
+def condense_uw_velocities(ds, dimname="i", indices=(1, 3)):
+    """Condense u and w velocity components into tensor form (for 2D simulations)"""
+    return condense(ds, ["u", "w"], "uᵢ", dimname=dimname, indices=indices)
 #---
 
 #+++ Spatial derivatives

@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
-from aux00_utils import load_dataset_and_grid, condense_velocities, integrate, make_gaussian_filter
+from aux00_utils import load_dataset_and_grid, condense_velocities, condense_uw_velocities, integrate, make_gaussian_filter
 from aux03_plotting import budget_colors
 from aux01_pe_functions import calculate_ape_to_ke_exchange_term
 from aux02_ke_functions import (
@@ -40,13 +40,17 @@ print("Loading pre-filtered fields...")
 
 filtered_dimensions = ["x_caa", "y_aca"]
 
-ds = condense_velocities(ds, indices=[1, 2, 3])  # uᵢ with i dimension
-ds_full = ds[["b", "dV", "uᵢ"]].copy()
-
 filtered_filename = filename.replace(".nc", "_filtered_velocities.nc")
 ds_filt = xr.open_dataset(filtered_filename, decode_times=False).chunk({"time": 1})
 filter_length_scales = ds_filt.filter_length_scale.values
 filter_in_2d = int(ds_filt.attrs.get("filter_ndim", 2)) == 2
+tensor_dimensions = ("x_caa", "y_aca", "z_aac") if filter_in_2d else ("x_caa", "z_aac")
+
+if filter_in_2d:
+    ds = condense_velocities(ds, indices=[1, 2, 3])
+else:
+    ds = condense_uw_velocities(ds, indices=[1, 3])
+ds_full = ds[["b", "dV", "uᵢ"]].copy()
 
 print(f"Pre-filtered fields loaded from: {filtered_filename}")
 print(f"Filter length scales: {filter_length_scales}")
@@ -56,7 +60,7 @@ print(f"Filter dimensions: {'2D (x,y)' if filter_in_2d else '1D (x only)'}")
 #+++ Calculate strain tensor of the full (unfiltered) flow  [scale-independent]
 print("\n" + "="*60)
 print("Calculating strain tensor of the full (unfiltered) flow...")
-strain_rate_tensor = calculate_strain_tensor(ds_full["uᵢ"])
+strain_rate_tensor = calculate_strain_tensor(ds_full["uᵢ"], dimensions=tensor_dimensions)
 print("Done!")
 #---
 
@@ -82,9 +86,8 @@ for ℓ in filter_length_scales:
     sfs_stress_tensor = calculate_sfs_stress_tensor(ds_full["uᵢ"], gaussian_filter,
                                                     filter_dims=filtered_dimensions,
                                                     filtered_u_i=ds_filt_ℓ["ūᵢ"])
-    sfs_stress_tensor_trace = (sfs_stress_tensor.sel(i=1, j=1)
-                               + sfs_stress_tensor.sel(i=2, j=2)
-                               + sfs_stress_tensor.sel(i=3, j=3))
+    i_vals = sfs_stress_tensor.coords["i"].values
+    sfs_stress_tensor_trace = sum(sfs_stress_tensor.sel(i=k, j=k) for k in i_vals)
     sfs_ke_density = sfs_stress_tensor_trace / 2
 
     # ε<ℓ = 2ρ₀ν τ(S, S) = 2ρ₀ν Σᵢⱼ [ filter(Sⁱʲ Sⁱʲ) - filter(Sⁱʲ)² ]   [m² s⁻³]

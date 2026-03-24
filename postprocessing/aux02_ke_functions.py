@@ -121,8 +121,7 @@ def calculate_sfs_stress_tensor(u_i, filter, filter_dims=["x_caa", "y_aca"],
 #---
 
 #+++ Velocity gradient tensor
-def calculate_velocity_gradient_tensor(u_i_bar, dimensions=("x_caa", "y_aca", "z_aac"),
-                                        index_dim="i"):
+def calculate_velocity_gradient_tensor(u_i_bar, dimensions=("x_caa", "y_aca", "z_aac"), index_dim="i"):
     """
     Compute the large-scale velocity gradient tensor ∂ūⁱ/∂xʲ
 
@@ -159,8 +158,7 @@ def calculate_velocity_gradient_tensor(u_i_bar, dimensions=("x_caa", "y_aca", "z
 #---
 
 #+++ Large-scale strain rate tensor
-def calculate_strain_tensor(u_i_bar, dimensions=("x_caa", "y_aca", "z_aac"),
-                                         index_dim="i"):
+def calculate_strain_tensor(u_i_bar, dimensions=("x_caa", "y_aca", "z_aac"), index_dim="i"):
     """
     Compute the large-scale strain rate tensor S̄ℓⁱʲ
 

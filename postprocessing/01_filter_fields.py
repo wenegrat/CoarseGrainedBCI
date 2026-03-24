@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
-from aux00_utils import load_dataset_and_grid, condense_velocities, make_gaussian_filter
+from aux00_utils import load_dataset_and_grid, condense_velocities, condense_uw_velocities, make_gaussian_filter
 #---
 
 #+++ Configuration
@@ -35,7 +35,10 @@ if filter_in_2d:
 else:
     print("Filtering velocity and buoyancy fields in 1D (x only)...")
 
-ds = condense_velocities(ds, indices=[1, 2, 3])
+if filter_in_2d:
+    ds = condense_velocities(ds, indices=(1, 2, 3))
+else:
+    ds = condense_uw_velocities(ds, indices=(1, 3))
 
 ds_filt_list = []
 for ℓ in filter_length_scales:

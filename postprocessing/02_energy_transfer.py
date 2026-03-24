@@ -6,7 +6,7 @@ import time
 import numpy as np
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
-from aux00_utils import load_dataset_and_grid, condense_velocities, integrate, make_gaussian_filter
+from aux00_utils import load_dataset_and_grid, condense_velocities, condense_uw_velocities, integrate, make_gaussian_filter
 from aux01_pe_functions import (
     calculate_density_fields_from_buoyancy,
     local_potential_energies_timeseries,
@@ -47,14 +47,19 @@ print("Loading pre-filtered fields...")
 
 filtered_dimensions = ["x_caa", "y_aca"]
 
-ds = condense_velocities(ds, indices=[1, 2, 3])
-ds_full = ds[["b", "dV", "LxLy", "uᵢ"]].copy()
-
 filtered_filename = filename.replace(".nc", "_filtered_velocities.nc")
 t0 = time.time()
 ds_filt = xr.open_dataset(filtered_filename, decode_times=False).chunk({"time": 1})
 filter_length_scales = ds_filt.filter_length_scale.values
 filter_in_2d = int(ds_filt.attrs.get("filter_ndim", 2)) == 2
+tensor_dimensions = ("x_caa", "y_aca", "z_aac") if filter_in_2d else ("x_caa", "z_aac")
+
+if filter_in_2d:
+    ds = condense_velocities(ds, indices=(1, 2, 3))
+else:
+    ds = condense_uw_velocities(ds, indices=(1, 3))
+ds_full = ds[["b", "dV", "LxLy", "uᵢ"]].copy()
+
 print(f"  Pre-filtered fields loaded from: {filtered_filename}  ({time.time()-t0:.1f}s)")
 print(f"  Filter length scales: {filter_length_scales}")
 print(f"  Filter dimensions: {'2D (x,y)' if filter_in_2d else '1D (x only)'}")
@@ -70,7 +75,7 @@ print(f"  ρ calculated  ({time.time()-t0:.1f}s)")
 
 # Full strain tensor is scale-independent
 t0 = time.time()
-strain_rate_tensor = calculate_strain_tensor(ds_full["uᵢ"])
+strain_rate_tensor = calculate_strain_tensor(ds_full["uᵢ"], dimensions=tensor_dimensions)
 print(f"  Full strain tensor calculated  ({time.time()-t0:.1f}s)")
 #---
 
@@ -96,7 +101,7 @@ for ℓ in filter_length_scales:
     sfs_stress_tensor = calculate_sfs_stress_tensor(ds_full["uᵢ"], gaussian_filter,
                                                     filter_dims=filtered_dimensions,
                                                     filtered_u_i=ds_filt_ℓ["ūᵢ"])
-    strain_rate_tensor_l = calculate_strain_tensor(ds_filt_ℓ["ūᵢ"])
+    strain_rate_tensor_l = calculate_strain_tensor(ds_filt_ℓ["ūᵢ"], dimensions=tensor_dimensions)
     # Π_KE = -τⁱʲ : S̄ⁱʲ
     Π_KE = calculate_cross_scale_ke_flux(sfs_stress_tensor, strain_rate_tensor_l)
     print(f"  Π_KE  ({time.time()-t0:.1f}s)")
