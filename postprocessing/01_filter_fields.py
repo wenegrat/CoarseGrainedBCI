@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 import gcm_filters
+from scipy.ndimage import gaussian_filter1d
 from dask.diagnostics.progress import ProgressBar
 from aux00_utils import load_dataset_and_grid, condense_velocities
 #---
@@ -29,28 +30,49 @@ print(f"Dataset loaded: {len(ds.time)} time steps")
 #---
 
 #+++ Filter velocity and buoyancy fields at each length scale
+filter_in_2d = ds.dims["x_caa"] > 1 and ds.dims["y_aca"] > 1
 print("\n" + "="*60)
-print("Filtering velocity and buoyancy fields...")
+if filter_in_2d:
+    print("Filtering velocity and buoyancy fields in 2D (x and y)...")
+else:
+    print("Filtering velocity and buoyancy fields in 1D (x only)...")
 
-filtered_dimensions = ["x_caa", "y_aca"]
 dx_min = float(min(ds.Δx_caa.min(), ds.Δy_aca.min()))
+dx_x   = float(ds.Δx_caa.min())
 
 ds = condense_velocities(ds, indices=[1, 2, 3])
+
+def apply_filter_1d(da, sigma_grid):
+    """Apply a Gaussian filter along x only (periodic BC via mode='wrap').
+    sigma_grid = ℓ / dx, consistent with gcm_filters' convention filter_scale = ℓ * sqrt(12)."""
+    return xr.apply_ufunc(
+        gaussian_filter1d, da,
+        input_core_dims=[["x_caa"]],
+        output_core_dims=[["x_caa"]],
+        kwargs={"sigma": sigma_grid, "axis": -1, "mode": "wrap"},
+        dask="parallelized",
+        output_dtypes=[da.dtype],
+    )
 
 ds_filt_list = []
 for ℓ in filter_length_scales:
     print(f"  filter_length_scale = {ℓ:.4f}...")
-    gaussian_filter = gcm_filters.Filter(
-        filter_scale=ℓ * np.sqrt(12),
-        dx_min=dx_min,
-        filter_shape=gcm_filters.FilterShape.GAUSSIAN,
-        grid_type=gcm_filters.GridType.REGULAR,
-    )
-    ds_ℓ = xr.Dataset({
-        "ūᵢ": gaussian_filter.apply(ds["uᵢ"], dims=filtered_dimensions),
-        "b̄":  gaussian_filter.apply(ds["b"],  dims=filtered_dimensions),
-    })
-    ds_filt_list.append(ds_ℓ)
+
+    if filter_in_2d:
+        gaussian_filter = gcm_filters.Filter(
+            filter_scale=ℓ * np.sqrt(12),
+            dx_min=dx_min,
+            filter_shape=gcm_filters.FilterShape.GAUSSIAN,
+            grid_type=gcm_filters.GridType.REGULAR,
+        )
+        ūᵢ = gaussian_filter.apply(ds["uᵢ"], dims=["x_caa", "y_aca"])
+        b̄  = gaussian_filter.apply(ds["b"],  dims=["x_caa", "y_aca"])
+    else:
+        sigma_grid = ℓ / dx_x
+        ūᵢ = apply_filter_1d(ds["uᵢ"], sigma_grid)
+        b̄  = apply_filter_1d(ds["b"],  sigma_grid)
+
+    ds_filt_list.append(xr.Dataset({"ūᵢ": ūᵢ, "b̄": b̄}))
 
 scale_coord = xr.DataArray(filter_length_scales, dims="filter_length_scale",
                             name="filter_length_scale")
