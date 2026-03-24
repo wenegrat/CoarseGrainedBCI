@@ -60,7 +60,7 @@ print("\nDone!")
 #+++ Save results
 print("\n" + "="*60)
 print("Saving results...")
-output_filename = filename.replace(".nc", "_energy_transfer.nc")
+output_filename = filename.replace(".nc", "_energy_transfer_sweep.nc")
 with ProgressBar():
     energy_transfer.to_netcdf(output_filename)
 print(f"Results saved to: {output_filename}")
