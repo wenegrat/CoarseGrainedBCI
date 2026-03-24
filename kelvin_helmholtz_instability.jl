@@ -11,12 +11,15 @@ using Oceanostics.ProgressMessengers
 include("utils.jl")
 
 #+++ Define simulation parameters
+# All quantities are non-dimensional, scaled by h* (shear layer half-thickness),
+# u₀* (half the velocity difference), and the advective time h*/u₀*.
 params = (
     Lx = 10,
     Ly = 5,
     Lz = 10,
-    Ri = 0.1,
-    h = 1/4,
+    Re₀ = 1000,  # Reynolds number:          Re₀ = u₀* h* / ν*
+    Ri₀ = 0.10,  # Initial Richardson number: Ri₀ = b₀* h* / u₀*²
+    Pr  = 1.0,   # Prandtl number:            Pr  = ν* / κ*
     perturbation_amplitude = 0.01,
     stop_time = 200.0,
 )
@@ -26,10 +29,9 @@ params = (
 if has_cuda_gpu()
     arch = GPU()
     Nz = 512
-    x_aspect_ratio = 1  # Δx / Δz ratio
-    y_aspect_ratio = 1  # Δy / Δz ratio
-    ν = 5e-4
-    κ = 5e-4
+    x_aspect_ratio = 1   # Δx / Δz ratio
+    y_aspect_ratio = 1   # Δy / Δz ratio
+    Re₀ = params.Re₀
 else
     @warn "No CUDA GPU detected. Running on CPU with a coarse grid and high aspect ratio."
 
@@ -37,9 +39,11 @@ else
     Nz = 256
     x_aspect_ratio = 4   # Δx / Δz ratio
     y_aspect_ratio = Inf # Δy / Δz ratio
-    ν = 2e-3
-    κ = 2e-3
+    Re₀ = 500            # Lower Re for CPU testing
 end
+
+ν = 1 / Re₀
+κ = ν / params.Pr
 
 @info "Cell aspect ratio: Δx/Δz = $(x_aspect_ratio), Δy/Δz = $(y_aspect_ratio)"
 
@@ -51,7 +55,7 @@ Ny = isinf(y_aspect_ratio) ? 1 : round(Int, Nz * (params.Ly / params.Lz) / y_asp
 Nx = closest_factor_number((2, 3, 5), Nx)
 Ny = closest_factor_number((2, 3, 5), Ny)
 
-params = (; params..., Nx, Ny, Nz, ν, κ)
+params = (; params..., Nx, Ny, Nz, ν, κ, Re₀)
 
 grid = RectilinearGrid(arch; size=(params.Nx, params.Ny, params.Nz),
                        x=(-params.Lx/2, params.Lx/2),
@@ -71,14 +75,16 @@ b = model.tracers.b
 #---
 
 #+++ Define initial conditions: shear flow with stratification and perturbation
-shear_flow(x, z) = tanh(z) # Base shear flow
-stratification(x, z) = params.h * params.Ri * tanh(z / params.h) # Base stratification
-perturbation(x, z) = params.perturbation_amplitude * sin(2π * x / 10) * exp(-z^2 / 2) # Small perturbation to trigger instability
+# In non-dim units: U(z) = tanh(z), B(z) = Ri₀·tanh(z)
+# (b absorbs Ri₀ because Oceananigans BuoyancyTracer uses coefficient 1 in the momentum eq)
+shear_flow(x, z)   = tanh(z)
+stratification(x, z) = params.Ri₀ * tanh(z)
+perturbation(x, z) = params.perturbation_amplitude * sin(2π * x / params.Lx) * exp(-z^2 / 2)
 
 # Set initial conditions
 uᵢ(x, y, z) = shear_flow(x, z)
 bᵢ(x, y, z) = stratification(x, z)
-wᵢ(x, y, z) = params.perturbation_amplitude * cos(2π * x / 10 + π/2) * exp(-z^2 / 2)
+wᵢ(x, y, z) = perturbation(x, z)
 
 set!(model, u=uᵢ, b=bᵢ, w=wᵢ)
 #---
