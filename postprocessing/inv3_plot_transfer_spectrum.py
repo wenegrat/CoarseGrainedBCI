@@ -37,6 +37,8 @@ for ax, var in zip(axes, ["∫Π_KE dV", "∫Π_APE dV"]):
     ax.set_xscale("log")
     ax.set_yscale("symlog", linthresh=1e-4)
     ax.grid(True, alpha=0.3)
+    ax2 = ax.secondary_xaxis("top", functions=(lambda x: 1/x, lambda x: 1/x))
+    ax2.set_xlabel("ℓ  [m]")
 
 axes[0].set_title("KE cross-scale transfer spectrum")
 axes[1].set_title("APE cross-scale transfer spectrum")
