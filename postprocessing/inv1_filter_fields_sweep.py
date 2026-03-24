@@ -9,13 +9,13 @@ from aux00_utils import load_dataset_and_grid, filter_fields
 
 #+++ Configuration
 import argparse
-parser = argparse.ArgumentParser(description="Filter velocity and buoyancy fields for KE budget")
+parser = argparse.ArgumentParser(description="Filter velocity and buoyancy fields for cross-scale energy transfer sweep")
 parser.add_argument("--filename", default="output/khi_128x1x256.nc",
                     help="Path to simulation NetCDF file")
 args = parser.parse_args()
 REPO_ROOT = Path(__file__).resolve().parent.parent
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
-filter_length_scales = np.geomspace(0.05, 2, 30) # Length scales for filtering
+filter_length_scales = np.geomspace(0.05, 2, 25) # Length scales for filtering
 #---
 
 #+++ Load data and grid
@@ -44,7 +44,7 @@ print("Done!")
 print("\n" + "="*60)
 print("Saving filtered fields...")
 
-output_filename = filename.replace(".nc", "_filtered_velocities_inv01.nc")
+output_filename = filename.replace(".nc", "_filtered_velocities_sweep.nc")
 with ProgressBar():
     ds_filt.to_netcdf(output_filename)
 print(f"Filtered fields saved to: {output_filename}")
