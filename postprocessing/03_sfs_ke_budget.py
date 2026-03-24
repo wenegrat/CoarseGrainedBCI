@@ -145,6 +145,9 @@ output_filename = filename.replace(".nc", "_sfs_ke_budget.nc")
 with ProgressBar():
     sfs_ke_budget_terms.to_netcdf(output_filename)
 print(f"\nResults saved to: {output_filename}")
+
+# Reload from disk so plots read pre-computed data rather than re-triggering the dask graph
+sfs_ke_budget_terms = xr.open_dataset(output_filename, decode_timedelta=False)
 #---
 
 #+++ Plot integrated KE decomposition
