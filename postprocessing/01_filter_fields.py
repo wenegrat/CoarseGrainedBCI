@@ -4,10 +4,8 @@ import os
 from pathlib import Path
 import numpy as np
 import xarray as xr
-import gcm_filters
-from scipy.ndimage import gaussian_filter1d
 from dask.diagnostics.progress import ProgressBar
-from aux00_utils import load_dataset_and_grid, condense_velocities
+from aux00_utils import load_dataset_and_grid, condense_velocities, make_gaussian_filter
 #---
 
 #+++ Configuration
@@ -37,47 +35,22 @@ if filter_in_2d:
 else:
     print("Filtering velocity and buoyancy fields in 1D (x only)...")
 
-dx_min = float(min(ds.Δx_caa.min(), ds.Δy_aca.min()))
-dx_x   = float(ds.Δx_caa.min())
-
 ds = condense_velocities(ds, indices=[1, 2, 3])
-
-def apply_filter_1d(da, sigma_grid):
-    """Apply a Gaussian filter along x only (periodic BC via mode='wrap').
-    sigma_grid = ℓ / dx, consistent with gcm_filters' convention filter_scale = ℓ * sqrt(12)."""
-    return xr.apply_ufunc(
-        gaussian_filter1d, da,
-        input_core_dims=[["x_caa"]],
-        output_core_dims=[["x_caa"]],
-        kwargs={"sigma": sigma_grid, "axis": -1, "mode": "wrap"},
-        dask="parallelized",
-        output_dtypes=[da.dtype],
-    )
 
 ds_filt_list = []
 for ℓ in filter_length_scales:
     print(f"  filter_length_scale = {ℓ:.4f}...")
-
-    if filter_in_2d:
-        gaussian_filter = gcm_filters.Filter(
-            filter_scale=ℓ * np.sqrt(12),
-            dx_min=dx_min,
-            filter_shape=gcm_filters.FilterShape.GAUSSIAN,
-            grid_type=gcm_filters.GridType.REGULAR,
-        )
-        ūᵢ = gaussian_filter.apply(ds["uᵢ"], dims=["x_caa", "y_aca"])
-        b̄  = gaussian_filter.apply(ds["b"],  dims=["x_caa", "y_aca"])
-    else:
-        sigma_grid = ℓ / dx_x
-        ūᵢ = apply_filter_1d(ds["uᵢ"], sigma_grid)
-        b̄  = apply_filter_1d(ds["b"],  sigma_grid)
-
-    ds_filt_list.append(xr.Dataset({"ūᵢ": ūᵢ, "b̄": b̄}))
+    gf = make_gaussian_filter(ℓ, ds, filter_in_2d)
+    ds_filt_list.append(xr.Dataset({
+        "ūᵢ": gf.apply(ds["uᵢ"], dims=["x_caa", "y_aca"]),
+        "b̄":  gf.apply(ds["b"],  dims=["x_caa", "y_aca"]),
+    }))
 
 scale_coord = xr.DataArray(filter_length_scales, dims="filter_length_scale",
                             name="filter_length_scale")
 ds_filt = xr.concat(ds_filt_list, dim=scale_coord)
 ds_filt["dV"] = ds["dV"]  # scale-independent, no filter_length_scale dimension
+ds_filt.attrs["filter_ndim"] = 2 if filter_in_2d else 1
 print("Done!")
 #---
 
