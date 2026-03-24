@@ -3,9 +3,8 @@
 import os
 from pathlib import Path
 import numpy as np
-import xarray as xr
 from dask.diagnostics.progress import ProgressBar
-from aux00_utils import load_dataset_and_grid, condense_velocities, condense_uw_velocities, make_gaussian_filter
+from aux00_utils import load_dataset_and_grid, filter_fields
 #---
 
 #+++ Configuration
@@ -28,32 +27,14 @@ print(f"Dataset loaded: {len(ds.time)} time steps")
 #---
 
 #+++ Filter velocity and buoyancy fields at each length scale
-filter_in_2d = ds.dims["x_caa"] > 1 and ds.dims["y_aca"] > 1
+filter_in_2d = ds.sizes["x_caa"] > 1 and ds.sizes["y_aca"] > 1
 print("\n" + "="*60)
 if filter_in_2d:
     print("Filtering velocity and buoyancy fields in 2D (x and y)...")
 else:
     print("Filtering velocity and buoyancy fields in 1D (x only)...")
 
-if filter_in_2d:
-    ds = condense_velocities(ds, indices=(1, 2, 3))
-else:
-    ds = condense_uw_velocities(ds, indices=(1, 3))
-
-ds_filt_list = []
-for ℓ in filter_length_scales:
-    print(f"  filter_length_scale = {ℓ:.4f}...")
-    gf = make_gaussian_filter(ℓ, ds, filter_in_2d)
-    ds_filt_list.append(xr.Dataset({
-        "ūᵢ": gf.apply(ds["uᵢ"], dims=["x_caa", "y_aca"]),
-        "b̄":  gf.apply(ds["b"],  dims=["x_caa", "y_aca"]),
-    }))
-
-scale_coord = xr.DataArray(filter_length_scales, dims="filter_length_scale",
-                            name="filter_length_scale")
-ds_filt = xr.concat(ds_filt_list, dim=scale_coord)
-ds_filt["dV"] = ds["dV"]  # scale-independent, no filter_length_scale dimension
-ds_filt.attrs["filter_ndim"] = 2 if filter_in_2d else 1
+ds_filt = filter_fields(ds, filter_length_scales, filter_in_2d=filter_in_2d)
 print("Done!")
 #---
 

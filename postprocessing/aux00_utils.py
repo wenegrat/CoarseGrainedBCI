@@ -185,6 +185,47 @@ def make_gaussian_filter(ℓ, ds, filter_in_2d):
     else:
         dx_min = float(ds.Δx_caa.min())
     return GaussianFilter(ℓ, dx_min, filter_in_2d=filter_in_2d)
+
+
+def filter_fields(ds, filter_length_scales, filter_in_2d=True):
+    """Filter velocity and buoyancy fields at each length scale.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        Dataset with velocity components (u,v,w or u,w) and buoyancy b.
+    filter_length_scales : array-like
+        Physical length scales at which to apply the filter.
+    filter_in_2d : bool
+        If True, filter in x and y (3D simulation). If False, filter in x only
+        (xz simulation with y_aca=1).
+
+    Returns
+    -------
+    ds_filt : xr.Dataset
+        Dataset with filtered fields ūᵢ and b̄ at each filter_length_scale,
+        plus dV (scale-independent) and the filter_ndim global attribute.
+    """
+    if filter_in_2d:
+        ds = condense_velocities(ds, indices=(1, 2, 3))
+    else:
+        ds = condense_uw_velocities(ds, indices=(1, 3))
+
+    ds_filt_list = []
+    for ℓ in filter_length_scales:
+        print(f"  filter_length_scale = {ℓ:.4f}...")
+        gf = make_gaussian_filter(ℓ, ds, filter_in_2d)
+        ds_filt_list.append(xr.Dataset({
+            "ūᵢ": gf.apply(ds["uᵢ"], dims=["x_caa", "y_aca"]),
+            "b̄":  gf.apply(ds["b"],  dims=["x_caa", "y_aca"]),
+        }))
+
+    scale_coord = xr.DataArray(filter_length_scales, dims="filter_length_scale",
+                               name="filter_length_scale")
+    ds_filt = xr.concat(ds_filt_list, dim=scale_coord)
+    ds_filt["dV"] = ds["dV"]
+    ds_filt.attrs["filter_ndim"] = 2 if filter_in_2d else 1
+    return ds_filt
 #---
 
 #+++ Dask-parallel filter wrapper
