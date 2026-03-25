@@ -1,8 +1,8 @@
 #!/bin/bash -l
 #PBS -A UMCP0028
-#PBS -N sweep_2916x1x4096
-#PBS -o logs/sweep_2916x1x4096.log
-#PBS -e logs/sweep_2916x1x4096.log
+#PBS -N sweep_2048x1x2048
+#PBS -o logs/sweep_2048x1x2048.log
+#PBS -e logs/sweep_2048x1x2048.log
 #PBS -l walltime=23:59:00
 #PBS -q casper
 #PBS -M tchor@umd.edu
@@ -11,7 +11,7 @@
 #PBS -l select=1:ncpus=18:mem=1400GB:ngpus=0
 #PBS -l job_priority=premium
 
-SIM=2916x1x4096
+SIM=khi_2048x1x2048
 PYTHON=/glade/u/home/tomasc/miniconda3/envs/py313/bin/python
 
 # Clear the environment from any previously loaded modules
