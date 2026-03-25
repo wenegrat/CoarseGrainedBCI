@@ -35,7 +35,7 @@ else
 
     arch = CPU()
     Nz = 256
-    x_aspect_ratio = 4   # Δx / Δz ratio
+    x_aspect_ratio = 2   # Δx / Δz ratio
     y_aspect_ratio = Inf # Δy / Δz ratio
     ν = 2e-3
     κ = 2e-3
