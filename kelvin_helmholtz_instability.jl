@@ -30,7 +30,7 @@ if has_cuda_gpu()
     arch = GPU()
     Nz = 512
     x_aspect_ratio = 1   # Δx / Δz ratio
-    y_aspect_ratio = 1   # Δy / Δz ratio
+    y_aspect_ratio = Inf # Δy / Δz ratio
     Re₀ = params.Re₀
 else
     @warn "No CUDA GPU detected. Running on CPU with a coarse grid and high aspect ratio."
