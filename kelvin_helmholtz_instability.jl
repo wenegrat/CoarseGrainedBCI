@@ -62,7 +62,7 @@ grid = RectilinearGrid(arch; size=(params.Nx, params.Ny, params.Nz),
 
 #+++ Create model
 model = NonhydrostaticModel(grid;
-                            advection = WENO(order=5),
+                            advection = Centered(order=4),
                             closure = ScalarDiffusivity(ν=params.ν, κ=params.κ),
                             buoyancy = BuoyancyTracer(),
                             tracers = :b)
