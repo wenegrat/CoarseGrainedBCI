@@ -28,7 +28,7 @@ params = (
 #+++ Create grid
 if has_cuda_gpu()
     arch = GPU()
-    Nz = 512
+    Nz = 4096
     x_aspect_ratio = 1   # Δx / Δz ratio
     y_aspect_ratio = Inf # Δy / Δz ratio
     Re₀ = params.Re₀
@@ -36,8 +36,8 @@ else
     @warn "No CUDA GPU detected. Running on CPU with a coarse grid and high aspect ratio."
 
     arch = CPU()
-    Nz = 256
-    x_aspect_ratio = 4   # Δx / Δz ratio
+    Nz = 512
+    x_aspect_ratio = 2   # Δx / Δz ratio
     y_aspect_ratio = Inf # Δy / Δz ratio
     Re₀ = 500            # Lower Re for CPU testing
 end
@@ -66,7 +66,7 @@ grid = RectilinearGrid(arch; size=(params.Nx, params.Ny, params.Nz),
 
 #+++ Create model
 model = NonhydrostaticModel(grid;
-                            advection = WENO(order=5),
+                            advection = Centered(order=4),
                             closure = ScalarDiffusivity(ν=params.ν, κ=params.κ),
                             buoyancy = BuoyancyTracer(),
                             tracers = :b)
@@ -142,7 +142,7 @@ vorticity = Field(∂z(u) - ∂x(w))
 outputs = (; ω=vorticity, b, pe, PE, u=u_center, v=v_center, w=w_center, ε̄)
 
 using NCDatasets
-output_filename = "output/kelvin_helmholtz_instability_$(params.Nx)x$(params.Ny)x$(params.Nz)"
+output_filename = "output/khi_$(params.Nx)x$(params.Ny)x$(params.Nz)"
 if !(model.closure isa ScalarDiffusivity)
     ν = viscosity(model)
     κ = diffusivity(model, Val(:b))
@@ -157,7 +157,7 @@ simulation.output_writers[:fields] =
                  global_attributes = params,
                  overwrite_existing = true)
 
-output_filename_2d = "output/kelvin_helmholtz_instability_$(params.Nx)x$(params.Ny)x$(params.Nz)_2d.nc"
+output_filename_2d = "output/khi_$(params.Nx)x$(params.Ny)x$(params.Nz)_2d.nc"
 simulation.output_writers[:twod_fields] =
 NetCDFWriter(model, outputs,
             schedule = TimeInterval(2),
