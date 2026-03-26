@@ -1,29 +1,12 @@
 import os
-import time
-from functools import wraps
+from pathlib import Path
 import numpy as np
 import xarray as xr
 import gcm_filters
 
-#+++ Timing decorator
-def timeit(func):
-    """Decorator that prints the elapsed time of a function call"""
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        print(f"\n{func.__name__}...")
-        start_time = time.time()
-        result = func(*args, **kwargs)
-        elapsed_time = time.time() - start_time
-        print(f"Elapsed wall time: {elapsed_time:.2f} seconds ({elapsed_time/60:.2f} minutes)")
-        return result
-    return wrapper
-#---
+PP_OUTPUT = Path(__file__).resolve().parent / "output"
 
 #+++ Integrations and sums
-def volume_sum(da, dims=("x_caa", "y_aca", "z_aac")):
-    """Sum a DataArray over spatial dimensions"""
-    return da.sum(dims)
-
 def integrate(da, dV, dims=("x_caa", "y_aca", "z_aac")):
     """Integrate a DataArray over spatial dimensions"""
     return (da * dV).sum(dims)
@@ -251,4 +234,11 @@ class DaskParallelFilter:
 
     def __getattr__(self, name):
         return getattr(self._filter, name)
+#---
+
+#+++ Pre-computed result loaders
+def load_energy_transfer(filename):
+    """Load the *_energy_transfer.nc file produced by 02_energy_transfer.py."""
+    et_filename = str(PP_OUTPUT / (Path(filename).stem + "_energy_transfer.nc"))
+    return xr.open_dataset(et_filename, decode_timedelta=False).chunk({"time": 1})
 #---

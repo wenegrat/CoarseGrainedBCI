@@ -7,14 +7,13 @@ Calculate SFS APE budget from Kelvin-Helmholtz simulation output
 import os
 from pathlib import Path
 import time
-import numpy as np
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
-from aux00_utils import load_dataset_and_grid, condense_velocities, integrate, make_gaussian_filter
-from aux03_plotting import budget_colors
+from aux00_utils import load_dataset_and_grid, condense_velocities, condense_uw_velocities, integrate, make_gaussian_filter, load_energy_transfer
+from aux03_plotting import budget_colors, plot_sfs_budget
 from aux01_pe_functions import (
     calculate_density_fields_from_buoyancy,
-    local_potential_energies_timeseries,
+    local_potential_energies_timeseries,  # used for filtered density in loop
     calculate_sfs_ape_tendency,
     calculate_sfs_R_correction,
     calculate_sfs_ape_dissipation,
@@ -31,6 +30,7 @@ parser.add_argument("--n-workers", type=int, default=18,
                     help="Number of CPU workers for APE sorting (ThreadPoolExecutor)")
 args = parser.parse_args()
 REPO_ROOT = Path(__file__).resolve().parent.parent
+PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 n_workers = args.n_workers
 #---
@@ -44,23 +44,27 @@ ds = ds.chunk({"time": 1})
 print(f"Dataset loaded: {len(ds.time)} time steps  ({time.time()-t0:.1f}s)")
 #---
 
-#+++ Load filtered fields
+#+++ Load filtered fields and pre-sorted density
 print("\n" + "="*60)
-print("Loading pre-filtered fields...")
+print("Loading pre-filtered fields and sorted density...")
 
-filtered_dimensions = ["x_caa", "y_aca"]
-
-ds = condense_velocities(ds, indices=[1, 2, 3])
-ds_full = ds[["b", "dV", "LxLy", "uᵢ"]].copy()
-
-filtered_filename = filename.replace(".nc", "_filtered_velocities.nc")
+filtered_filename = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities.nc"))
 t0 = time.time()
 ds_filt = xr.open_dataset(filtered_filename, decode_times=False).chunk({"time": 1})
 filter_length_scales = ds_filt.filter_length_scale.values
 filter_in_2d = int(ds_filt.attrs.get("filter_ndim", 2)) == 2
+filtered_dimensions = ["x_caa", "y_aca"] if filter_in_2d else ["x_caa"]
+
+ds = condense_velocities(ds, indices=[1, 2, 3]) if filter_in_2d else condense_uw_velocities(ds, indices=[1, 3])
+ds_full = ds[["b", "dV", "LxLy", "uᵢ"]].copy()
 print(f"  Pre-filtered fields loaded from: {filtered_filename}  ({time.time()-t0:.1f}s)")
 print(f"  Filter length scales: {filter_length_scales}")
 print(f"  Filter dimensions: {'2D (x,y)' if filter_in_2d else '1D (x only)'}")
+
+sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + "_sorted_density.nc"))
+t0 = time.time()
+ds_sorted = xr.open_dataset(sorted_density_filename, decode_times=False).chunk({"time": 1})
+print(f"  Sorted density loaded from: {sorted_density_filename}  ({time.time()-t0:.1f}s)")
 #---
 
 #+++ Calculate scale-independent fields
@@ -72,18 +76,16 @@ ds_full = calculate_density_fields_from_buoyancy(ds_full, buoyancy_name="b", den
 print(f"  ρ calculated  ({time.time()-t0:.1f}s)")
 
 t0 = time.time()
-full_local_pes = local_potential_energies_timeseries(ds_full, density_name="ρ", rho_to_sort=ds_full.ρ,
-                                                     ape_method="precomputed_integral",
-                                                     use_numpy_version=True, n_workers=n_workers)
-print(f"  full_local_pes  ({time.time()-t0:.1f}s)")
+full_local_pes = local_potential_energies_timeseries(ds_full, ds_sorted.rho_sorted, ds_sorted.dz_sorted,
+                                                     density_name="ρ", n_workers=n_workers)
+print(f"  full_local_pes calculated  ({time.time()-t0:.1f}s)")
 #---
 
 #+++ Loop over filter scales and calculate budget terms
 print("\n" + "="*60)
 print("Calculating budget terms for each filter scale...")
 
-energy_transfer_filename = filename.replace(".nc", "_energy_transfer.nc")
-energy_transfer = xr.open_dataset(energy_transfer_filename, decode_timedelta=False).chunk({"time": 1})
+energy_transfer = load_energy_transfer(filename)
 
 dV = ds_full.dV
 budget_list = []
@@ -102,10 +104,8 @@ for ℓ in filter_length_scales:
     print(f"  ρ̄ calculated  ({time.time()-t0:.1f}s)")
 
     t0 = time.time()
-    filt_local_pes = local_potential_energies_timeseries(ds_filt_ℓ, density_name="ρ̄",
-                                                         rho_to_sort=ds_full.ρ,
-                                                         ape_method="precomputed_integral",
-                                                         use_numpy_version=True, n_workers=n_workers)
+    filt_local_pes = local_potential_energies_timeseries(ds_filt_ℓ, full_local_pes.rho_sorted, full_local_pes.dz_sorted,
+                                                         density_name="ρ̄", n_workers=n_workers)
     print(f"  filt_local_pes  ({time.time()-t0:.1f}s)")
 
     t0 = time.time()
@@ -190,7 +190,7 @@ print("\nDone!")
 print("\n" + "="*60)
 print("Saving results...")
 
-output_filename = filename.replace(".nc", "_sfs_ape_budget.nc")
+output_filename = str(PP_OUTPUT / (Path(filename).stem + "_sfs_ape_budget.nc"))
 with ProgressBar():
     sfs_ape_budget_terms.to_netcdf(output_filename)
 print(f"\nResults saved to: {output_filename}")
@@ -204,8 +204,6 @@ print("\n" + "="*60)
 print("Creating plots...")
 print("="*60)
 
-import matplotlib.pyplot as plt
-
 integrated_vars = {
     "∫-∂ₜ SFS APE dV":    budget_colors["tendency"],
     "∫Π_APE dV":           budget_colors["flux"],
@@ -214,19 +212,6 @@ integrated_vars = {
     "∫Rˢ dV":              "C4",
     "residual_APE":         budget_colors["residual"],
 }
-
-for ℓ in filter_length_scales:
-    fig, ax = plt.subplots(figsize=(10, 6), constrained_layout=True)
-    for var, color in integrated_vars.items():
-        sfs_ape_budget_terms[var].sel(filter_length_scale=ℓ).dropna("time").plot.line(
-            ax=ax, x="time", label=var, color=color)
-    ax.legend()
-    ax.set_ylabel("Budget Terms [W or J s⁻¹]")
-    ax.set_title(f"Integrated SFS APE Budget Terms  (ℓ = {ℓ:.4f})")
-    ax.grid(True, alpha=0.3)
-    plot_filename = str(REPO_ROOT / "figures" / os.path.basename(output_filename).replace(
-        ".nc", f"_l{ℓ:.4f}.png"))
-    fig.savefig(plot_filename, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    print(f"  Plot saved to: {plot_filename}")
+plot_sfs_budget(sfs_ape_budget_terms, integrated_vars, filter_length_scales,
+                output_filename, REPO_ROOT, "Integrated SFS APE Budget Terms")
 #---

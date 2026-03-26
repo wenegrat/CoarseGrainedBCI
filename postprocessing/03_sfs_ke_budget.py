@@ -2,11 +2,10 @@
 #+++ Imports
 import os
 from pathlib import Path
-import numpy as np
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
-from aux00_utils import load_dataset_and_grid, condense_velocities, condense_uw_velocities, integrate, make_gaussian_filter
-from aux03_plotting import budget_colors
+from aux00_utils import load_dataset_and_grid, condense_velocities, condense_uw_velocities, integrate, make_gaussian_filter, load_energy_transfer
+from aux03_plotting import budget_colors, plot_sfs_budget
 from aux01_pe_functions import calculate_ape_to_ke_exchange_term
 from aux02_ke_functions import (
     calculate_sfs_stress_tensor,
@@ -23,6 +22,7 @@ parser.add_argument("--filename", default="output/khi_90x1x256.nc",
                     help="Path to simulation NetCDF file")
 args = parser.parse_args()
 REPO_ROOT = Path(__file__).resolve().parent.parent
+PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 #---
 
@@ -38,12 +38,12 @@ print(f"Dataset loaded: {len(ds.time)} time steps")
 print("\n" + "="*60)
 print("Loading pre-filtered fields...")
 
-filtered_dimensions = ["x_caa", "y_aca"]
-
-filtered_filename = filename.replace(".nc", "_filtered_velocities.nc")
+filtered_filename = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities.nc"))
 ds_filt = xr.open_dataset(filtered_filename, decode_times=False).chunk({"time": 1})
-filter_length_scales = ds_filt.filter_length_scale.values
 filter_in_2d = int(ds_filt.attrs.get("filter_ndim", 2)) == 2
+filtered_dimensions = ["x_caa", "y_aca"] if filter_in_2d else ["x_caa"]
+
+filter_length_scales = ds_filt.filter_length_scale.values
 tensor_dimensions = ("x_caa", "y_aca", "z_aac") if filter_in_2d else ("x_caa", "z_aac")
 
 if filter_in_2d:
@@ -68,8 +68,7 @@ print("Done!")
 print("\n" + "="*60)
 print("Calculating budget terms for each filter scale...")
 
-energy_transfer_filename = filename.replace(".nc", "_energy_transfer.nc")
-energy_transfer = xr.open_dataset(energy_transfer_filename, decode_timedelta=False).chunk({"time": 1})
+energy_transfer = load_energy_transfer(filename)
 
 dV = ds_full.dV
 budget_list = []
@@ -97,8 +96,8 @@ for ℓ in filter_length_scales:
 
     print("  APE->KE exchange term...")
     ape_to_ke_exchange = calculate_ape_to_ke_exchange_term(
-        ds_full["uᵢ"].sel(i=3),   # full w
-        ds_full.b,                # full buoyancy
+        ds_full["uᵢ"].sel(i=3), # full w
+        ds_full.b,              # full buoyancy
         gaussian_filter,
         filter_dims=filtered_dimensions,
         filtered_w=ds_filt_ℓ["ūᵢ"].sel(i=3),
@@ -144,7 +143,7 @@ print("\nDone!")
 print("\n" + "="*60)
 print("Saving results...")
 
-output_filename = filename.replace(".nc", "_sfs_ke_budget.nc")
+output_filename = str(PP_OUTPUT / (Path(filename).stem + "_sfs_ke_budget.nc"))
 with ProgressBar():
     sfs_ke_budget_terms.to_netcdf(output_filename)
 print(f"\nResults saved to: {output_filename}")
@@ -158,8 +157,6 @@ print("\n" + "="*60)
 print("Creating plots...")
 print("="*60)
 
-import matplotlib.pyplot as plt
-
 integrated_vars = {
     "∫-∂ₜ SFS KE dV":    budget_colors["tendency"],
     "∫Π_KE dV":          budget_colors["flux"],
@@ -167,19 +164,6 @@ integrated_vars = {
     "∫(SFS APE->KE) dV": budget_colors["exchange"],
     "residual_KE":       budget_colors["residual"],
 }
-
-for ℓ in filter_length_scales:
-    fig, ax = plt.subplots(figsize=(10, 6), constrained_layout=True)
-    for var, color in integrated_vars.items():
-        sfs_ke_budget_terms[var].sel(filter_length_scale=ℓ).dropna("time").plot.line(
-            ax=ax, x="time", label=var, color=color)
-    ax.legend()
-    ax.set_ylabel("Budget Terms [W or J s⁻¹]")
-    ax.set_title(f"Integrated SFS KE Budget Terms  (ℓ = {ℓ:.4f})")
-    ax.grid(True, alpha=0.3)
-    plot_filename = str(REPO_ROOT / "figures" / os.path.basename(output_filename).replace(
-        ".nc", f"_l{ℓ:.4f}.png"))
-    fig.savefig(plot_filename, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    print(f"  Plot saved to: {plot_filename}")
+plot_sfs_budget(sfs_ke_budget_terms, integrated_vars, filter_length_scales,
+                output_filename, REPO_ROOT, "Integrated SFS KE Budget Terms")
 #---

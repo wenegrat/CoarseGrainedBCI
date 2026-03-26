@@ -4,73 +4,17 @@ Kinetic energy calculation functions
 This module contains functions for calculating kinetic energy (KE).
 """
 
-import numpy as np
 import xarray as xr
 from aux00_utils import (integrate, calculate_gradient,
                          condense_velocities, condense_uw_velocities,
                          make_gaussian_filter, filter_fields)
 from aux01_pe_functions import (calculate_density_fields_from_buoyancy,
+                                sorted_timeseries,
                                 local_potential_energies_timeseries,
                                 calculate_cross_scale_ape_flux)
 
 # Physical constants
 ρ0 = 1025  # reference density [kg/m^3]
-
-#+++ KE from condensed velocity tensor
-def local_KE_vector(u_i, index_dim="i"):
-    """
-    Calculate local KE density from the condensed velocity tensor
-
-    Parameters
-    ----------
-    u_i : xr.DataArray
-        Velocity vector with an index dimension (e.g. i=1,2,3 for u,v,w),
-        as produced by condense_velocities().
-    index_dim : str
-        Name of the vector index dimension.
-
-    Returns
-    -------
-    xr.DataArray
-        Local KE density: (1/2)|u|²  [m² s⁻²]
-    """
-    return (u_i**2).sum(index_dim) / 2
-
-def local_KE_s(u_i, u_i_bar, filter, filter_dims=["x_caa", "y_aca"], index_dim="i"):
-    """
-    Calculate subfilter-scale (SFS) KE density
-
-    The SFS KE equals half the trace of the sub-filter stress tensor τ(u,u)
-    (Eyink & Aluie 2009, Eq. 6; Aluie et al. 2018):
-
-        KE_s = (1/2)[ filter(|u|²) - |ū|² ]
-             = filter(KE) - KE_l
-
-    It is locally non-negative for non-negative filter kernels (Vreman et al. 1994).
-
-    Parameters
-    ----------
-    u_i : xr.DataArray
-        Full (unfiltered) velocity vector.
-    u_i_bar : xr.DataArray
-        Filtered velocity vector.
-    filter : gcm_filters.Filter
-        Filter object.
-    filter_dims : list of str
-        Spatial dimensions along which to apply the filter.
-    index_dim : str
-        Name of the vector index dimension.
-
-    Returns
-    -------
-    xr.DataArray
-        SFS KE density: filter(KE) - KE_l  [m² s⁻²]
-    """
-    KE_full = local_KE_vector(u_i, index_dim=index_dim)
-    KE_bar  = filter.apply(KE_full, dims=filter_dims)
-    KE_l    = local_KE_l(u_i_bar, index_dim=index_dim)
-    return KE_bar - KE_l
-#---
 
 #+++ SFS stress tensor
 def calculate_sfs_stress_tensor(u_i, filter, filter_dims=["x_caa", "y_aca"],
@@ -199,7 +143,7 @@ def calculate_strain_tensor(u_i_bar, dimensions=("x_caa", "y_aca", "z_aac"), ind
 
 #+++ SFS KE dissipation
 def calculate_sfs_ke_dissipation(S, ν, filter, filter_dims=["x_caa", "y_aca"],
-                                  index_dims=("i", "j")):
+                                 index_dims=("i", "j")):
     """
     Compute the SFS KE dissipation ε<ℓ = 2ν τ(S, S)
 
@@ -306,94 +250,9 @@ def calculate_cross_scale_ke_flux(τ, S̄, index_dims=("i", "j")):
     return -(τ * S̄).sum(index_dims)
 #---
 
-#+++ Calculate kinetic energy
-def local_KE(u, v, w):
-    """
-    Calculate local kinetic energy density
-
-    Parameters
-    ----------
-    u, v, w : xr.DataArray
-        Velocity components
-
-    Returns
-    -------
-    xr.DataArray
-        Local KE density: (u^2 + v^2 + w^2) / 2  [m² s⁻²]
-    """
-    return (u**2 + v**2 + w**2) / 2
-
-def integrated_KE(ds, u_name="u", v_name="v", w_name="w", dV_name="dV",
-                  x_dim="x_caa", y_dim="y_aca", z_dim="z_aac"):
-    """
-    Calculate volume-integrated kinetic energy
-
-    Parameters
-    ----------
-    ds : xr.Dataset
-        Dataset containing velocity fields
-    u_name : str
-        Name of u velocity component
-    v_name : str
-        Name of v velocity component
-    w_name : str
-        Name of w velocity component
-    dV_name : str
-        Name of volume element field
-    x_dim, y_dim, z_dim : str
-        Names of spatial dimensions
-
-    Returns
-    -------
-    xr.DataArray
-        Integrated KE
-    """
-    u = ds[u_name]
-    v = ds[v_name]
-    w = ds[w_name]
-    dV = ds[dV_name]
-
-    ke = local_KE(u, v, w)
-    KE = (ke * dV).sum((x_dim, y_dim, z_dim))
-    return KE
-
-def integrated_KE_timeseries(ds, verbose=False, u_name="u", v_name="v", w_name="w",
-                             dV_name="dV", x_dim="x_caa", y_dim="y_aca", z_dim="z_aac"):
-    """
-    Calculate volume-integrated KE for all time steps
-
-    Parameters
-    ----------
-    ds : xr.Dataset
-        Dataset containing velocity fields
-    verbose : bool
-        Whether to print progress
-    u_name : str
-        Name of u velocity component
-    v_name : str
-        Name of v velocity component
-    w_name : str
-        Name of w velocity component
-    dV_name : str
-        Name of volume element field
-    x_dim, y_dim, z_dim : str
-        Names of spatial dimensions
-
-    Returns
-    -------
-    xr.DataArray
-        Time series of volume-integrated KE
-    """
-    if verbose: print("Calculating KE time series...")
-    KE = integrated_KE(ds, u_name=u_name, v_name=v_name, w_name=w_name,
-                      dV_name=dV_name, x_dim=x_dim, y_dim=y_dim, z_dim=z_dim)
-    if verbose: print("\nDone!")
-    return KE
-#---
-
 #+++ Cross-scale energy transfer pipeline
 def calculate_energy_transfer(ds, filter_length_scales, filter_in_2d=True,
-                               ds_filt=None, n_workers=18):
+                              ds_filt=None, rho_sorted=None, dz_sorted=None, n_workers=18):
     """Calculate cross-scale KE and APE transfer terms at each filter scale.
 
     Parameters
@@ -408,6 +267,13 @@ def calculate_energy_transfer(ds, filter_length_scales, filter_in_2d=True,
     ds_filt : xr.Dataset, optional
         Pre-computed filtered fields (ūᵢ, b̄) indexed by filter_length_scale.
         If None, filter_fields() is called internally.
+    rho_sorted : xr.DataArray, optional
+        Pre-sorted reference density (time, z_1d_sorted), e.g. loaded from a
+        ``*_sorted_density.nc`` file.  When provided together with
+        ``dz_sorted``, the density-sorting step is skipped entirely.
+    dz_sorted : xr.DataArray, optional
+        Pre-sorted cell heights (time, z_1d_sorted). Must be supplied together
+        with ``rho_sorted``.
     n_workers : int
         Number of threads for APE sorting (ThreadPoolExecutor).
 
@@ -417,7 +283,7 @@ def calculate_energy_transfer(ds, filter_length_scales, filter_in_2d=True,
         Dataset with Π_KE, Π_APE, ∫Π_KE dV, ∫Π_APE dV indexed by
         filter_length_scale.
     """
-    filtered_dimensions = ["x_caa", "y_aca"]
+    filtered_dimensions = ["x_caa", "y_aca"] if filter_in_2d else ["x_caa"]
     tensor_dimensions   = ("x_caa", "y_aca", "z_aac") if filter_in_2d else ("x_caa", "z_aac")
 
     if ds_filt is None:
@@ -430,7 +296,15 @@ def calculate_energy_transfer(ds, filter_length_scales, filter_in_2d=True,
     ds_full = ds[["b", "dV", "LxLy", "uᵢ"]].copy()
 
     ds_full = calculate_density_fields_from_buoyancy(ds_full, buoyancy_name="b", density_name="ρ")
-    strain_rate_tensor = calculate_strain_tensor(ds_full["uᵢ"], dimensions=tensor_dimensions)
+
+    # Use pre-sorted reference state if provided; otherwise sort the full density field
+    if rho_sorted is not None and dz_sorted is not None:
+        print("Using pre-sorted reference density (skipping sort).")
+    else:
+        print("Computing full-field reference state (rho_sorted)...")
+        _full_sorted = sorted_timeseries(ds_full, field_to_sort="ρ", n_workers=n_workers)
+        rho_sorted = _full_sorted.rho_sorted
+        dz_sorted  = _full_sorted.dz_sorted
 
     dV = ds_full.dV
     transfer_list = []
@@ -454,11 +328,12 @@ def calculate_energy_transfer(ds, filter_length_scales, filter_in_2d=True,
 
         # --- APE cross-scale transfer ---
         # Compute ρ̄ and the large-scale reference state z₀(ρ̄) → Υˡ
+        # Pass pre-sorted full-field reference state to avoid re-sorting each iteration
         ds_filt_ℓ = calculate_density_fields_from_buoyancy(ds_filt_ℓ, buoyancy_name="b̄", density_name="ρ̄")
         filt_local_pes = local_potential_energies_timeseries(ds_filt_ℓ, density_name="ρ̄",
-                                                             rho_to_sort=ds_full.ρ,
-                                                             ape_method="precomputed_integral",
-                                                             use_numpy_version=True, n_workers=n_workers)
+                                                             rho_sorted=rho_sorted,
+                                                             dz_sorted=dz_sorted,
+                                                             n_workers=n_workers)
         # Π_APE = -(filter(ρuᵢ) - ρ̄ūᵢ) · ∇Υˡ
         Π_APE = calculate_cross_scale_ape_flux(ds_full.ρ, ds_full["uᵢ"], filt_local_pes.upsilon,
                                                gaussian_filter, filter_dims=filtered_dimensions,
