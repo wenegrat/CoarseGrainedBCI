@@ -60,6 +60,7 @@ print("\nDone!")
 #+++ Save results
 print("\n" + "="*60)
 print("Saving results...")
+energy_transfer.attrs.update(ds.attrs)
 output_filename = filename.replace(".nc", "_energy_transfer_sweep.nc")
 with ProgressBar():
     energy_transfer.to_netcdf(output_filename)

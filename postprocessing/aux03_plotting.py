@@ -6,6 +6,17 @@ This module contains visualization functions for energy timeseries data.
 
 import matplotlib.pyplot as plt
 
+def run_label(attrs):
+    """Return a formatted string with Re, Ri, Pr from dataset attributes."""
+    parts = []
+    if "Re" in attrs:
+        parts.append(f"Re = {int(attrs['Re'])}")
+    if "Ri" in attrs:
+        parts.append(f"Ri = {float(attrs['Ri']):.2f}")
+    if "Pr" in attrs:
+        parts.append(f"Pr = {float(attrs['Pr']):.0f}")
+    return ",  ".join(parts)
+
 budget_colors = {
     "tendency":    "C0",
     "flux":        "C1",
@@ -41,7 +52,9 @@ def plot_sfs_budget(budget_terms, integrated_vars, filter_length_scales, output_
                 ax=ax, x="time", label=var, color=color)
         ax.legend()
         ax.set_ylabel("Budget Terms [W or J s⁻¹]")
-        ax.set_title(f"{title}  (ℓ = {ℓ:.4f})")
+        label = run_label(budget_terms.attrs)
+        subtitle = f"\n{label}" if label else ""
+        ax.set_title(f"{title}  (ℓ = {ℓ:.4f}){subtitle}")
         ax.grid(True, alpha=0.3)
         plot_filename = str(repo_root / "figures" / os.path.basename(output_filename).replace(
             ".nc", f"_l{ℓ:.4f}.png"))

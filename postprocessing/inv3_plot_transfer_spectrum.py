@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import xarray as xr
 import matplotlib.pyplot as plt
+from aux03_plotting import run_label
 #---
 
 #+++ Configuration
@@ -42,6 +43,9 @@ for ax, var in zip(axes, ["∫Π_KE dV", "∫Π_APE dV"]):
 
 axes[0].set_title("KE cross-scale transfer spectrum")
 axes[1].set_title("APE cross-scale transfer spectrum")
+label = run_label(et.attrs)
+if label:
+    fig.suptitle(label, fontsize=11)
 
 plot_filename = str(REPO_ROOT / "figures" / os.path.basename(input_filename).replace(".nc", ".png"))
 fig.savefig(plot_filename, dpi=150, bbox_inches="tight")

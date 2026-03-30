@@ -62,6 +62,7 @@ ds_for_sort.attrs.update(ds.attrs)
 ds_for_sort = calculate_density_fields_from_buoyancy(ds_for_sort, buoyancy_name="b", density_name="ρ")
 
 sorted_density = sorted_timeseries(ds_for_sort, field_to_sort="ρ", n_workers=n_workers)
+sorted_density.attrs.update(ds.attrs)
 
 sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + "_sorted_density.nc"))
 with ProgressBar():

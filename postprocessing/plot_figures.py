@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 import xarray as xr
 import matplotlib.pyplot as plt
-from aux03_plotting import budget_colors
+from aux03_plotting import budget_colors, run_label
 #---
 
 #+++ Configuration
@@ -34,9 +34,12 @@ print("\nPlotting local KE budget terms...")
 
 ke_local_vars = ["KE_of_sfs_flow", "∂ₜ SFS KE", "Π_KE", "εₛ", "SFS APE->KE exchange"]
 
+label = run_label(ds_ke.attrs)
 for var in ke_local_vars:
     ds_ke[var].isel(y_aca=0, time=slice(None, None, time_stride)).plot(
         x="x_caa", col="time", col_wrap=5)
+    if label:
+        plt.gcf().suptitle(label, fontsize=10, y=1.01)
     plot_filename = str(REPO_ROOT / "figures" / (os.path.basename(ke_budget_file).replace(".nc", f"_{var}.png").replace("/", "_")))
     plt.savefig(plot_filename, dpi=150, bbox_inches="tight")
     plt.close()
@@ -68,14 +71,16 @@ for var, color in ke_integrated_vars.items():
     ds_ke[var].dropna("time").plot.line(ax=ax_ke, x="time", label=var, color=color)
 ax_ke.legend()
 ax_ke.set_ylabel("Budget Terms [W or J s⁻¹]")
-ax_ke.set_title("Integrated SFS KE Budget Terms")
+label = run_label(ds_ke.attrs)
+subtitle = f"\n{label}" if label else ""
+ax_ke.set_title(f"Integrated SFS KE Budget Terms{subtitle}")
 ax_ke.grid(True, alpha=0.3)
 
 for var, color in ape_integrated_vars.items():
     ds_ape[var].dropna("time").plot.line(ax=ax_ape, x="time", label=var, color=color)
 ax_ape.legend()
 ax_ape.set_ylabel("Budget Terms [W or J s⁻¹]")
-ax_ape.set_title("Integrated SFS APE Budget Terms")
+ax_ape.set_title(f"Integrated SFS APE Budget Terms{subtitle}")
 ax_ape.grid(True, alpha=0.3)
 
 plot_filename = str(REPO_ROOT / "figures" / os.path.basename(filename).replace(".nc", "_sfs_budgets.png"))
@@ -89,9 +94,12 @@ print("\nPlotting local APE budget terms...")
 
 ape_local_vars = ["Eaˢ(ρ, z)", "∂ₜ SFS APE", "Π_APE", "χₛ", "SFS KE->APE exchange", "Rˢ"]
 
+label_ape = run_label(ds_ape.attrs)
 for var in ape_local_vars:
     ds_ape[var].isel(y_aca=0, time=slice(None, None, time_stride)).plot(
         x="x_caa", col="time", col_wrap=5)
+    if label_ape:
+        plt.gcf().suptitle(label_ape, fontsize=10, y=1.01)
     plot_filename = str(REPO_ROOT / "figures" / (os.path.basename(ape_budget_file).replace(".nc", f"_{var}.png").replace("/", "_")))
     plt.savefig(plot_filename, dpi=150, bbox_inches="tight")
     plt.close()

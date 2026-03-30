@@ -136,6 +136,7 @@ for ℓ in filter_length_scales:
 sfs_ke_budget_terms = xr.concat(budget_list, dim=xr.DataArray(filter_length_scales,
                                                               dims="filter_length_scale",
                                                               name="filter_length_scale"))
+sfs_ke_budget_terms.attrs.update(ds.attrs)
 print("\nDone!")
 #---
 

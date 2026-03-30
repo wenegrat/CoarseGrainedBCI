@@ -207,6 +207,7 @@ def filter_fields(ds, filter_length_scales, filter_in_2d=True):
                                name="filter_length_scale")
     ds_filt = xr.concat(ds_filt_list, dim=scale_coord)
     ds_filt["dV"] = ds["dV"]
+    ds_filt.attrs.update(ds.attrs)
     ds_filt.attrs["filter_ndim"] = 2 if filter_in_2d else 1
     return ds_filt
 #---

@@ -65,6 +65,7 @@ print("\nDone!")
 #+++ Save results
 print("\n" + "="*60)
 print("Saving results...")
+energy_transfer.attrs.update(ds.attrs)
 output_filename = str(PP_OUTPUT / (Path(filename).stem + "_energy_transfer.nc"))
 with ProgressBar():
     energy_transfer.to_netcdf(output_filename)

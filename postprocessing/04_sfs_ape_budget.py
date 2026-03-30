@@ -181,6 +181,7 @@ for ℓ in filter_length_scales:
 sfs_ape_budget_terms = xr.concat(budget_list, dim=xr.DataArray(filter_length_scales,
                                                                dims="filter_length_scale",
                                                                name="filter_length_scale"))
+sfs_ape_budget_terms.attrs.update(ds.attrs)
 # Scale-independent fields don't need filter_length_scale dimension
 sfs_ape_budget_terms["ρ"] = ds_full.ρ
 print("\nDone!")
