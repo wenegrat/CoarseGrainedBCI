@@ -217,8 +217,9 @@ bₙ = @lift view(b_timeseries[$n], :, 1, :)
 
 fig = Figure(size=(900, 500))
 
-title = @lift @sprintf("Kelvin-Helmholtz Instability: t = %.1f", times[$n])
-fig[1, :] = Label(fig, title, fontsize=24, tellwidth=false)
+params_str = @sprintf("Re = %d,  Ri = %.2f,  Pr = %d", params.Re, params.Ri, params.Pr)
+title = @lift @sprintf("Kelvin-Helmholtz Instability  (%s)\nt = %.1f", params_str, times[$n])
+fig[1, 1:4] = Label(fig, title, fontsize=20, tellwidth=false, justification=:center)
 
 kwargs = (xlabel="x", ylabel="z", limits=((-5, 5), (-5, 5)), aspect=1)
 
