@@ -8,7 +8,7 @@
 #PBS -M tchor@umd.edu
 #PBS -m ae
 #PBS -r n
-#PBS -l select=1:ncpus=18:mem=1000GB:ngpus=0
+#PBS -l select=1:ncpus=18:mem=730GB:ngpus=0
 #PBS -l job_priority=premium
 
 SIM=khi_1458x1x2048
@@ -35,3 +35,7 @@ qstat -f $PBS_JOBID >> logs/inv1_filter_fields_sweep_${SIM}.out
 time $PYTHON -u inv2_energy_transfer_sweep.py --filename output/${SIM}.nc --n-workers 18 2>&1 | tee logs/inv2_energy_transfer_sweep_${SIM}.out
 qstat -f $PBS_JOBID >> logs/inv2_energy_transfer_sweep_${SIM}.log
 qstat -f $PBS_JOBID >> logs/inv2_energy_transfer_sweep_${SIM}.out
+
+time $PYTHON -u inv3_plot_transfer_spectrum.py --filename output/${SIM}.nc 2>&1 | tee logs/inv3_plot_transfer_spectrum_${SIM}.out
+qstat -f $PBS_JOBID >> logs/inv3_plot_transfer_spectrum_${SIM}.log
+qstat -f $PBS_JOBID >> logs/inv3_plot_transfer_spectrum_${SIM}.out
