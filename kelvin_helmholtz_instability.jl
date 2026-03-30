@@ -1,5 +1,4 @@
 # Kelvin-Helmholtz instability simulation
-
 using Oceananigans
 using CairoMakie
 using Printf
@@ -8,6 +7,7 @@ using CUDA: has_cuda_gpu
 using Oceananigans.Architectures: on_architecture
 using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation
 using Oceanostics.ProgressMessengers
+@info "Finished loading packages"
 
 include("utils.jl")
 
@@ -35,6 +35,8 @@ params = (
     h = 1/4,
     perturbation_amplitude = 0.01,
     stop_time = 200.0,
+    Re₀ = 1e-3, # Reynolds number (ν = 1/Re)
+    Pr = 1,     # Prandtl number (κ = ν/Pr)
 )
 #---
 
@@ -43,16 +45,13 @@ if has_cuda_gpu()
     arch = GPU()
     x_aspect_ratio = 1   # Δx / Δz ratio
     y_aspect_ratio = Inf # Δy / Δz ratio
-    ν = 5e-5
-    κ = 5e-5
 else
     @warn "No CUDA GPU detected. Running on CPU with a coarse grid and high aspect ratio."
 
     arch = CPU()
     x_aspect_ratio = 2   # Δx / Δz ratio
     y_aspect_ratio = Inf # Δy / Δz ratio
-    ν = 2e-3
-    κ = 2e-3
+    params = (; params..., Re = 500) # Reduce Re for coarser CPU run
 end
 
 @info "Cell aspect ratio: Δx/Δz = $(x_aspect_ratio), Δy/Δz = $(y_aspect_ratio)"
@@ -65,13 +64,26 @@ Ny = isinf(y_aspect_ratio) ? 1 : round(Int, Nz * (params.Ly / params.Lz) / y_asp
 Nx = closest_factor_number((2, 3, 5), Nx)
 Ny = closest_factor_number((2, 3, 5), Ny)
 
-params = (; params..., Nx, Ny, Nz, ν, κ)
+params = (; params..., Nx, Ny, Nz)
 
 grid = RectilinearGrid(arch; size=(params.Nx, params.Ny, params.Nz),
                        x=(-params.Lx/2, params.Lx/2),
                        y=(-params.Ly/2, params.Ly/2),
                        z=(-params.Lz/2, params.Lz/2),
                        topology=(Periodic, Periodic, Bounded))
+#---
+
+#+++ Define Reynolds number, viscosity and diffusivity
+let
+    if grid.Ny == 1
+        Re = params.Re₀ * params.Nz^2
+    else
+        Re = params.Re₀ * params.Nz^(4/3) # Double check this
+    end
+    ν = 1 / Re
+    κ = ν / params.Pr
+    global params = merge(params, (; ν, κ, Re))
+end
 #---
 
 #+++ Create model
