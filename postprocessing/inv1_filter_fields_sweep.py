@@ -15,7 +15,7 @@ parser.add_argument("--filename", default="output/khi_128x1x256.nc",
 args = parser.parse_args()
 REPO_ROOT = Path(__file__).resolve().parent.parent
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
-filter_length_scales = np.geomspace(0.05, 10, 30) # Length scales for filtering
+filter_length_scales = np.geomspace(0.01, 10, 35) # Length scales for filtering
 #---
 
 #+++ Load data and grid
