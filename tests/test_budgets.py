@@ -2,7 +2,7 @@
 Budget closure tests for SFS KE and APE budgets.
 
 For each filter scale, checks that the residual is small relative to
-the largest term in the budget: max(|residual|) / max(|terms|) < THRESHOLD.
+the smallest budget term: max(|residual|) / min_v(max(|term_v|)) < THRESHOLD.
 """
 
 import pytest
@@ -12,13 +12,20 @@ from pathlib import Path
 
 PP_OUTPUT = Path(__file__).parent.parent / "postprocessing" / "output"
 STEM      = "khi_180x1x512"
-THRESHOLD = 0.05  # residual must be < 5% of the largest budget term
+# Residual must be < THRESHOLD x 100% of the smallest budget term (this number is large since we test with pretty
+# coarse simulations
+THRESHOLD = 0.12
 
 
 def relative_residual(ds, residual_var, budget_vars):
-    """max(|residual|) / max over budget terms of max(|term|)"""
+    """max(|residual|) / min_v(max(|term_v|))
+
+    The denominator is the smallest peak value among all budget terms
+    (each term's peak is its max absolute value over all time and space).
+    This provides a stricter normalisation than dividing by the largest term.
+    """
     residual = np.nanmax(np.abs(ds[residual_var].values))
-    scale    = max(np.nanmax(np.abs(ds[v].values)) for v in budget_vars)
+    scale    = min(np.nanmax(np.abs(ds[v].values)) for v in budget_vars)
     return residual / scale
 
 
@@ -30,7 +37,7 @@ def print_budget_summary(ds, residual_var, budget_vars, rel):
     for v in budget_vars:
         print(f"  {v:<35}  {np.nanmax(np.abs(ds[v].values)):.4e}")
     print(f"  {residual_var:<35}  {np.nanmax(np.abs(ds[residual_var].values)):.4e}")
-    print(f"  {'relative residual':<35}  {rel:.3%}  ({'PASS' if rel < THRESHOLD else 'FAIL'}, threshold={THRESHOLD:.0%})")
+    print(f"  {'residual / min(terms)':<35}  {rel:.3%}  ({'PASS' if rel < THRESHOLD else 'FAIL'}, threshold={THRESHOLD:.0%})")
 
 
 def load(suffix):
