@@ -6,6 +6,10 @@ on:
       - main
   issue_comment:
     types: [created]
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   test:
@@ -15,6 +19,7 @@ jobs:
 
     if: |
       github.event_name == 'push' ||
+      github.event_name == 'workflow_dispatch' ||
       (github.event.issue.pull_request != null &&
        startsWith(github.event.comment.body, 'test'))
 
@@ -90,6 +95,9 @@ jobs:
       - name: Install Python packages
         run: pip install -r tests/requirements.txt
 
+      - name: Create output directories
+        run: mkdir -p figures animations postprocessing/output
+
       - name: Run postprocessing pipeline
         working-directory: postprocessing
         run: bash 00_get_budgets.sh output/khi_180x1x512.nc
@@ -100,6 +108,30 @@ jobs:
       - name: Run budget closure tests
         id: pytest
         run: pytest tests/ -v -s
+
+      - name: List output files
+        if: always()
+        run: |
+          echo "=== figures/ ==="
+          ls -la figures/ || echo "(directory missing)"
+          echo "=== animations/ ==="
+          ls -la animations/ || echo "(directory missing)"
+
+      - name: Upload simulation animation
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: simulation-animation
+          path: animations/*.mp4
+          if-no-files-found: warn
+
+      - name: Upload budget plots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: budget-plots
+          path: figures/*.png
+          if-no-files-found: warn
 
       # -----------------------------------------------------------------------
       # Report back to PR
