@@ -2,7 +2,6 @@ import os
 from pathlib import Path
 import numpy as np
 import xarray as xr
-import gcm_filters
 
 PP_OUTPUT = Path(__file__).resolve().parent / "output"
 
@@ -109,49 +108,50 @@ def calculate_gradient(scalar, output_name="grad_scalar", dimensions=("x_caa", "
     return aux_ds[output_name]
 #---
 
-#+++ Gaussian filter (unified 1D / 2D)
+#+++ Gaussian filter (x: periodic, z: bounded)
 class GaussianFilter:
-    """Unified Gaussian filter with a gcm_filters-compatible .apply() interface.
+    """Gaussian filter in x (periodic) and z (bounded) directions.
 
-    In 2D mode: wraps gcm_filters.Filter (REGULAR grid).
-    In 1D mode: applies scipy gaussian_filter1d along dims[0] with mode='wrap'
-                (suitable for periodic x with y=1 simulations).
+    Two sequential 1D scipy Gaussian convolutions:
+      - x: mode='wrap'    — periodic BC
+      - z: mode='reflect' — no-flux (Neumann) BC at domain boundaries
 
-    Scale convention is consistent with gcm_filters: filter_scale = ℓ * sqrt(12),
-    so the real-space Gaussian sigma = ℓ, and sigma in grid units = ℓ / dx_min.
+    sigma = ℓ / dx_min in grid units, so the physical-space sigma equals ℓ.
     """
-    def __init__(self, ℓ, dx_min, filter_in_2d=True):
-        self.filter_in_2d = filter_in_2d
-        if filter_in_2d:
-            self._filter = gcm_filters.Filter(
-                filter_scale=ℓ * np.sqrt(12),
-                dx_min=dx_min,
-                filter_shape=gcm_filters.FilterShape.GAUSSIAN,
-                grid_type=gcm_filters.GridType.REGULAR,
-            )
-        else:
-            self._sigma_grid = ℓ / dx_min
+    def __init__(self, ℓ, dx_min, dz_min):
+        self._sigma_x = ℓ / dx_min
+        self._sigma_z = ℓ / dz_min
 
     def apply(self, da, dims):
-        if self.filter_in_2d:
-            return self._filter.apply(da, dims=dims)
+        """Apply filter in dims[0] (x, periodic) then dims[1] (z, bounded).
+
+        Parameters
+        ----------
+        da : xr.DataArray
+        dims : list of str
+            [x_dim, z_dim], e.g. ['x_caa', 'z_aac']
+        """
         from scipy.ndimage import gaussian_filter1d
-        return xr.apply_ufunc(
+        x_dim, z_dim = dims
+        da_x = xr.apply_ufunc(
             gaussian_filter1d, da,
-            input_core_dims=[[dims[0]]],
-            output_core_dims=[[dims[0]]],
-            kwargs={"sigma": self._sigma_grid, "axis": -1, "mode": "wrap"},
+            input_core_dims=[[x_dim]],
+            output_core_dims=[[x_dim]],
+            kwargs={"sigma": self._sigma_x, "axis": -1, "mode": "wrap"},
             dask="parallelized",
             output_dtypes=[da.dtype],
         )
+        return xr.apply_ufunc(
+            gaussian_filter1d, da_x,
+            input_core_dims=[[z_dim]],
+            output_core_dims=[[z_dim]],
+            kwargs={"sigma": self._sigma_z, "axis": -1, "mode": "reflect"},
+            dask="parallelized",
+            output_dtypes=[da_x.dtype],
+        )
 
-    def __getattr__(self, name):
-        if self.filter_in_2d:
-            return getattr(self._filter, name)
-        raise AttributeError(f"GaussianFilter has no attribute '{name}' in 1D mode")
 
-
-def make_gaussian_filter(ℓ, ds, filter_in_2d):
+def make_gaussian_filter(ℓ, ds):
     """Return a GaussianFilter for length scale ℓ using grid spacing from ds.
 
     Parameters
@@ -159,48 +159,38 @@ def make_gaussian_filter(ℓ, ds, filter_in_2d):
     ℓ : float
         Filter length scale in physical units.
     ds : xr.Dataset
-        Simulation dataset (must contain Δx_caa and Δy_aca).
-    filter_in_2d : bool
-        If True, filter in x and y (gcm_filters). If False, filter in x only (scipy).
+        Simulation dataset (must contain Δx_caa and Δz_aac).
     """
-    if filter_in_2d:
-        dx_min = float(min(ds.Δx_caa.min(), ds.Δy_aca.min()))
-    else:
-        dx_min = float(ds.Δx_caa.min())
-    return GaussianFilter(ℓ, dx_min, filter_in_2d=filter_in_2d)
+    dx_min = float(ds.Δx_caa.min())
+    dz_min = float(ds.Δz_aac.min())
+    return GaussianFilter(ℓ, dx_min, dz_min)
 
 
-def filter_fields(ds, filter_length_scales, filter_in_2d=True):
-    """Filter velocity and buoyancy fields at each length scale.
+def filter_fields(ds, filter_length_scales):
+    """Filter velocity and buoyancy fields at each length scale in x and z.
 
     Parameters
     ----------
     ds : xr.Dataset
-        Dataset with velocity components (u,v,w or u,w) and buoyancy b.
+        Dataset with velocity components (u, w) and buoyancy b.
     filter_length_scales : array-like
         Physical length scales at which to apply the filter.
-    filter_in_2d : bool
-        If True, filter in x and y (3D simulation). If False, filter in x only
-        (xz simulation with y_aca=1).
 
     Returns
     -------
     ds_filt : xr.Dataset
         Dataset with filtered fields ūᵢ and b̄ at each filter_length_scale,
-        plus dV (scale-independent) and the filter_ndim global attribute.
+        plus dV (scale-independent).
     """
-    if filter_in_2d:
-        ds = condense_velocities(ds, indices=(1, 2, 3))
-    else:
-        ds = condense_uw_velocities(ds, indices=(1, 3))
+    ds = condense_uw_velocities(ds, indices=(1, 3))
 
     ds_filt_list = []
     for ℓ in filter_length_scales:
         print(f"  filter_length_scale = {ℓ:.4f}...")
-        gf = make_gaussian_filter(ℓ, ds, filter_in_2d)
+        gf = make_gaussian_filter(ℓ, ds)
         ds_filt_list.append(xr.Dataset({
-            "ūᵢ": gf.apply(ds["uᵢ"], dims=["x_caa", "y_aca"]),
-            "b̄":  gf.apply(ds["b"],  dims=["x_caa", "y_aca"]),
+            "ūᵢ": gf.apply(ds["uᵢ"], dims=["x_caa", "z_aac"]),
+            "b̄":  gf.apply(ds["b"],  dims=["x_caa", "z_aac"]),
         }))
 
     scale_coord = xr.DataArray(filter_length_scales, dims="filter_length_scale",
@@ -208,14 +198,14 @@ def filter_fields(ds, filter_length_scales, filter_in_2d=True):
     ds_filt = xr.concat(ds_filt_list, dim=scale_coord)
     ds_filt["dV"] = ds["dV"]
     ds_filt.attrs.update(ds.attrs)
-    ds_filt.attrs["filter_ndim"] = 2 if filter_in_2d else 1
+    ds_filt.attrs["filter_ndim"] = 2
     return ds_filt
 #---
 
 #+++ Dask-parallel filter wrapper
 class DaskParallelFilter:
     """
-    Thin proxy around gcm_filters.Filter that automatically chunks the input
+    Thin proxy around a GaussianFilter that automatically chunks the input
     along the time dimension and computes with a thread pool, giving ~N×
     speedup where N is the number of available cores.
 

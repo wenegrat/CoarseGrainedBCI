@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
-from aux00_utils import load_dataset_and_grid, condense_velocities, condense_uw_velocities, integrate, make_gaussian_filter, load_energy_transfer
+from aux00_utils import load_dataset_and_grid, condense_uw_velocities, integrate, make_gaussian_filter, load_energy_transfer
 from aux03_plotting import budget_colors, plot_sfs_budget
 from aux01_pe_functions import calculate_ape_to_ke_exchange_term
 from aux02_ke_functions import (
@@ -40,21 +40,16 @@ print("Loading pre-filtered fields...")
 
 filtered_filename = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities.nc"))
 ds_filt = xr.open_dataset(filtered_filename, decode_times=False).chunk({"time": 1})
-filter_in_2d = int(ds_filt.attrs.get("filter_ndim", 2)) == 2
-filtered_dimensions = ["x_caa", "y_aca"] if filter_in_2d else ["x_caa"]
-
+filtered_dimensions = ["x_caa", "z_aac"]
 filter_length_scales = ds_filt.filter_length_scale.values
-tensor_dimensions = ("x_caa", "y_aca", "z_aac") if filter_in_2d else ("x_caa", "z_aac")
+tensor_dimensions = ("x_caa", "z_aac")
 
-if filter_in_2d:
-    ds = condense_velocities(ds, indices=[1, 2, 3])
-else:
-    ds = condense_uw_velocities(ds, indices=[1, 3])
+ds = condense_uw_velocities(ds, indices=[1, 3])
 ds_full = ds[["b", "dV", "uᵢ"]].copy()
 
 print(f"Pre-filtered fields loaded from: {filtered_filename}")
 print(f"Filter length scales: {filter_length_scales}")
-print(f"Filter dimensions: {'2D (x,y)' if filter_in_2d else '1D (x only)'}")
+print(f"Filter dimensions: x and z")
 #---
 
 #+++ Calculate strain tensor of the full (unfiltered) flow  [scale-independent]
@@ -76,7 +71,7 @@ budget_list = []
 for ℓ in filter_length_scales:
     print(f"\n--- filter_length_scale = {ℓ:.4f} ---")
 
-    gaussian_filter = make_gaussian_filter(ℓ, ds, filter_in_2d)
+    gaussian_filter = make_gaussian_filter(ℓ, ds)
 
     ds_filt_ℓ = ds_filt.sel(filter_length_scale=ℓ)
 

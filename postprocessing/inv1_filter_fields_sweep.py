@@ -29,14 +29,10 @@ print(f"Dataset loaded: {len(ds.time)} time steps")
 #---
 
 #+++ Filter velocity and buoyancy fields at each length scale
-filter_in_2d = ds.sizes["x_caa"] > 1 and ds.sizes["y_aca"] > 1
 print("\n" + "="*60)
-if filter_in_2d:
-    print("Filtering velocity and buoyancy fields in 2D (x and y)...")
-else:
-    print("Filtering velocity and buoyancy fields in 1D (x only)...")
+print("Filtering velocity and buoyancy fields in x and z...")
 
-ds_filt = filter_fields(ds, filter_length_scales, filter_in_2d=filter_in_2d)
+ds_filt = filter_fields(ds, filter_length_scales)
 print("Done!")
 #---
 

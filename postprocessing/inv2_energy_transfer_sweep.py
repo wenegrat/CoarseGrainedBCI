@@ -41,17 +41,15 @@ ds_filt = xr.open_dataset(filtered_filename, decode_times=False).chunk(chunks)
 ds = ds.reindex(time=ds_filt.time).chunk(chunks)
 
 filter_length_scales = ds_filt.filter_length_scale.values
-filter_in_2d = int(ds_filt.attrs.get("filter_ndim", 2)) == 2
 print(f"  Loaded from: {filtered_filename}  ({time.time()-t0:.1f}s)")
 print(f"  Filter length scales: {filter_length_scales}")
-print(f"  Filter dimensions: {'2D (x,y)' if filter_in_2d else '1D (x only)'}")
+print(f"  Filter dimensions: x and z")
 #---
 
 #+++ Calculate cross-scale transfer terms
 print("\n" + "="*60)
 print("Calculating cross-scale transfer terms...")
 energy_transfer = calculate_energy_transfer(ds, filter_length_scales,
-                                            filter_in_2d=filter_in_2d,
                                             ds_filt=ds_filt,
                                             n_workers=n_workers)
 print("\nDone!")
