@@ -114,7 +114,7 @@ class GaussianFilter:
 
     Two sequential 1D scipy Gaussian convolutions:
       - x: mode='wrap'    — periodic BC
-      - z: mode='reflect' — no-flux (Neumann) BC at domain boundaries
+      - z: mode='nearest' — extends with boundary value beyond domain walls
 
     sigma = ℓ / dx_min in grid units, so the physical-space sigma equals ℓ.
     """
@@ -145,7 +145,7 @@ class GaussianFilter:
             gaussian_filter1d, da_x,
             input_core_dims=[[z_dim]],
             output_core_dims=[[z_dim]],
-            kwargs={"sigma": self._sigma_z, "axis": -1, "mode": "reflect"},
+            kwargs={"sigma": self._sigma_z, "axis": -1, "mode": "nearest"},
             dask="parallelized",
             output_dtypes=[da_x.dtype],
         )
