@@ -38,6 +38,17 @@ params = (
     Re₀ = 1e-3, # Reynolds number (ν = 1/Re)
     Pr = 1,     # Prandtl number (κ = ν/Pr)
 )
+
+# Theoretical most unstable wavenumber for the KH instability.
+# Velocity profile: u = tanh(z), shear layer scale δ_u = 1 (implicit).
+# Michalke (1964): k_max · δ_u = 0.4446 for the inviscid, unstratified case.
+# Hazel (1972): approximate stratification correction ∝ √(1 − 4·Ri)
+#               (exact for same-scale profiles R = δ_b/δ_u = 1; here R = h = 1/4, so approximate).
+let k_max = 0.4446 * sqrt(max(0.0, 1 - 4*params.Ri))
+    global params = (; params..., k_max_KH = k_max, λ_max_KH = 2π / k_max)
+end
+@info @sprintf("Most unstable KH wavenumber: k_max = %.4f  (λ_max = %.2f, Lx = %.1f)",
+               params.k_max_KH, params.λ_max_KH, params.Lx)
 #---
 
 #+++ Create grid
