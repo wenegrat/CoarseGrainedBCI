@@ -12,7 +12,7 @@ from aux02_ke_functions import calculate_energy_transfer
 #+++ Configuration
 import argparse
 parser = argparse.ArgumentParser(description="Calculate cross-scale KE and APE transfer terms")
-parser.add_argument("--filename", default="output/khi_128x1x256.nc",
+parser.add_argument("--filename", default="output/khi_90x1x256.nc",
                     help="Path to simulation NetCDF file")
 parser.add_argument("--n-workers", type=int, default=18,
                     help="Number of CPU workers for APE sorting (ThreadPoolExecutor)")
@@ -20,7 +20,7 @@ args = parser.parse_args()
 REPO_ROOT = Path(__file__).resolve().parent.parent
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 n_workers = args.n_workers
-chunks = dict(time=1, z_aac=10)
+chunks = dict(time=1)
 #---
 
 #+++ Load data and grid

@@ -10,19 +10,19 @@ from aux00_utils import load_dataset_and_grid, filter_fields
 #+++ Configuration
 import argparse
 parser = argparse.ArgumentParser(description="Filter velocity and buoyancy fields for cross-scale energy transfer sweep")
-parser.add_argument("--filename", default="output/khi_128x1x256.nc",
+parser.add_argument("--filename", default="output/khi_90x1x256.nc",
                     help="Path to simulation NetCDF file")
 args = parser.parse_args()
 REPO_ROOT = Path(__file__).resolve().parent.parent
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
-filter_length_scales = np.geomspace(0.01, 10, 35) # Length scales for filtering
+filter_length_scales = np.geomspace(0.01, 50, 30) # Length scales for filtering
 #---
 
 #+++ Load data and grid
 print("\n" + "="*60)
 print("Loading data and grid...")
 ds = load_dataset_and_grid(filename)
-ds = ds.chunk(dict(time=1, z_aac=10))
+ds = ds.chunk(dict(time=1))
 
 ds = ds.sel(time=[30, 40, 50, 60, 70], method="nearest")
 print(f"Dataset loaded: {len(ds.time)} time steps")
