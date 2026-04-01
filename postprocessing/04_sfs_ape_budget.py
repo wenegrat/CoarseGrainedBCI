@@ -13,6 +13,7 @@ from aux00_utils import load_dataset_and_grid, condense_uw_velocities, integrate
 from aux03_plotting import budget_colors, plot_sfs_budget
 from aux01_pe_functions import (
     calculate_density_fields_from_buoyancy,
+    calculate_b_r,
     local_potential_energies_timeseries,  # used for filtered density in loop
     calculate_sfs_ape_tendency,
     calculate_sfs_R_correction,
@@ -78,6 +79,10 @@ t0 = time.time()
 full_local_pes = local_potential_energies_timeseries(ds_full, ds_sorted.rho_sorted, ds_sorted.dz_sorted,
                                                      density_name="ρ", n_workers=n_workers)
 print(f"  full_local_pes calculated  ({time.time()-t0:.1f}s)")
+
+t0 = time.time()
+b_r = calculate_b_r(ds_full.ρ, full_local_pes.rho_sorted)
+print(f"  b_r calculated  ({time.time()-t0:.1f}s)")
 #---
 
 #+++ Loop over filter scales and calculate budget terms
@@ -120,13 +125,14 @@ for ℓ in filter_length_scales:
     print(f"  sfs_ape_dissipation  ({time.time()-t0:.1f}s)")
 
     t0 = time.time()
+    b_r_filt = gaussian_filter.apply(b_r, dims=filtered_dimensions)
     ape_to_ke_exchange = calculate_ape_to_ke_exchange_term(
         ds_full["uᵢ"].sel(i=3),
-        ds_full.b,
+        b_r,
         gaussian_filter,
         filter_dims=filtered_dimensions,
         filtered_w=ds_filt_ℓ["ūᵢ"].sel(i=3),
-        filtered_b=ds_filt_ℓ["b̄"],)
+        filtered_b=b_r_filt,)
     print(f"  ape_to_ke_exchange  ({time.time()-t0:.1f}s)")
 
     t0 = time.time()

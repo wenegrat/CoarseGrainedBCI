@@ -6,7 +6,7 @@ import xarray as xr
 from dask.diagnostics.progress import ProgressBar
 from aux00_utils import load_dataset_and_grid, condense_uw_velocities, integrate, make_gaussian_filter, load_energy_transfer
 from aux03_plotting import budget_colors, plot_sfs_budget
-from aux01_pe_functions import calculate_ape_to_ke_exchange_term
+from aux01_pe_functions import calculate_density_fields_from_buoyancy, calculate_b_r, calculate_ape_to_ke_exchange_term
 from aux02_ke_functions import (
     calculate_sfs_stress_tensor,
     calculate_strain_tensor,
@@ -47,9 +47,21 @@ tensor_dimensions = ("x_caa", "z_aac")
 ds = condense_uw_velocities(ds, indices=[1, 3])
 ds_full = ds[["b", "dV", "uᵢ"]].copy()
 
+sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + "_sorted_density.nc"))
+ds_sorted = xr.open_dataset(sorted_density_filename, decode_times=False).chunk({"time": 1})
+
 print(f"Pre-filtered fields loaded from: {filtered_filename}")
+print(f"Sorted density loaded from: {sorted_density_filename}")
 print(f"Filter length scales: {filter_length_scales}")
 print(f"Filter dimensions: x and z")
+#---
+
+#+++ Calculate density and relative buoyancy [scale-independent]
+print("\n" + "="*60)
+print("Calculating density and relative buoyancy...")
+ds_full = calculate_density_fields_from_buoyancy(ds_full, buoyancy_name="b", density_name="ρ")
+b_r = calculate_b_r(ds_full.ρ, ds_sorted.rho_sorted)
+print("Done!")
 #---
 
 #+++ Calculate strain tensor of the full (unfiltered) flow  [scale-independent]
@@ -90,13 +102,14 @@ for ℓ in filter_length_scales:
                                                       filter_dims=filtered_dimensions)
 
     print("  APE->KE exchange term...")
+    b_r_filt = gaussian_filter.apply(b_r, dims=filtered_dimensions)
     ape_to_ke_exchange = calculate_ape_to_ke_exchange_term(
         ds_full["uᵢ"].sel(i=3), # full w
-        ds_full.b,              # full buoyancy
+        b_r,                    # relative buoyancy
         gaussian_filter,
         filter_dims=filtered_dimensions,
         filtered_w=ds_filt_ℓ["ūᵢ"].sel(i=3),
-        filtered_b=ds_filt_ℓ["b̄"],
+        filtered_b=b_r_filt,
     )
 
     # ∂KE_s/∂t   centred finite difference, staggered time grid
