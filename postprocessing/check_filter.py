@@ -37,4 +37,10 @@ print(ds_filt)
 #---
 
 from matplotlib import pyplot as plt
-ds_filt.circle_filtered.plot(col="filter_length_scale", x="x_caa")
+g = ds_filt.circle_filtered.plot(col="filter_length_scale", x="x_caa",)
+
+# Set "data aspect ratio" to 1 for each subplot (axes)
+for ax in np.ravel(g.axes):
+    ax.set_aspect('equal', adjustable='box')
+
+plt.show()
