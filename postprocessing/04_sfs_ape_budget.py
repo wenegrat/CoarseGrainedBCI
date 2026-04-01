@@ -20,6 +20,7 @@ from aux01_pe_functions import (
     calculate_sfs_ape_dissipation,
     calculate_ape_to_ke_exchange_term,
 )
+from aux01_pe_functions import g, ρ0
 #---
 
 #+++ Configuration
@@ -81,7 +82,10 @@ full_local_pes = local_potential_energies_timeseries(ds_full, ds_sorted.rho_sort
 print(f"  full_local_pes calculated  ({time.time()-t0:.1f}s)")
 
 t0 = time.time()
-b_r = calculate_b_r(ds_full.ρ, full_local_pes.rho_sorted)
+# b_r = calculate_b_r(ds_full.ρ, full_local_pes.rho_sorted)
+ds_sorted_on_z_aac = ds_sorted.rho_sorted.rename(z_1d_sorted="z_aac").interp(z_aac=ds_full.ρ.z_aac)
+b_r = -g*(ds_full.b - ds_sorted_on_z_aac) / ρ0
+
 print(f"  b_r calculated  ({time.time()-t0:.1f}s)")
 #---
 
