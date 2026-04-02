@@ -12,12 +12,13 @@ def integrate(da, dV, dims=("x_caa", "y_aca", "z_aac")):
 #---
 
 #+++ Load data
-def _pad_domain_in_z(ds, top_value=1.0, bottom_value=-1.0):
-    """Extend the z domain to twice its original height.
+def _pad_domain_in_z(ds):
+    """Extend the z domain to twice its original height using edge-value padding.
 
-    Adds Nz//2 constant-value cells at the bottom (bottom_value) and Nz//2 at
-    the top (top_value). Assumes a uniform z grid. Δz_aac is extended with the
-    same constant dz; dV and z-extent attributes are recomputed.
+    Adds Nz//2 cells at the bottom (each filled with that field's bottom boundary
+    value) and Nz//2 cells at the top (each filled with the top boundary value),
+    doubling the domain height. Assumes a uniform z grid. Δz_aac is extended with
+    the same constant dz; dV and z-extent attributes are recomputed.
     """
     Nz     = ds.sizes["z_aac"]
     Nz_pad = Nz // 2
@@ -33,10 +34,11 @@ def _pad_domain_in_z(ds, top_value=1.0, bottom_value=-1.0):
         if name in {"Δz_aac", "dV"} or "z_aac" not in da.dims:
             new_vars[name] = da
             continue
-        bot_slab = xr.full_like(da.isel(z_aac=slice(None, Nz_pad)), fill_value=bottom_value)
-        top_slab = xr.full_like(da.isel(z_aac=slice(-Nz_pad, None)), fill_value=top_value)
-        bot_slab = bot_slab.assign_coords(z_aac=z_bot)
-        top_slab = top_slab.assign_coords(z_aac=z_top)
+        # Use actual boundary values: multiply a zero slab by 0 then add boundary scalar
+        bot_slab = (da.isel(z_aac=slice(None, Nz_pad)) * 0
+                    + da.isel(z_aac=0)).assign_coords(z_aac=z_bot)
+        top_slab = (da.isel(z_aac=slice(-Nz_pad, None)) * 0
+                    + da.isel(z_aac=-1)).assign_coords(z_aac=z_top)
         new_vars[name] = xr.concat([bot_slab, da, top_slab], dim="z_aac")
 
     new_vars["Δz_aac"] = xr.DataArray(
@@ -90,7 +92,7 @@ def load_dataset_and_grid(filename):
     ds["dV"] = ds.Δx_caa * ds.Δy_aca * ds.Δz_aac
     ds["LxLy"] = ds.Lx * ds.Ly
 
-    # Pad domain in z (double height: 1 at top, -1 at bottom)
+    # Pad domain in z (double height using boundary values of each field)
     ds = _pad_domain_in_z(ds)
 
     return ds
