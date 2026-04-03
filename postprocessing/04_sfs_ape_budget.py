@@ -9,10 +9,10 @@ from pathlib import Path
 import time
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
-from aux00_utils import load_dataset_and_grid, condense_velocities, condense_uw_velocities, integrate, make_gaussian_filter, load_energy_transfer
-from aux03_plotting import budget_colors, plot_sfs_budget
+from aux00_utils import load_dataset_and_grid, condense_uw_velocities, integrate, make_gaussian_filter, load_energy_transfer
 from aux01_pe_functions import (
     calculate_density_fields_from_buoyancy,
+    calculate_b_r,
     local_potential_energies_timeseries,  # used for filtered density in loop
     calculate_sfs_ape_tendency,
     calculate_sfs_R_correction,
@@ -52,14 +52,13 @@ filtered_filename = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities
 t0 = time.time()
 ds_filt = xr.open_dataset(filtered_filename, decode_times=False).chunk({"time": 1})
 filter_length_scales = ds_filt.filter_length_scale.values
-filter_in_2d = int(ds_filt.attrs.get("filter_ndim", 2)) == 2
-filtered_dimensions = ["x_caa", "y_aca"] if filter_in_2d else ["x_caa"]
+filtered_dimensions = ["x_caa", "z_aac"]
 
-ds = condense_velocities(ds, indices=[1, 2, 3]) if filter_in_2d else condense_uw_velocities(ds, indices=[1, 3])
+ds = condense_uw_velocities(ds, indices=[1, 3])
 ds_full = ds[["b", "dV", "LxLy", "uᵢ"]].copy()
 print(f"  Pre-filtered fields loaded from: {filtered_filename}  ({time.time()-t0:.1f}s)")
 print(f"  Filter length scales: {filter_length_scales}")
-print(f"  Filter dimensions: {'2D (x,y)' if filter_in_2d else '1D (x only)'}")
+print(f"  Filter dimensions: x and z")
 
 sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + "_sorted_density.nc"))
 t0 = time.time()
@@ -79,6 +78,10 @@ t0 = time.time()
 full_local_pes = local_potential_energies_timeseries(ds_full, ds_sorted.rho_sorted, ds_sorted.dz_sorted,
                                                      density_name="ρ", n_workers=n_workers)
 print(f"  full_local_pes calculated  ({time.time()-t0:.1f}s)")
+
+t0 = time.time()
+b_r = calculate_b_r(ds_full.ρ, full_local_pes.rho_sorted)
+print(f"  b_r calculated  ({time.time()-t0:.1f}s)")
 #---
 
 #+++ Loop over filter scales and calculate budget terms
@@ -93,7 +96,7 @@ budget_list = []
 for ℓ in filter_length_scales:
     print(f"\n--- filter_length_scale = {ℓ:.4f} ---")
 
-    gaussian_filter = make_gaussian_filter(ℓ, ds, filter_in_2d)
+    gaussian_filter = make_gaussian_filter(ℓ, ds)
 
     ds_filt_ℓ = ds_filt.sel(filter_length_scale=ℓ).drop_vars("filter_length_scale")
     ds_filt_ℓ["LxLy"] = ds["LxLy"]
@@ -121,13 +124,14 @@ for ℓ in filter_length_scales:
     print(f"  sfs_ape_dissipation  ({time.time()-t0:.1f}s)")
 
     t0 = time.time()
+    b_r_filt = gaussian_filter.apply(b_r, dims=filtered_dimensions)
     ape_to_ke_exchange = calculate_ape_to_ke_exchange_term(
         ds_full["uᵢ"].sel(i=3),
-        ds_full.b,
+        b_r,
         gaussian_filter,
         filter_dims=filtered_dimensions,
         filtered_w=ds_filt_ℓ["ūᵢ"].sel(i=3),
-        filtered_b=ds_filt_ℓ["b̄"],)
+        filtered_b=b_r_filt,)
     print(f"  ape_to_ke_exchange  ({time.time()-t0:.1f}s)")
 
     t0 = time.time()
@@ -195,24 +199,4 @@ output_filename = str(PP_OUTPUT / (Path(filename).stem + "_sfs_ape_budget.nc"))
 with ProgressBar():
     sfs_ape_budget_terms.to_netcdf(output_filename)
 print(f"\nResults saved to: {output_filename}")
-
-# Reload from disk so plots read pre-computed data rather than re-triggering the dask graph
-sfs_ape_budget_terms = xr.open_dataset(output_filename, decode_timedelta=False)
-#---
-
-#+++ Plot integrated budget terms
-print("\n" + "="*60)
-print("Creating plots...")
-print("="*60)
-
-integrated_vars = {
-    "∫-∂ₜ SFS APE dV":    budget_colors["tendency"],
-    "∫Π_APE dV":           budget_colors["flux"],
-    "∫-χₛ dV":             budget_colors["dissipation"],
-    "∫(SFS KE->APE) dV":   budget_colors["exchange"],
-    "∫Rˢ dV":              "C4",
-    "residual_APE":         budget_colors["residual"],
-}
-plot_sfs_budget(sfs_ape_budget_terms, integrated_vars, filter_length_scales,
-                output_filename, REPO_ROOT, "Integrated SFS APE Budget Terms")
 #---

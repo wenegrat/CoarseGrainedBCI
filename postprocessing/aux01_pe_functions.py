@@ -53,6 +53,80 @@ def calculate_density_fields_from_buoyancy(ds, ρ_ref=ρ0, buoyancy_name="b", de
     return ds
 #---
 
+#+++ Calculate relative buoyancy b_r
+def calculate_b_r(rho, rho_sorted, z_name="z_aac"):
+    """
+    Calculate relative buoyancy b_r = -g(ρ - ρ_*(z)) / ρ₀.
+
+    ρ_*(z) is the sorted reference density evaluated at each vertical level,
+    obtained by interpolating the sorted profile onto the domain z grid.
+
+    Parameters
+    ----------
+    rho : xr.DataArray
+        Full density field, with vertical coordinate z_name.
+    rho_sorted : xr.DataArray
+        Sorted reference density profile (time, z_1d_sorted).
+    z_name : str
+        Name of the vertical coordinate in rho.
+
+    Returns
+    -------
+    xr.DataArray
+        b_r with the same shape as rho [m s⁻²].
+    """
+    z_target     = rho.coords[z_name].values          # (Nz,) — target z grid
+    z_sorted_vals = rho_sorted.coords["z_1d_sorted"].values  # (N,) — sorted z positions
+    Nz = len(z_target)
+
+    def _interp(rho_sorted_1d):
+        return np.interp(z_target, z_sorted_vals, rho_sorted_1d)
+
+    rho_star = xr.apply_ufunc(
+        _interp,
+        rho_sorted,
+        input_core_dims=[["z_1d_sorted"]],
+        output_core_dims=[[z_name]],
+        vectorize=True,
+        dask="parallelized",
+        output_dtypes=[rho.dtype],
+        dask_gufunc_kwargs={"output_sizes": {z_name: Nz}},
+    ).assign_coords({z_name: rho.coords[z_name]})
+
+    b_r = -g * (rho - rho_star) / ρ0
+    b_r.name = "b_r"
+    return b_r
+#---
+
+#+++ Calculate relative buoyancy b_r (simple xarray interpolation)
+def calculate_b_r_simple(rho, rho_sorted, z_name="z_aac"):
+    """
+    Calculate relative buoyancy b_r = -g(ρ - ρ_*(z)) / ρ₀.
+
+    Uses xarray .rename/.interp to map the sorted reference profile onto the
+    domain z grid. Simpler than calculate_b_r but requires the sorted profile
+    coordinate to be named 'z_1d_sorted'.
+
+    Parameters
+    ----------
+    rho : xr.DataArray
+        Full density field, with vertical coordinate z_name.
+    rho_sorted : xr.DataArray
+        Sorted reference density profile with coordinate 'z_1d_sorted'.
+    z_name : str
+        Name of the vertical coordinate in rho.
+
+    Returns
+    -------
+    xr.DataArray
+        b_r with the same shape as rho [m s⁻²].
+    """
+    rho_star = rho_sorted.rename(z_1d_sorted=z_name).interp({z_name: rho[z_name]})
+    b_r = -g * (rho - rho_star) / ρ0
+    b_r.name = "b_r"
+    return b_r
+#---
+
 #+++ Calculate TPE
 def local_TPE(rho, z_name="z_aac"):
     """
@@ -70,9 +144,6 @@ def local_TPE(rho, z_name="z_aac"):
     """
     return g * rho * rho[z_name] / ρ0
 #---
-
-
-
 
 #+++ Local APE calculations using precomputed integral method
 def _local_APE_precomputed_integral_numpy(ρ_3d, z_3d, ρ_sorted_array, z_sorted_array, cumulative_rho_dz, cumulative_dz, z_0_3d=None):

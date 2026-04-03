@@ -6,7 +6,7 @@ This module contains functions for calculating kinetic energy (KE).
 
 import xarray as xr
 from aux00_utils import (integrate, calculate_gradient,
-                         condense_velocities, condense_uw_velocities,
+                         condense_uw_velocities,
                          make_gaussian_filter, filter_fields)
 from aux01_pe_functions import (calculate_density_fields_from_buoyancy,
                                 sorted_timeseries,
@@ -251,7 +251,7 @@ def calculate_cross_scale_ke_flux(τ, S̄, index_dims=("i", "j")):
 #---
 
 #+++ Cross-scale energy transfer pipeline
-def calculate_energy_transfer(ds, filter_length_scales, filter_in_2d=True,
+def calculate_energy_transfer(ds, filter_length_scales,
                               ds_filt=None, rho_sorted=None, dz_sorted=None, n_workers=18):
     """Calculate cross-scale KE and APE transfer terms at each filter scale.
 
@@ -259,11 +259,9 @@ def calculate_energy_transfer(ds, filter_length_scales, filter_in_2d=True,
     ----------
     ds : xr.Dataset
         Full (unfiltered) simulation dataset. Must contain velocity components
-        (u,v,w or u,w), buoyancy b, and grid variables dV, LxLy.
+        (u, w), buoyancy b, and grid variables dV, LxLy.
     filter_length_scales : array-like
         Physical length scales at which to compute the transfer terms.
-    filter_in_2d : bool
-        If True, filter in x and y (3D). If False, filter in x only (xz).
     ds_filt : xr.Dataset, optional
         Pre-computed filtered fields (ūᵢ, b̄) indexed by filter_length_scale.
         If None, filter_fields() is called internally.
@@ -283,16 +281,13 @@ def calculate_energy_transfer(ds, filter_length_scales, filter_in_2d=True,
         Dataset with Π_KE, Π_APE, ∫Π_KE dV, ∫Π_APE dV indexed by
         filter_length_scale.
     """
-    filtered_dimensions = ["x_caa", "y_aca"] if filter_in_2d else ["x_caa"]
-    tensor_dimensions   = ("x_caa", "y_aca", "z_aac") if filter_in_2d else ("x_caa", "z_aac")
+    filtered_dimensions = ["x_caa", "z_aac"]
+    tensor_dimensions   = ("x_caa", "z_aac")
 
     if ds_filt is None:
-        ds_filt = filter_fields(ds, filter_length_scales, filter_in_2d)
+        ds_filt = filter_fields(ds, filter_length_scales)
 
-    if filter_in_2d:
-        ds = condense_velocities(ds, indices=(1, 2, 3))
-    else:
-        ds = condense_uw_velocities(ds, indices=(1, 3))
+    ds = condense_uw_velocities(ds, indices=(1, 3))
     ds_full = ds[["b", "dV", "LxLy", "uᵢ"]].copy()
 
     ds_full = calculate_density_fields_from_buoyancy(ds_full, buoyancy_name="b", density_name="ρ")
@@ -311,7 +306,7 @@ def calculate_energy_transfer(ds, filter_length_scales, filter_in_2d=True,
 
     for ℓ in filter_length_scales:
         print(f"\n--- filter_length_scale = {ℓ:.4f} ---")
-        gaussian_filter = make_gaussian_filter(ℓ, ds, filter_in_2d)
+        gaussian_filter = make_gaussian_filter(ℓ, ds)
 
         ds_filt_ℓ = ds_filt.sel(filter_length_scale=ℓ).drop_vars("filter_length_scale")
         ds_filt_ℓ["LxLy"] = ds["LxLy"]

@@ -48,7 +48,7 @@ jobs:
         run: julia --project -e 'using Pkg; Pkg.instantiate()'
 
       - name: Run simulation (Nz=512, CPU)
-        run: julia --project -t 4 kelvin_helmholtz_instability.jl --Nz 512 --Ri 0.1
+        run: julia --project -t 4 kelvin_helmholtz_instability.jl --Nz 512 --Ri 0.1 --stop-time 70
 
       # -----------------------------------------------------------------------
       # Python — postprocessing pipeline
@@ -96,6 +96,14 @@ jobs:
         with:
           name: budget-plots
           path: figures/*.png
+          if-no-files-found: warn
+
+      - name: Upload postprocessing NetCDF files
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: postprocessing-output
+          path: postprocessing/output/*.nc
           if-no-files-found: warn
 
       # -----------------------------------------------------------------------
