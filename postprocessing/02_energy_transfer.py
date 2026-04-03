@@ -12,7 +12,7 @@ from aux02_ke_functions import calculate_energy_transfer
 #+++ Configuration
 import argparse
 parser = argparse.ArgumentParser(description="Calculate cross-scale KE and APE transfer terms")
-parser.add_argument("--filename", default="output/khi_90x1x256.nc",
+parser.add_argument("--filename", default="output/khi_Nz256_Ri0.10.nc",
                     help="Path to simulation NetCDF file")
 parser.add_argument("--n-workers", type=int, default=18,
                     help="Number of CPU workers for APE sorting (ThreadPoolExecutor)")
@@ -39,10 +39,9 @@ t0 = time.time()
 filtered_filename = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities.nc"))
 ds_filt = xr.open_dataset(filtered_filename, decode_times=False).chunk({"time": 1})
 filter_length_scales = ds_filt.filter_length_scale.values
-filter_in_2d = int(ds_filt.attrs.get("filter_ndim", 2)) == 2
 print(f"  Filtered fields loaded from: {filtered_filename}  ({time.time()-t0:.1f}s)")
 print(f"  Filter length scales: {filter_length_scales}")
-print(f"  Filter dimensions: {'2D (x,y)' if filter_in_2d else '1D (x only)'}")
+print(f"  Filter dimensions: x and z")
 
 t0 = time.time()
 sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + "_sorted_density.nc"))
@@ -54,7 +53,6 @@ print(f"  Sorted density loaded from: {sorted_density_filename}  ({time.time()-t
 print("\n" + "="*60)
 print("Calculating cross-scale transfer terms...")
 energy_transfer = calculate_energy_transfer(ds, filter_length_scales,
-                                            filter_in_2d=filter_in_2d,
                                             ds_filt=ds_filt,
                                             rho_sorted=ds_sorted.rho_sorted,
                                             dz_sorted=ds_sorted.dz_sorted,

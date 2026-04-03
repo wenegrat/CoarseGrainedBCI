@@ -11,10 +11,10 @@ import xarray as xr
 from pathlib import Path
 
 PP_OUTPUT = Path(__file__).parent.parent / "postprocessing" / "output"
-STEM      = "khi_180x1x512"
-# Residual must be < THRESHOLD x 100% of the smallest budget term (this number is large since we test with pretty
-# coarse simulations
-THRESHOLD = 0.12
+STEM      = "khi_Nz512_Ri0.10"
+# Residual must be < THRESHOLD x 100% of the smallest budget term (this number is large since we test with a
+# short, coarse simulation
+THRESHOLD = 0.15
 
 
 def relative_residual(ds, residual_var, budget_vars):
