@@ -1,8 +1,8 @@
 #!/bin/bash -l
 #PBS -A UMCP0028
-#PBS -N sweep_2916x1x4096
-#PBS -o logs/sweep_2916x1x4096.log
-#PBS -e logs/sweep_2916x1x4096.log
+#PBS -N sweep_Nz4096_Ri0.10
+#PBS -o logs/sweep_Nz4096_Ri0.10.log
+#PBS -e logs/sweep_Nz4096_Ri0.10.log
 #PBS -l walltime=23:59:00
 #PBS -q casper
 #PBS -M tchor@umd.edu
@@ -28,14 +28,14 @@ export JULIA_DEPOT_PATH="$WORK/.julia"
 export JULIA_CPU_TARGET="generic"
 juliaup default 1.12
 
-time $PYTHON -u inv1_filter_fields_sweep.py --filename output/${SIM}.nc 2>&1 | tee logs/inv1_filter_fields_sweep_${SIM}.out
+time $PYTHON -u inv1_filter_fields_sweep.py --filename output/${SIM}.nc 2>&1
 qstat -f $PBS_JOBID >> logs/inv1_filter_fields_sweep_${SIM}.log
 qstat -f $PBS_JOBID >> logs/inv1_filter_fields_sweep_${SIM}.out
 
-time $PYTHON -u inv2_energy_transfer_sweep.py --filename output/${SIM}.nc --n-workers 18 2>&1 | tee logs/inv2_energy_transfer_sweep_${SIM}.out
+time $PYTHON -u inv2_energy_transfer_sweep.py --filename output/${SIM}.nc --n-workers 18 2>&1
 qstat -f $PBS_JOBID >> logs/inv2_energy_transfer_sweep_${SIM}.log
 qstat -f $PBS_JOBID >> logs/inv2_energy_transfer_sweep_${SIM}.out
 
-time $PYTHON -u inv3_plot_transfer_spectrum.py --filename output/${SIM}.nc 2>&1 | tee logs/inv3_plot_transfer_spectrum_${SIM}.out
+time $PYTHON -u inv3_plot_transfer_spectrum.py --filename output/${SIM}.nc 2>&1
 qstat -f $PBS_JOBID >> logs/inv3_plot_transfer_spectrum_${SIM}.log
 qstat -f $PBS_JOBID >> logs/inv3_plot_transfer_spectrum_${SIM}.out
