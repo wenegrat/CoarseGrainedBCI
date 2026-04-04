@@ -220,6 +220,30 @@ NetCDFWriter(model, outputs,
 
 # Run simulation
 show_gpu_status()
+@info @sprintf("""
+================================================================================
+  Kelvin-Helmholtz instability simulation
+================================================================================
+  Grid:         Nx=%d, Ny=%d, Nz=%d
+  Domain:       Lx=%.1f, Ly=%.1f, Lz=%.1f
+  Stop time:    %.1f
+  Richardson:   Ri = %.4f
+  Reynolds:     Re = %.1f  (Re₀ = %.2e)
+  Prandtl:      Pr = %.1f
+  Viscosity:    ν  = %.2e
+  Diffusivity:  κ  = %.2e
+  KH wavenumber: k_max = %.4f  (λ_max = %.2f)
+================================================================================
+""",
+    params.Nx, params.Ny, params.Nz,
+    params.Lx, params.Ly, params.Lz,
+    params.stop_time,
+    params.Ri,
+    params.Re, params.Re₀,
+    params.Pr,
+    params.ν,
+    params.κ,
+    params.k_max_KH, params.λ_max_KH)
 @info "Running Kelvin-Helmholtz instability simulation..."
 run!(simulation)
 
