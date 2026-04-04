@@ -53,19 +53,26 @@ print("\nCreating plots...")
 label = run_label(ke_budget.attrs)
 
 for ℓ in filter_length_scales:
-    fig, axes = plt.subplots(1, 2, figsize=(16, 6), constrained_layout=True)
+    fig, axes = plt.subplots(2, 2, figsize=(16, 12), constrained_layout=True)
 
-    for ax, budget, vars_dict, title in [
-        (axes[0], ke_budget,  ke_vars,  "Integrated SFS KE Budget"),
-        (axes[1], ape_budget, ape_vars, "Integrated SFS APE Budget"),
-    ]:
-        for var, color in vars_dict.items():
-            budget[var].sel(filter_length_scale=ℓ).dropna("time").plot.line(
-                ax=ax, x="time", label=var, color=color)
-        ax.legend(fontsize=8)
-        ax.set_ylabel("Budget Terms [W or J s⁻¹]")
-        ax.set_title(f"{title}  (ℓ = {ℓ:.4f})")
-        ax.grid(True, alpha=0.3)
+    for row in range(2):
+        for ax, budget, vars_dict, title in [
+            (axes[row, 0], ke_budget,  ke_vars,  "Integrated SFS KE Budget"),
+            (axes[row, 1], ape_budget, ape_vars, "Integrated SFS APE Budget"),
+        ]:
+            for var, color in vars_dict.items():
+                budget[var].sel(filter_length_scale=ℓ).dropna("time").plot.line(
+                    ax=ax, x="time", label=var, color=color)
+            ax.legend(fontsize=8)
+            ax.set_ylabel("Budget Terms [W or J s⁻¹]")
+            ax.set_title(f"{title}  (ℓ = {ℓ:.4f})")
+            ax.grid(True, alpha=0.3)
+
+    # Share y-axis scale across both columns in the bottom row only
+    ymin = min(axes[1, 0].get_ylim()[0], axes[1, 1].get_ylim()[0])
+    ymax = max(axes[1, 0].get_ylim()[1], axes[1, 1].get_ylim()[1])
+    axes[1, 0].set_ylim(ymin, ymax)
+    axes[1, 1].set_ylim(ymin, ymax)
 
     if label:
         fig.suptitle(label, fontsize=11)
