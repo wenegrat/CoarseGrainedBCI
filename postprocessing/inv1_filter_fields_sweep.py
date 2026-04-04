@@ -15,7 +15,7 @@ parser.add_argument("--filename", default="output/khi_Nz256_Ri0.10.nc",
 args = parser.parse_args()
 REPO_ROOT = Path(__file__).resolve().parent.parent
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
-filter_length_scales = np.geomspace(0.01, 50, 30) # Length scales for filtering
+filter_length_scales = np.geomspace(0.01, 10, 30) # Length scales for filtering
 #---
 
 #+++ Load data and grid
@@ -24,7 +24,7 @@ print("Loading data and grid...")
 ds = load_dataset_and_grid(filename)
 ds = ds.chunk(dict(time=1))
 
-ds = ds.sel(time=[30, 40, 50, 60, 70], method="nearest")
+ds = ds.sel(time=[40, 50, 60, 70, 80, 100], method="nearest")
 print(f"Dataset loaded: {len(ds.time)} time steps")
 #---
 
