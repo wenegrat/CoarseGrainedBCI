@@ -12,12 +12,10 @@ from dask.diagnostics.progress import ProgressBar
 from aux00_utils import load_dataset_and_grid, condense_uw_velocities, integrate, make_gaussian_filter, load_energy_transfer
 from aux01_pe_functions import (
     calculate_density_fields_from_buoyancy,
-    calculate_b_r,
     local_potential_energies_timeseries,  # used for filtered density in loop
     calculate_sfs_ape_tendency,
     calculate_sfs_R_correction,
     calculate_sfs_ape_dissipation,
-    calculate_ape_to_ke_exchange_term,
 )
 #---
 
@@ -78,10 +76,6 @@ t0 = time.time()
 full_local_pes = local_potential_energies_timeseries(ds_full, ds_sorted.rho_sorted, ds_sorted.dz_sorted,
                                                      density_name="ρ", n_workers=n_workers)
 print(f"  full_local_pes calculated  ({time.time()-t0:.1f}s)")
-
-t0 = time.time()
-b_r = calculate_b_r(ds_full.ρ, full_local_pes.rho_sorted)
-print(f"  b_r calculated  ({time.time()-t0:.1f}s)")
 #---
 
 #+++ Loop over filter scales and calculate budget terms
@@ -89,6 +83,10 @@ print("\n" + "="*60)
 print("Calculating budget terms for each filter scale...")
 
 energy_transfer = load_energy_transfer(filename)
+
+ke_budget_filename = str(PP_OUTPUT / (Path(filename).stem + "_sfs_ke_budget.nc"))
+ke_budget = xr.open_dataset(ke_budget_filename, decode_times=False).chunk({"time": 1})
+print(f"  KE budget loaded from: {ke_budget_filename}")
 
 dV = ds_full.dV
 budget_list = []
@@ -123,16 +121,9 @@ for ℓ in filter_length_scales:
         filtered_density=ds_filt_ℓ.ρ̄,)
     print(f"  sfs_ape_dissipation  ({time.time()-t0:.1f}s)")
 
-    t0 = time.time()
-    b_r_filt = gaussian_filter.apply(b_r, dims=filtered_dimensions)
-    ape_to_ke_exchange = calculate_ape_to_ke_exchange_term(
-        ds_full["uᵢ"].sel(i=3),
-        b_r,
-        gaussian_filter,
-        filter_dims=filtered_dimensions,
-        filtered_w=ds_filt_ℓ["ūᵢ"].sel(i=3),
-        filtered_b=b_r_filt,)
-    print(f"  ape_to_ke_exchange  ({time.time()-t0:.1f}s)")
+    # Read APE->KE exchange term from KE budget (avoid redundant recalculation)
+    ape_to_ke_exchange     = ke_budget["SFS APE->KE exchange"].sel(filter_length_scale=ℓ)
+    int_ape_to_ke_exchange = ke_budget["∫(SFS APE->KE) dV"].sel(filter_length_scale=ℓ)
 
     t0 = time.time()
     R_s = calculate_sfs_R_correction(full_local_pes.rho_sorted, full_local_pes.z0, filt_local_pes.z0,
@@ -144,12 +135,11 @@ for ℓ in filter_length_scales:
 
     int_dAPE_dt             = integrate(dAPE_dt, dV)
     int_sfs_ape_dissipation = integrate(sfs_ape_dissipation.reindex(time=dAPE_dt.time), dV)
-    int_ape_to_ke_exchange  = integrate(ape_to_ke_exchange.reindex(time=dAPE_dt.time), dV)
     int_R_s                 = integrate(R_s.reindex(time=dAPE_dt.time), dV)
 
     Π_APE_ℓ     = energy_transfer["Π_APE"].sel(filter_length_scale=ℓ)
     int_Π_APE_ℓ = energy_transfer["∫Π_APE dV"].sel(filter_length_scale=ℓ)
-    residual    = -int_dAPE_dt - int_ape_to_ke_exchange + int_Π_APE_ℓ.reindex(time=dAPE_dt.time) - int_sfs_ape_dissipation + int_R_s
+    residual    = -int_dAPE_dt - int_ape_to_ke_exchange.reindex(time=dAPE_dt.time) + int_Π_APE_ℓ.reindex(time=dAPE_dt.time) - int_sfs_ape_dissipation + int_R_s
 
     budget_ℓ = xr.Dataset({
         # Density fields
