@@ -4,6 +4,8 @@ Calculate SFS APE budget from Kelvin-Helmholtz simulation output
 """
 
 #+++ Imports
+import gc
+import logging
 import os
 from pathlib import Path
 import time
@@ -17,6 +19,9 @@ from aux01_pe_functions import (
     calculate_sfs_R_correction,
     calculate_sfs_ape_dissipation,
 )
+
+logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s", datefmt="%H:%M:%S")
+print = logging.info
 #---
 
 #+++ Configuration
@@ -90,8 +95,17 @@ print(f"  KE budget loaded from: {ke_budget_filename}")
 
 dV = ds_full.dV
 budget_list = []
+checkpoint_files = []
 
 for ℓ in filter_length_scales:
+    checkpoint_path = PP_OUTPUT / (Path(filename).stem + f"_sfs_ape_budget_checkpoint_l{ℓ:.4f}.nc")
+    checkpoint_files.append(checkpoint_path)
+
+    if checkpoint_path.exists():
+        print(f"\n--- filter_length_scale = {ℓ:.4f} (loading from checkpoint) ---")
+        budget_list.append(xr.open_dataset(str(checkpoint_path), decode_times=False))
+        continue
+
     print(f"\n--- filter_length_scale = {ℓ:.4f} ---")
 
     gaussian_filter = make_gaussian_filter(ℓ, ds)
@@ -170,7 +184,21 @@ for ℓ in filter_length_scales:
         "residual_APE": residual,
     }).reindex(time=dAPE_dt.time)
 
-    budget_list.append(budget_ℓ)
+    print(f"  Saving checkpoint...")
+    t0 = time.time()
+    with ProgressBar():
+        budget_ℓ.to_netcdf(str(checkpoint_path))
+    print(f"  Checkpoint saved  ({time.time()-t0:.1f}s)")
+
+    # Free memory before the next iteration
+    del ds_filt_ℓ, filt_local_pes, full_local_ape_filtered, subfilter_local_ape
+    del sfs_ape_dissipation, R_s, dAPE_dt, budget_ℓ
+    del ape_to_ke_exchange, int_ape_to_ke_exchange
+    del int_dAPE_dt, int_sfs_ape_dissipation, int_R_s
+    del Π_APE_ℓ, int_Π_APE_ℓ, residual
+    gc.collect()
+
+    budget_list.append(xr.open_dataset(str(checkpoint_path), decode_times=False))
 
 sfs_ape_budget_terms = xr.concat(budget_list, dim=xr.DataArray(filter_length_scales,
                                                                dims="filter_length_scale",
@@ -189,4 +217,9 @@ output_filename = str(PP_OUTPUT / (Path(filename).stem + "_sfs_ape_budget.nc"))
 with ProgressBar():
     sfs_ape_budget_terms.to_netcdf(output_filename)
 print(f"\nResults saved to: {output_filename}")
+
+print("\nDeleting intermediate checkpoint files...")
+for f in checkpoint_files:
+    f.unlink(missing_ok=True)
+    print(f"  Deleted: {f.name}")
 #---
