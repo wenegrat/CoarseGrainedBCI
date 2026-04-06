@@ -73,7 +73,7 @@ def load_dataset_and_grid(filename):
         z domain padded to 2x its original height (1 at top, -1 at bottom).
     """
     print(f"Loading data from {filename}...")
-    ds = xr.open_dataset(filename, decode_times=False)
+    ds = xr.open_dataset(filename, decode_times=False, chunks={})
     grid = xr.open_dataset(filename, group="underlying_grid_reconstruction_kwargs")
 
     # Add grid extent as attributes
