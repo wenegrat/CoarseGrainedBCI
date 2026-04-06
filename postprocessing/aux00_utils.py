@@ -189,6 +189,7 @@ class GaussianFilter:
             kwargs={"sigma": self._sigma_x, "axis": -1, "mode": "wrap"},
             dask="parallelized",
             output_dtypes=[da.dtype],
+            dask_gufunc_kwargs={"allow_rechunk": True},
         )
         return xr.apply_ufunc(
             gaussian_filter1d, da_x,
@@ -197,6 +198,7 @@ class GaussianFilter:
             kwargs={"sigma": self._sigma_z, "axis": -1, "mode": "nearest"},
             dask="parallelized",
             output_dtypes=[da_x.dtype],
+            dask_gufunc_kwargs={"allow_rechunk": True},
         )
 
 
