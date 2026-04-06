@@ -89,9 +89,13 @@ print("Calculating budget terms for each filter scale...")
 
 energy_transfer = load_energy_transfer(filename)
 
-ke_budget_filename = str(PP_OUTPUT / (Path(filename).stem + "_sfs_ke_budget.nc"))
-ke_budget = xr.open_dataset(ke_budget_filename, decode_times=False).chunk({"time": 1})
-print(f"  KE budget loaded from: {ke_budget_filename}")
+ke_fields_filename     = str(PP_OUTPUT / (Path(filename).stem + "_sfs_ke_budget_fields.nc"))
+ke_integrated_filename = str(PP_OUTPUT / (Path(filename).stem + "_sfs_ke_budget_integrated.nc"))
+ke_budget = xr.merge([
+    xr.open_dataset(ke_fields_filename,     decode_times=False).chunk({"time": 1}),
+    xr.open_dataset(ke_integrated_filename, decode_times=False).chunk({"time": 1}),
+])
+print(f"  KE budget loaded from: {ke_fields_filename} + {ke_integrated_filename}")
 
 dV = ds_full.dV
 budget_list = []
@@ -213,10 +217,21 @@ print("\nDone!")
 print("\n" + "="*60)
 print("Saving results...")
 
-output_filename = str(PP_OUTPUT / (Path(filename).stem + "_sfs_ape_budget.nc"))
+integrated_vars = [v for v in sfs_ape_budget_terms.data_vars if v.startswith("∫") or "residual" in v]
+local_vars      = [v for v in sfs_ape_budget_terms.data_vars if v not in integrated_vars]
+
+fields_filename     = str(PP_OUTPUT / (Path(filename).stem + "_sfs_ape_budget_fields.nc"))
+integrated_filename = str(PP_OUTPUT / (Path(filename).stem + "_sfs_ape_budget_integrated.nc"))
+
+print("  Saving local fields...")
 with ProgressBar():
-    sfs_ape_budget_terms.to_netcdf(output_filename)
-print(f"\nResults saved to: {output_filename}")
+    sfs_ape_budget_terms[local_vars].to_netcdf(fields_filename)
+print(f"  Fields saved to:     {fields_filename}")
+
+print("  Saving integrated timeseries...")
+with ProgressBar():
+    sfs_ape_budget_terms[integrated_vars].to_netcdf(integrated_filename)
+print(f"  Integrated saved to: {integrated_filename}")
 
 print("\nDeleting intermediate checkpoint files...")
 for f in checkpoint_files:

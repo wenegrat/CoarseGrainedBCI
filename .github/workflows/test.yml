@@ -103,7 +103,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: postprocessing-output
-          path: postprocessing/output/*.nc
+          path: postprocessing/output/*_integrated.nc
           if-no-files-found: warn
 
       # -----------------------------------------------------------------------

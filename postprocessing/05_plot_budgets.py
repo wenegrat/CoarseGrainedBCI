@@ -20,8 +20,8 @@ filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) el
 
 #+++ Load budget data
 print("Loading budget data...")
-ke_filename  = str(PP_OUTPUT / (Path(filename).stem + "_sfs_ke_budget.nc"))
-ape_filename = str(PP_OUTPUT / (Path(filename).stem + "_sfs_ape_budget.nc"))
+ke_filename  = str(PP_OUTPUT / (Path(filename).stem + "_sfs_ke_budget_integrated.nc"))
+ape_filename = str(PP_OUTPUT / (Path(filename).stem + "_sfs_ape_budget_integrated.nc"))
 ke_budget  = xr.open_dataset(ke_filename,  decode_timedelta=False)
 ape_budget = xr.open_dataset(ape_filename, decode_timedelta=False)
 filter_length_scales = ke_budget.filter_length_scale.values
