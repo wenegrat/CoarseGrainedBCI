@@ -29,21 +29,7 @@ export JULIA_CPU_TARGET="generic"
 juliaup default 1.12
 
 time $PYTHON -u 01_filter_and_prepare_fields.py --filename output/khi_${SIM}.nc 2>&1
-qstat -f $PBS_JOBID >> logs/01_filter_fields_${SIM}.log
-qstat -f $PBS_JOBID >> logs/01_filter_fields_${SIM}.out
-
 time $PYTHON -u 02_energy_transfer.py --filename output/khi_${SIM}.nc --n-workers 18 2>&1
-qstat -f $PBS_JOBID >> logs/02_energy_transfer_${SIM}.log
-qstat -f $PBS_JOBID >> logs/02_energy_transfer_${SIM}.out
-
 time $PYTHON -u 03_sfs_ke_budget.py --filename output/khi_${SIM}.nc 2>&1
-qstat -f $PBS_JOBID >> logs/03_sfs_ke_budget_${SIM}.log
-qstat -f $PBS_JOBID >> logs/03_sfs_ke_budget_${SIM}.out
-
 time $PYTHON -u 04_sfs_ape_budget.py --filename output/khi_${SIM}.nc --n-workers 18 2>&1
-qstat -f $PBS_JOBID >> logs/04_sfs_ape_budget_${SIM}.log
-qstat -f $PBS_JOBID >> logs/04_sfs_ape_budget_${SIM}.out
-
 time $PYTHON -u 05_plot_budgets.py --filename output/khi_${SIM}.nc 2>&1
-qstat -f $PBS_JOBID >> logs/05_plot_budgets_${SIM}.log
-qstat -f $PBS_JOBID >> logs/05_plot_budgets_${SIM}.out
