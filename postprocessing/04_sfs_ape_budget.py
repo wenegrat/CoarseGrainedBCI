@@ -77,10 +77,26 @@ t0 = time.time()
 ds_full = calculate_density_fields_from_buoyancy(ds_full, buoyancy_name="b", density_name="ρ")
 print(f"  ρ calculated  ({time.time()-t0:.1f}s)")
 
-t0 = time.time()
-full_local_pes = local_potential_energies_timeseries(ds_full, ds_sorted.rho_sorted, ds_sorted.dz_sorted,
-                                                     density_name="ρ", n_workers=n_workers)
-print(f"  full_local_pes calculated  ({time.time()-t0:.1f}s)")
+full_local_pes_checkpoint = PP_OUTPUT / (Path(filename).stem + "_full_local_pes_checkpoint.nc")
+if full_local_pes_checkpoint.exists():
+    print(f"  Loading full_local_pes from checkpoint: {full_local_pes_checkpoint.name}")
+    t0 = time.time()
+    full_local_pes = xr.open_dataset(str(full_local_pes_checkpoint), decode_times=False).chunk({"time": 1})
+    print(f"  full_local_pes loaded  ({time.time()-t0:.1f}s)")
+else:
+    t0 = time.time()
+    full_local_pes = local_potential_energies_timeseries(ds_full, ds_sorted.rho_sorted, ds_sorted.dz_sorted,
+                                                         density_name="ρ", n_workers=n_workers)
+    print(f"  full_local_pes calculated  ({time.time()-t0:.1f}s)")
+    print(f"  Saving full_local_pes checkpoint...")
+    t0 = time.time()
+    with ProgressBar():
+        full_local_pes.to_netcdf(str(full_local_pes_checkpoint))
+    print(f"  Checkpoint saved  ({time.time()-t0:.1f}s)")
+    del full_local_pes
+    gc.collect()
+    full_local_pes = xr.open_dataset(str(full_local_pes_checkpoint), decode_times=False).chunk({"time": 1})
+    print(f"  full_local_pes reloaded lazily")
 #---
 
 #+++ Loop over filter scales and calculate budget terms
@@ -99,7 +115,7 @@ print(f"  KE budget loaded from: {ke_fields_filename} + {ke_integrated_filename}
 
 dV = ds_full.dV
 budget_list = []
-checkpoint_files = []
+checkpoint_files = [full_local_pes_checkpoint]
 
 for ℓ in filter_length_scales:
     checkpoint_path = PP_OUTPUT / (Path(filename).stem + f"_sfs_ape_budget_checkpoint_l{ℓ:.4f}.nc")
@@ -107,7 +123,7 @@ for ℓ in filter_length_scales:
 
     if checkpoint_path.exists():
         print(f"\n--- filter_length_scale = {ℓ:.4f} (loading from checkpoint) ---")
-        budget_list.append(xr.open_dataset(str(checkpoint_path), decode_times=False))
+        budget_list.append(xr.open_dataset(str(checkpoint_path), decode_times=False).chunk({"time": 1}))
         continue
 
     print(f"\n--- filter_length_scale = {ℓ:.4f} ---")
@@ -202,7 +218,7 @@ for ℓ in filter_length_scales:
     del Π_APE_ℓ, int_Π_APE_ℓ, residual
     gc.collect()
 
-    budget_list.append(xr.open_dataset(str(checkpoint_path), decode_times=False))
+    budget_list.append(xr.open_dataset(str(checkpoint_path), decode_times=False).chunk({"time": 1}))
 
 sfs_ape_budget_terms = xr.concat(budget_list, dim=xr.DataArray(filter_length_scales,
                                                                dims="filter_length_scale",
