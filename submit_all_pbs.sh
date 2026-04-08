@@ -10,8 +10,14 @@
 
 NZ=${1:-4096}
 
-SIM_JOB=$(qsub -v NZ=$NZ submit_simulation_pbs.sh)
+SIM_JOB=$(qsub -N kelvin_helmholtz_${NZ} \
+               -o logs/kelvin_helmholtz_${NZ}.log \
+               -e logs/kelvin_helmholtz_${NZ}.log \
+               -v NZ=$NZ submit_simulation_pbs.sh)
 echo "Submitted simulation (Nz=$NZ): $SIM_JOB"
 
-PP_JOB=$(qsub -v NZ=$NZ -W depend=afterok:$SIM_JOB postprocessing/submit_budgeting_pbs.sh)
+PP_JOB=$(qsub -N budgeting_Nz${NZ}_Ri0.10 \
+              -o postprocessing/logs/budgeting_Nz${NZ}_Ri0.10.log \
+              -e postprocessing/logs/budgeting_Nz${NZ}_Ri0.10.log \
+              -v NZ=$NZ -W depend=afterok:$SIM_JOB postprocessing/submit_budgeting_pbs.sh)
 echo "Submitted post-processing (depends on $SIM_JOB): $PP_JOB"
