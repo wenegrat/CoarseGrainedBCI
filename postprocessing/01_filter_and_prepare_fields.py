@@ -15,12 +15,14 @@ parser.add_argument("--filename", default="output/khi_Nz256_Ri0.10.nc",
                     help="Path to simulation NetCDF file")
 parser.add_argument("--n-workers", type=int, default=18,
                     help="Number of CPU workers for density sorting (ThreadPoolExecutor)")
+parser.add_argument("--filter-scales", type=float, nargs="+", default=[0.2, 0.4, 0.8, 2],
+                    help="Filter length scales (default: 0.2 0.4 0.8 2)")
 args = parser.parse_args()
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 n_workers = args.n_workers
-filter_length_scales = np.geomspace(0.6, 10, 4) # Length scales for filtering
+filter_length_scales = args.filter_scales
 #---
 
 #+++ Load data and grid
@@ -32,14 +34,10 @@ print(f"Dataset loaded: {len(ds.time)} time steps")
 #---
 
 #+++ Filter velocity and buoyancy fields at each length scale
-filter_in_2d = ds.sizes["x_caa"] > 1 and ds.sizes["y_aca"] > 1
 print("\n" + "="*60)
-if filter_in_2d:
-    print("Filtering velocity and buoyancy fields in 2D (x and y)...")
-else:
-    print("Filtering velocity and buoyancy fields in 1D (x only)...")
+print("Filtering velocity and buoyancy fields in x and z...")
 
-ds_filt = filter_fields(ds, filter_length_scales, filter_in_2d=filter_in_2d)
+ds_filt = filter_fields(ds, filter_length_scales)
 print("Done!")
 #---
 
@@ -62,6 +60,7 @@ ds_for_sort.attrs.update(ds.attrs)
 ds_for_sort = calculate_density_fields_from_buoyancy(ds_for_sort, buoyancy_name="b", density_name="ρ")
 
 sorted_density = sorted_timeseries(ds_for_sort, field_to_sort="ρ", n_workers=n_workers)
+sorted_density.attrs.update(ds.attrs)
 
 sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + "_sorted_density.nc"))
 with ProgressBar():

@@ -1,5 +1,4 @@
 # Kelvin-Helmholtz instability simulation
-
 using Oceananigans
 using CairoMakie
 using Printf
@@ -8,6 +7,7 @@ using CUDA: has_cuda_gpu
 using Oceananigans.Architectures: on_architecture
 using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation
 using Oceanostics.ProgressMessengers
+@info "Finished loading packages"
 
 include("utils.jl")
 
@@ -19,11 +19,24 @@ let s = ArgParseSettings()
             arg_type = Int
             required = false
             default = has_cuda_gpu() ? 4096 : 512
+
         "--Ri"
             help = "Richardson number (default: 0.1)"
             arg_type = Float64
             required = false
             default = 0.1
+
+        "--stop-time"
+            help = "Simulation stop time (default: 200.0)"
+            arg_type = Float64
+            required = false
+            default = 200.0
+
+        "--Re0"
+            help = "Base Reynolds number (default: 5e-4)"
+            arg_type = Float64
+            required = false
+            default = 5e-4
     end
     global parsed_args = parse_args(s)
 end
@@ -31,6 +44,8 @@ end
 
 Nz = parsed_args["Nz"]
 Ri = parsed_args["Ri"]
+stop_time = parsed_args["stop-time"]
+Re₀ = parsed_args["Re0"]
 
 #+++ Define simulation parameters
 params = (
@@ -40,8 +55,21 @@ params = (
     Ri = Ri,
     h = 1/4,
     perturbation_amplitude = 0.01,
-    stop_time = 200.0,
+    stop_time = stop_time,
+    Re₀ = Re₀,  # Reynolds number (ν = 1/Re)
+    Pr = 1,     # Prandtl number (κ = ν/Pr)
 )
+
+# Theoretical most unstable wavenumber for the KH instability.
+# Velocity profile: u = tanh(z), shear layer scale δ_u = 1 (implicit).
+# Michalke (1964): k_max · δ_u = 0.4446 for the inviscid, unstratified case.
+# Hazel (1972): approximate stratification correction ∝ √(1 − 4·Ri)
+#               (exact for same-scale profiles R = δ_b/δ_u = 1; here R = h = 1/4, so approximate).
+let k_max = 0.4446 * sqrt(max(0.0, 1 - 4*params.Ri))
+    global params = (; params..., k_max_KH = k_max, λ_max_KH = 2π / k_max)
+end
+@info @sprintf("Most unstable KH wavenumber: k_max = %.4f  (λ_max = %.2f, Lx = %.1f)",
+               params.k_max_KH, params.λ_max_KH, params.Lx)
 #---
 
 #+++ Create grid
@@ -49,16 +77,12 @@ if has_cuda_gpu()
     arch = GPU()
     x_aspect_ratio = 1   # Δx / Δz ratio
     y_aspect_ratio = Inf # Δy / Δz ratio
-    ν = 5e-5
-    κ = 5e-5
 else
     @warn "No CUDA GPU detected. Running on CPU with a coarse grid and high aspect ratio."
 
     arch = CPU()
     x_aspect_ratio = 2   # Δx / Δz ratio
     y_aspect_ratio = Inf # Δy / Δz ratio
-    ν = 2e-3
-    κ = 2e-3
 end
 
 @info "Cell aspect ratio: Δx/Δz = $(x_aspect_ratio), Δy/Δz = $(y_aspect_ratio)"
@@ -71,13 +95,26 @@ Ny = isinf(y_aspect_ratio) ? 1 : round(Int, Nz * (params.Ly / params.Lz) / y_asp
 Nx = closest_factor_number((2, 3, 5), Nx)
 Ny = closest_factor_number((2, 3, 5), Ny)
 
-params = (; params..., Nx, Ny, Nz, ν, κ)
+params = (; params..., Nx, Ny, Nz)
 
 grid = RectilinearGrid(arch; size=(params.Nx, params.Ny, params.Nz),
                        x=(-params.Lx/2, params.Lx/2),
                        y=(-params.Ly/2, params.Ly/2),
                        z=(-params.Lz/2, params.Lz/2),
                        topology=(Periodic, Periodic, Bounded))
+#---
+
+#+++ Define Reynolds number, viscosity and diffusivity
+let
+    if grid.Ny == 1
+        Re = params.Re₀ * params.Nz^2
+    else
+        Re = params.Re₀ * params.Nz^(4/3) # Double check this
+    end
+    ν = 1 / Re
+    κ = ν / params.Pr
+    global params = merge(params, (; ν, κ, Re))
+end
 #---
 
 #+++ Create model
@@ -189,6 +226,30 @@ NetCDFWriter(model, outputs,
 
 # Run simulation
 show_gpu_status()
+@info @sprintf("""
+================================================================================
+  Kelvin-Helmholtz instability simulation
+================================================================================
+  Grid:         Nx=%d, Ny=%d, Nz=%d
+  Domain:       Lx=%.1f, Ly=%.1f, Lz=%.1f
+  Stop time:    %.1f
+  Richardson:   Ri = %.4f
+  Reynolds:     Re = %.1f  (Re₀ = %.2e)
+  Prandtl:      Pr = %.1f
+  Viscosity:    ν  = %.2e
+  Diffusivity:  κ  = %.2e
+  KH wavenumber: k_max = %.4f  (λ_max = %.2f)
+================================================================================
+""",
+    params.Nx, params.Ny, params.Nz,
+    params.Lx, params.Ly, params.Lz,
+    params.stop_time,
+    params.Ri,
+    params.Re, params.Re₀,
+    params.Pr,
+    params.ν,
+    params.κ,
+    params.k_max_KH, params.λ_max_KH)
 @info "Running Kelvin-Helmholtz instability simulation..."
 run!(simulation)
 
@@ -213,8 +274,9 @@ bₙ = @lift view(b_timeseries[$n], :, 1, :)
 
 fig = Figure(size=(900, 500))
 
-title = @lift @sprintf("Kelvin-Helmholtz Instability: t = %.1f", times[$n])
-fig[1, :] = Label(fig, title, fontsize=24, tellwidth=false)
+params_str = @sprintf("Re = %d,  Ri = %.2f,  Pr = %d", params.Re, params.Ri, params.Pr)
+title = @lift @sprintf("Kelvin-Helmholtz Instability  (%s)\nt = %.1f", params_str, times[$n])
+fig[1, 1:4] = Label(fig, title, fontsize=20, tellwidth=false, justification=:center)
 
 kwargs = (xlabel="x", ylabel="z", limits=((-5, 5), (-5, 5)), aspect=1)
 

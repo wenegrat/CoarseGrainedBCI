@@ -4,21 +4,24 @@ Calculate SFS APE budget from Kelvin-Helmholtz simulation output
 """
 
 #+++ Imports
+import gc
+import logging
 import os
 from pathlib import Path
 import time
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
-from aux00_utils import load_dataset_and_grid, condense_velocities, condense_uw_velocities, integrate, make_gaussian_filter, load_energy_transfer
-from aux03_plotting import budget_colors, plot_sfs_budget
+from aux00_utils import load_dataset_and_grid, condense_uw_velocities, integrate, make_gaussian_filter, load_energy_transfer
 from aux01_pe_functions import (
     calculate_density_fields_from_buoyancy,
     local_potential_energies_timeseries,  # used for filtered density in loop
     calculate_sfs_ape_tendency,
     calculate_sfs_R_correction,
     calculate_sfs_ape_dissipation,
-    calculate_ape_to_ke_exchange_term,
 )
+
+logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s", datefmt="%H:%M:%S")
+print = logging.info
 #---
 
 #+++ Configuration
@@ -52,14 +55,13 @@ filtered_filename = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities
 t0 = time.time()
 ds_filt = xr.open_dataset(filtered_filename, decode_times=False).chunk({"time": 1})
 filter_length_scales = ds_filt.filter_length_scale.values
-filter_in_2d = int(ds_filt.attrs.get("filter_ndim", 2)) == 2
-filtered_dimensions = ["x_caa", "y_aca"] if filter_in_2d else ["x_caa"]
+filtered_dimensions = ["x_caa", "z_aac"]
 
-ds = condense_velocities(ds, indices=[1, 2, 3]) if filter_in_2d else condense_uw_velocities(ds, indices=[1, 3])
+ds = condense_uw_velocities(ds, indices=[1, 3])
 ds_full = ds[["b", "dV", "LxLy", "uᵢ"]].copy()
 print(f"  Pre-filtered fields loaded from: {filtered_filename}  ({time.time()-t0:.1f}s)")
 print(f"  Filter length scales: {filter_length_scales}")
-print(f"  Filter dimensions: {'2D (x,y)' if filter_in_2d else '1D (x only)'}")
+print(f"  Filter dimensions: x and z")
 
 sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + "_sorted_density.nc"))
 t0 = time.time()
@@ -75,10 +77,26 @@ t0 = time.time()
 ds_full = calculate_density_fields_from_buoyancy(ds_full, buoyancy_name="b", density_name="ρ")
 print(f"  ρ calculated  ({time.time()-t0:.1f}s)")
 
-t0 = time.time()
-full_local_pes = local_potential_energies_timeseries(ds_full, ds_sorted.rho_sorted, ds_sorted.dz_sorted,
-                                                     density_name="ρ", n_workers=n_workers)
-print(f"  full_local_pes calculated  ({time.time()-t0:.1f}s)")
+full_local_pes_checkpoint = PP_OUTPUT / (Path(filename).stem + "_full_local_pes_checkpoint.nc")
+if full_local_pes_checkpoint.exists():
+    print(f"  Loading full_local_pes from checkpoint: {full_local_pes_checkpoint.name}")
+    t0 = time.time()
+    full_local_pes = xr.open_dataset(str(full_local_pes_checkpoint), decode_times=False).chunk({"time": 1})
+    print(f"  full_local_pes loaded  ({time.time()-t0:.1f}s)")
+else:
+    t0 = time.time()
+    full_local_pes = local_potential_energies_timeseries(ds_full, ds_sorted.rho_sorted, ds_sorted.dz_sorted,
+                                                         density_name="ρ", n_workers=n_workers)
+    print(f"  full_local_pes calculated  ({time.time()-t0:.1f}s)")
+    print(f"  Saving full_local_pes checkpoint...")
+    t0 = time.time()
+    with ProgressBar():
+        full_local_pes.to_netcdf(str(full_local_pes_checkpoint))
+    print(f"  Checkpoint saved  ({time.time()-t0:.1f}s)")
+    del full_local_pes
+    gc.collect()
+    full_local_pes = xr.open_dataset(str(full_local_pes_checkpoint), decode_times=False).chunk({"time": 1})
+    print(f"  full_local_pes reloaded lazily")
 #---
 
 #+++ Loop over filter scales and calculate budget terms
@@ -87,13 +105,30 @@ print("Calculating budget terms for each filter scale...")
 
 energy_transfer = load_energy_transfer(filename)
 
+ke_fields_filename     = str(PP_OUTPUT / (Path(filename).stem + "_sfs_ke_budget_fields.nc"))
+ke_integrated_filename = str(PP_OUTPUT / (Path(filename).stem + "_sfs_ke_budget_integrated.nc"))
+ke_budget = xr.merge([
+    xr.open_dataset(ke_fields_filename,     decode_times=False).chunk({"time": 1}),
+    xr.open_dataset(ke_integrated_filename, decode_times=False).chunk({"time": 1}),
+])
+print(f"  KE budget loaded from: {ke_fields_filename} + {ke_integrated_filename}")
+
 dV = ds_full.dV
 budget_list = []
+checkpoint_files = [full_local_pes_checkpoint]
 
 for ℓ in filter_length_scales:
+    checkpoint_path = PP_OUTPUT / (Path(filename).stem + f"_sfs_ape_budget_checkpoint_l{ℓ:.4f}.nc")
+    checkpoint_files.append(checkpoint_path)
+
+    if checkpoint_path.exists():
+        print(f"\n--- filter_length_scale = {ℓ:.4f} (loading from checkpoint) ---")
+        budget_list.append(xr.open_dataset(str(checkpoint_path), decode_times=False).chunk({"time": 1}))
+        continue
+
     print(f"\n--- filter_length_scale = {ℓ:.4f} ---")
 
-    gaussian_filter = make_gaussian_filter(ℓ, ds, filter_in_2d)
+    gaussian_filter = make_gaussian_filter(ℓ, ds)
 
     ds_filt_ℓ = ds_filt.sel(filter_length_scale=ℓ).drop_vars("filter_length_scale")
     ds_filt_ℓ["LxLy"] = ds["LxLy"]
@@ -120,15 +155,9 @@ for ℓ in filter_length_scales:
         filtered_density=ds_filt_ℓ.ρ̄,)
     print(f"  sfs_ape_dissipation  ({time.time()-t0:.1f}s)")
 
-    t0 = time.time()
-    ape_to_ke_exchange = calculate_ape_to_ke_exchange_term(
-        ds_full["uᵢ"].sel(i=3),
-        ds_full.b,
-        gaussian_filter,
-        filter_dims=filtered_dimensions,
-        filtered_w=ds_filt_ℓ["ūᵢ"].sel(i=3),
-        filtered_b=ds_filt_ℓ["b̄"],)
-    print(f"  ape_to_ke_exchange  ({time.time()-t0:.1f}s)")
+    # Read APE->KE exchange term from KE budget (avoid redundant recalculation)
+    ape_to_ke_exchange     = ke_budget["SFS APE->KE exchange"].sel(filter_length_scale=ℓ)
+    int_ape_to_ke_exchange = ke_budget["∫(SFS APE->KE) dV"].sel(filter_length_scale=ℓ)
 
     t0 = time.time()
     R_s = calculate_sfs_R_correction(full_local_pes.rho_sorted, full_local_pes.z0, filt_local_pes.z0,
@@ -140,12 +169,11 @@ for ℓ in filter_length_scales:
 
     int_dAPE_dt             = integrate(dAPE_dt, dV)
     int_sfs_ape_dissipation = integrate(sfs_ape_dissipation.reindex(time=dAPE_dt.time), dV)
-    int_ape_to_ke_exchange  = integrate(ape_to_ke_exchange.reindex(time=dAPE_dt.time), dV)
     int_R_s                 = integrate(R_s.reindex(time=dAPE_dt.time), dV)
 
     Π_APE_ℓ     = energy_transfer["Π_APE"].sel(filter_length_scale=ℓ)
     int_Π_APE_ℓ = energy_transfer["∫Π_APE dV"].sel(filter_length_scale=ℓ)
-    residual    = -int_dAPE_dt - int_ape_to_ke_exchange + int_Π_APE_ℓ.reindex(time=dAPE_dt.time) - int_sfs_ape_dissipation + int_R_s
+    residual    = -int_dAPE_dt - int_ape_to_ke_exchange.reindex(time=dAPE_dt.time) + int_Π_APE_ℓ.reindex(time=dAPE_dt.time) - int_sfs_ape_dissipation + int_R_s
 
     budget_ℓ = xr.Dataset({
         # Density fields
@@ -176,11 +204,26 @@ for ℓ in filter_length_scales:
         "residual_APE": residual,
     }).reindex(time=dAPE_dt.time)
 
-    budget_list.append(budget_ℓ)
+    print(f"  Saving checkpoint...")
+    t0 = time.time()
+    with ProgressBar():
+        budget_ℓ.to_netcdf(str(checkpoint_path))
+    print(f"  Checkpoint saved  ({time.time()-t0:.1f}s)")
+
+    # Free memory before the next iteration
+    del ds_filt_ℓ, filt_local_pes, full_local_ape_filtered, subfilter_local_ape
+    del sfs_ape_dissipation, R_s, dAPE_dt, budget_ℓ
+    del ape_to_ke_exchange, int_ape_to_ke_exchange
+    del int_dAPE_dt, int_sfs_ape_dissipation, int_R_s
+    del Π_APE_ℓ, int_Π_APE_ℓ, residual
+    gc.collect()
+
+    budget_list.append(xr.open_dataset(str(checkpoint_path), decode_times=False).chunk({"time": 1}))
 
 sfs_ape_budget_terms = xr.concat(budget_list, dim=xr.DataArray(filter_length_scales,
                                                                dims="filter_length_scale",
                                                                name="filter_length_scale"))
+sfs_ape_budget_terms.attrs.update(ds.attrs)
 # Scale-independent fields don't need filter_length_scale dimension
 sfs_ape_budget_terms["ρ"] = ds_full.ρ
 print("\nDone!")
@@ -190,28 +233,24 @@ print("\nDone!")
 print("\n" + "="*60)
 print("Saving results...")
 
-output_filename = str(PP_OUTPUT / (Path(filename).stem + "_sfs_ape_budget.nc"))
+integrated_vars = [v for v in sfs_ape_budget_terms.data_vars if v.startswith("∫") or "residual" in v]
+local_vars      = [v for v in sfs_ape_budget_terms.data_vars if v not in integrated_vars]
+
+fields_filename     = str(PP_OUTPUT / (Path(filename).stem + "_sfs_ape_budget_fields.nc"))
+integrated_filename = str(PP_OUTPUT / (Path(filename).stem + "_sfs_ape_budget_integrated.nc"))
+
+print("  Saving local fields...")
 with ProgressBar():
-    sfs_ape_budget_terms.to_netcdf(output_filename)
-print(f"\nResults saved to: {output_filename}")
+    sfs_ape_budget_terms[local_vars].to_netcdf(fields_filename)
+print(f"  Fields saved to:     {fields_filename}")
 
-# Reload from disk so plots read pre-computed data rather than re-triggering the dask graph
-sfs_ape_budget_terms = xr.open_dataset(output_filename, decode_timedelta=False)
-#---
+print("  Saving integrated timeseries...")
+with ProgressBar():
+    sfs_ape_budget_terms[integrated_vars].to_netcdf(integrated_filename)
+print(f"  Integrated saved to: {integrated_filename}")
 
-#+++ Plot integrated budget terms
-print("\n" + "="*60)
-print("Creating plots...")
-print("="*60)
-
-integrated_vars = {
-    "∫-∂ₜ SFS APE dV":    budget_colors["tendency"],
-    "∫Π_APE dV":           budget_colors["flux"],
-    "∫-χₛ dV":             budget_colors["dissipation"],
-    "∫(SFS KE->APE) dV":   budget_colors["exchange"],
-    "∫Rˢ dV":              "C4",
-    "residual_APE":         budget_colors["residual"],
-}
-plot_sfs_budget(sfs_ape_budget_terms, integrated_vars, filter_length_scales,
-                output_filename, REPO_ROOT, "Integrated SFS APE Budget Terms")
+print("\nDeleting intermediate checkpoint files...")
+for f in checkpoint_files:
+    f.unlink(missing_ok=True)
+    print(f"  Deleted: {f.name}")
 #---

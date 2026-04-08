@@ -1,8 +1,8 @@
 #!/bin/bash -l
 #PBS -A UMCP0028
-#PBS -N kelvin_helmholtz
-#PBS -o logs/kelvin_helmholtz.log
-#PBS -e logs/kelvin_helmholtz.log
+#PBS -N kelvin_helmholtz_4096
+#PBS -o logs/kelvin_helmholtz_4096.log
+#PBS -e logs/kelvin_helmholtz_4096.log
 #PBS -l walltime=23:59:00
 #PBS -q casper
 #PBS -M tchor@umd.edu
@@ -24,7 +24,7 @@ echo $CUDA_VISIBLE_DEVICES
 export JULIA_DEPOT_PATH="$WORK/.julia"
 export JULIA_CPU_TARGET="generic"
 juliaup default 1.12
-time julia --project -t 8 kelvin_helmholtz_instability.jl 2>&1 | tee logs/kelvin_helmholtz.out
+time julia --project -t 8 kelvin_helmholtz_instability.jl --Nz 4096 2>&1 | tee logs/kelvin_helmholtz_4096.out
 
-qstat -f $PBS_JOBID >> logs/kelvin_helmholtz.log
-qstat -f $PBS_JOBID >> logs/kelvin_helmholtz.out
+qstat -f $PBS_JOBID >> logs/kelvin_helmholtz_4096.log
+qstat -f $PBS_JOBID >> logs/kelvin_helmholtz_4096.out
