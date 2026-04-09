@@ -1,8 +1,8 @@
 #!/bin/bash -l
 #PBS -A UMCP0028
-#PBS -N budgeting_Nz4096_Ri0.10
-#PBS -o logs/budgeting_Nz4096_Ri0.10.log
-#PBS -e logs/budgeting_Nz4096_Ri0.10.log
+#PBS -N budgeting_Nz512_Ri0.10
+#PBS -o logs/budgeting_Nz512_Ri0.10.log
+#PBS -e logs/budgeting_Nz512_Ri0.10.log
 #PBS -l walltime=23:59:00
 #PBS -q casper
 #PBS -M tchor@umd.edu
@@ -11,7 +11,8 @@
 #PBS -l select=1:ncpus=18:mem=730GB:ngpus=0
 #PBS -l job_priority=premium
 
-SIM=Nz4096_Ri0.10
+NZ=${NZ:-512}
+SIM=Nz${NZ}_Ri0.10
 PYTHON=/glade/u/home/tomasc/miniconda3/envs/py313/bin/python
 
 # Clear the environment from any previously loaded modules
@@ -28,8 +29,10 @@ export JULIA_DEPOT_PATH="$WORK/.julia"
 export JULIA_CPU_TARGET="generic"
 juliaup default 1.12
 
-time $PYTHON -u 01_filter_and_prepare_fields.py --filename output/khi_${SIM}.nc 2>&1
-time $PYTHON -u 02_energy_transfer.py --filename output/khi_${SIM}.nc --n-workers 18 2>&1
-time $PYTHON -u 03_sfs_ke_budget.py --filename output/khi_${SIM}.nc 2>&1
-time $PYTHON -u 04_sfs_ape_budget.py --filename output/khi_${SIM}.nc --n-workers 18 2>&1
-time $PYTHON -u 05_plot_budgets.py --filename output/khi_${SIM}.nc 2>&1
+time $PYTHON -u 01_filter_and_prepare_fields.py --filename output/khi_${SIM}.nc 2>&1 | tee logs/budgeting_Nz${NZ}_Ri0.10.out
+time $PYTHON -u 02_energy_transfer.py --filename output/khi_${SIM}.nc --n-workers 18 2>&1 | tee -a logs/budgeting_Nz${NZ}_Ri0.10.out
+time $PYTHON -u 03_sfs_ke_budget.py --filename output/khi_${SIM}.nc 2>&1 | tee -a logs/budgeting_Nz${NZ}_Ri0.10.out
+time $PYTHON -u 04_sfs_ape_budget.py --filename output/khi_${SIM}.nc --n-workers 18 2>&1 | tee -a logs/budgeting_Nz${NZ}_Ri0.10.out
+time $PYTHON -u 05_plot_budgets.py --filename output/khi_${SIM}.nc 2>&1 | tee -a logs/budgeting_Nz${NZ}_Ri0.10.out
+
+qstat -f $PBS_JOBID >> logs/budgeting_Nz${NZ}_Ri0.10.out

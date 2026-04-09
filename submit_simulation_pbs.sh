@@ -21,10 +21,12 @@ module li
 
 echo $CUDA_VISIBLE_DEVICES
 
+NZ=${NZ:-4096}
+
 export JULIA_DEPOT_PATH="$WORK/.julia"
 export JULIA_CPU_TARGET="generic"
 juliaup default 1.12
-time julia --project -t 8 kelvin_helmholtz_instability.jl --Nz 4096 2>&1 | tee logs/kelvin_helmholtz_4096.out
+time julia --project -t 8 kelvin_helmholtz_instability.jl --Nz $NZ 2>&1 | tee logs/kelvin_helmholtz_${NZ}.out
 
-qstat -f $PBS_JOBID >> logs/kelvin_helmholtz_4096.log
-qstat -f $PBS_JOBID >> logs/kelvin_helmholtz_4096.out
+qstat -f $PBS_JOBID >> logs/kelvin_helmholtz_${NZ}.log
+qstat -f $PBS_JOBID >> logs/kelvin_helmholtz_${NZ}.out
