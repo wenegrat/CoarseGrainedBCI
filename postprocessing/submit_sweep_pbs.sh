@@ -11,7 +11,10 @@
 #PBS -l select=1:ncpus=18:mem=730GB:ngpus=0
 #PBS -l job_priority=premium
 
-SIM=khi_Nz4096_Ri0.10
+cd "${POSTPROC_DIR:-$PBS_O_WORKDIR}"
+
+NZ=${NZ:-4096}
+SIM=khi_Nz${NZ}_Ri0.10
 PYTHON=/glade/u/home/tomasc/miniconda3/envs/py313/bin/python
 
 # Clear the environment from any previously loaded modules
