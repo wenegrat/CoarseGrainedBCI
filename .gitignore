@@ -5,6 +5,7 @@ slurm-*.out
 *.nc.bkp
 *.nc_bkp
 *.jld2
+*.zarr
 *.mp4
 *.pdf
 *.png
