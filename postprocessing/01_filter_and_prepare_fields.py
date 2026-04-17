@@ -45,9 +45,9 @@ print("Done!")
 print("\n" + "="*60)
 print("Saving filtered fields...")
 
-output_filename = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities.nc"))
+output_filename = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities.zarr"))
 with ProgressBar():
-    ds_filt.to_netcdf(output_filename)
+    ds_filt.to_zarr(output_filename, mode="w")
 print(f"Filtered fields saved to: {output_filename}")
 #---
 
@@ -62,8 +62,8 @@ ds_for_sort = calculate_density_fields_from_buoyancy(ds_for_sort, buoyancy_name=
 sorted_density = sorted_timeseries(ds_for_sort, field_to_sort="ρ", n_workers=n_workers)
 sorted_density.attrs.update(ds.attrs)
 
-sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + "_sorted_density.nc"))
+sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + "_sorted_density.zarr"))
 with ProgressBar():
-    sorted_density.to_netcdf(sorted_density_filename)
+    sorted_density.to_zarr(sorted_density_filename, mode="w")
 print(f"Sorted density saved to: {sorted_density_filename}")
 #---

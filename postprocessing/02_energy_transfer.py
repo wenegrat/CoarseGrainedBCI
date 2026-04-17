@@ -36,16 +36,16 @@ print(f"Dataset loaded: {len(ds.time)} time steps  ({time.time()-t0:.1f}s)")
 print("\n" + "="*60)
 print("Loading pre-filtered fields and sorted density...")
 t0 = time.time()
-filtered_filename = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities.nc"))
-ds_filt = xr.open_dataset(filtered_filename, decode_times=False).chunk({"time": 1})
+filtered_filename = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities.zarr"))
+ds_filt = xr.open_zarr(filtered_filename).chunk({"time": 1})
 filter_length_scales = ds_filt.filter_length_scale.values
 print(f"  Filtered fields loaded from: {filtered_filename}  ({time.time()-t0:.1f}s)")
 print(f"  Filter length scales: {filter_length_scales}")
 print(f"  Filter dimensions: x and z")
 
 t0 = time.time()
-sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + "_sorted_density.nc"))
-ds_sorted = xr.open_dataset(sorted_density_filename, decode_times=False).chunk({"time": 1})
+sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + "_sorted_density.zarr"))
+ds_sorted = xr.open_zarr(sorted_density_filename).chunk({"time": 1})
 print(f"  Sorted density loaded from: {sorted_density_filename}  ({time.time()-t0:.1f}s)")
 #---
 
@@ -64,8 +64,8 @@ print("\nDone!")
 print("\n" + "="*60)
 print("Saving results...")
 energy_transfer.attrs.update(ds.attrs)
-output_filename = str(PP_OUTPUT / (Path(filename).stem + "_energy_transfer.nc"))
+output_filename = str(PP_OUTPUT / (Path(filename).stem + "_energy_transfer.zarr"))
 with ProgressBar():
-    energy_transfer.to_netcdf(output_filename)
+    energy_transfer.to_zarr(output_filename, mode="w")
 print(f"Results saved to: {output_filename}")
 #---

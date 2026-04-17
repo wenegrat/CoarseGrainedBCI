@@ -36,8 +36,8 @@ print(f"Dataset loaded: {len(ds.time)} time steps  ({time.time()-t0:.1f}s)")
 print("\n" + "="*60)
 print("Loading pre-filtered fields...")
 t0 = time.time()
-filtered_filename = filename.replace(".nc", "_filtered_velocities_sweep.nc")
-ds_filt = xr.open_dataset(filtered_filename, decode_times=False).chunk(chunks)
+filtered_filename = filename.replace(".nc", "_filtered_velocities_sweep.zarr")
+ds_filt = xr.open_zarr(filtered_filename).chunk(chunks)
 ds = ds.reindex(time=ds_filt.time).chunk(chunks)
 
 filter_length_scales = ds_filt.filter_length_scale.values
@@ -59,8 +59,8 @@ print("\nDone!")
 print("\n" + "="*60)
 print("Saving results...")
 energy_transfer.attrs.update(ds.attrs)
-output_filename = filename.replace(".nc", "_energy_transfer_sweep.nc")
+output_filename = filename.replace(".nc", "_energy_transfer_sweep.zarr")
 with ProgressBar():
-    energy_transfer.to_netcdf(output_filename)
+    energy_transfer.to_zarr(output_filename, mode="w")
 print(f"Results saved to: {output_filename}")
 #---

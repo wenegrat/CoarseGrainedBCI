@@ -40,8 +40,8 @@ print("Done!")
 print("\n" + "="*60)
 print("Saving filtered fields...")
 
-output_filename = filename.replace(".nc", "_filtered_velocities_sweep.nc")
+output_filename = filename.replace(".nc", "_filtered_velocities_sweep.zarr")
 with ProgressBar():
-    ds_filt.to_netcdf(output_filename)
+    ds_filt.to_zarr(output_filename, mode="w")
 print(f"Filtered fields saved to: {output_filename}")
 #---
