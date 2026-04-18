@@ -41,6 +41,7 @@ print("\n" + "="*60)
 print("Saving filtered fields...")
 
 output_filename = filename.replace(".nc", "_filtered_velocities_sweep.zarr")
+ds_filt = ds_filt.chunk({d: (1 if d == "time" else -1) for d in ds_filt.dims})
 with ProgressBar():
     ds_filt.to_zarr(output_filename, mode="w")
 print(f"Filtered fields saved to: {output_filename}")

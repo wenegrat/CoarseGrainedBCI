@@ -37,7 +37,7 @@ print("\n" + "="*60)
 print("Loading pre-filtered fields and sorted density...")
 t0 = time.time()
 filtered_filename = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities.zarr"))
-ds_filt = xr.open_zarr(filtered_filename).chunk({"time": 1})
+ds_filt = xr.open_zarr(filtered_filename)
 filter_length_scales = ds_filt.filter_length_scale.values
 print(f"  Filtered fields loaded from: {filtered_filename}  ({time.time()-t0:.1f}s)")
 print(f"  Filter length scales: {filter_length_scales}")
@@ -45,7 +45,7 @@ print(f"  Filter dimensions: x and z")
 
 t0 = time.time()
 sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + "_sorted_density.zarr"))
-ds_sorted = xr.open_zarr(sorted_density_filename).chunk({"time": 1})
+ds_sorted = xr.open_zarr(sorted_density_filename)
 print(f"  Sorted density loaded from: {sorted_density_filename}  ({time.time()-t0:.1f}s)")
 #---
 
@@ -65,6 +65,7 @@ print("\n" + "="*60)
 print("Saving results...")
 energy_transfer.attrs.update(ds.attrs)
 output_filename = str(PP_OUTPUT / (Path(filename).stem + "_energy_transfer.zarr"))
+energy_transfer = energy_transfer.chunk({d: (1 if d == "time" else -1) for d in energy_transfer.dims})
 with ProgressBar():
     energy_transfer.to_zarr(output_filename, mode="w")
 print(f"Results saved to: {output_filename}")

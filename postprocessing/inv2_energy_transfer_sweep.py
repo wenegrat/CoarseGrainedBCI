@@ -37,7 +37,7 @@ print("\n" + "="*60)
 print("Loading pre-filtered fields...")
 t0 = time.time()
 filtered_filename = filename.replace(".nc", "_filtered_velocities_sweep.zarr")
-ds_filt = xr.open_zarr(filtered_filename).chunk(chunks)
+ds_filt = xr.open_zarr(filtered_filename)
 ds = ds.reindex(time=ds_filt.time).chunk(chunks)
 
 filter_length_scales = ds_filt.filter_length_scale.values
@@ -60,6 +60,7 @@ print("\n" + "="*60)
 print("Saving results...")
 energy_transfer.attrs.update(ds.attrs)
 output_filename = filename.replace(".nc", "_energy_transfer_sweep.zarr")
+energy_transfer = energy_transfer.chunk({d: (1 if d == "time" else -1) for d in energy_transfer.dims})
 with ProgressBar():
     energy_transfer.to_zarr(output_filename, mode="w")
 print(f"Results saved to: {output_filename}")

@@ -38,7 +38,7 @@ print("\n" + "="*60)
 print("Loading pre-filtered fields...")
 
 filtered_filename = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities.zarr"))
-ds_filt = xr.open_zarr(filtered_filename).chunk({"time": 1})
+ds_filt = xr.open_zarr(filtered_filename)
 filtered_dimensions = ["x_caa", "z_aac"]
 filter_length_scales = ds_filt.filter_length_scale.values
 tensor_dimensions = ("x_caa", "z_aac")
@@ -47,7 +47,7 @@ ds = condense_uw_velocities(ds, indices=[1, 3])
 ds_full = ds[["b", "dV", "uᵢ"]].copy()
 
 sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + "_sorted_density.zarr"))
-ds_sorted = xr.open_zarr(sorted_density_filename).chunk({"time": 1})
+ds_sorted = xr.open_zarr(sorted_density_filename)
 
 print(f"Pre-filtered fields loaded from: {filtered_filename}")
 print(f"Sorted density loaded from: {sorted_density_filename}")
@@ -154,6 +154,7 @@ print("Saving results...")
 integrated_vars = [v for v in sfs_ke_budget_terms.data_vars if v.startswith("∫") or "residual" in v]
 local_vars      = [v for v in sfs_ke_budget_terms.data_vars if v not in integrated_vars]
 
+sfs_ke_budget_terms = sfs_ke_budget_terms.chunk({d: (1 if d == "time" else -1) for d in sfs_ke_budget_terms.dims})
 fields_filename     = str(PP_OUTPUT / (Path(filename).stem + "_sfs_ke_budget_fields.zarr"))
 integrated_filename = str(PP_OUTPUT / (Path(filename).stem + "_sfs_ke_budget_integrated.zarr"))
 
