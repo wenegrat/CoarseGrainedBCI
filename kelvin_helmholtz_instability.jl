@@ -5,7 +5,7 @@ using Printf
 using ArgParse
 using CUDA: has_cuda_gpu
 using Oceananigans.Architectures: on_architecture
-using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation, FlowDiagnostics
+using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation, FlowDiagnostics, BoxFilter
 using Oceanostics.ProgressMessengers
 @info "Finished loading packages"
 
@@ -61,6 +61,12 @@ let s = ArgParseSettings()
             arg_type = Float64
             required = false
             default = 0.05
+
+        "--filter_width"
+            help = "Half-width (in physical length units) of the BoxFilter applied to u, v, b outputs. Converted to cells using the grid spacing (default: 0.8)"
+            arg_type = Float64
+            required = false
+            default = 0.8
     end
     global parsed_args = parse_args(s, as_symbols=true)
 end
@@ -111,6 +117,16 @@ Nx = closest_factor_number((2, 3, 5), Nx)
 Ny = closest_factor_number((2, 3, 5), Ny)
 
 params = (; params..., Nx, Ny)
+
+# Convert physical filter width to a cell-count half-width using the z-spacing
+# (the finest, halo-constrained direction). With aspect ratio 1 on GPU, this
+# matches Δx; on CPU with Δx = 2Δz, the x-filter becomes twice as wide in
+# physical units as the z-filter.
+Δz_est = params.Lz / params.Nz
+filter_width_cells = max(1, round(Int, params.filter_width / Δz_est))
+params = (; params..., filter_width_cells, Δz_est)
+@info @sprintf("BoxFilter width: %.3f (physical) → %d cells (using Δz ≈ %.4f)",
+               params.filter_width, params.filter_width_cells, params.Δz_est)
 
 grid = RectilinearGrid(arch; size=(params.Nx, params.Ny, params.Nz),
                        x=(-params.Lx/2, params.Lx/2),
@@ -211,7 +227,14 @@ PE = Integral(pe)
 
 vorticity = Field(∂z(u) - ∂x(w))
 
-outputs = (; ω=vorticity, b, pe, PE, u=u_center, v=v_center, w=w_center, ε̄, ε, Ri=Ri_field, S=S_field)
+#+++ Box-filtered u, v, b for subfilter-scale analysis
+u_filt = BoxFilter(u_center; dims=(1, 3), width=params.filter_width_cells)
+v_filt = BoxFilter(v_center; dims=(1, 3), width=params.filter_width_cells)
+b_filt = BoxFilter(b;        dims=(1, 3), width=params.filter_width_cells)
+#---
+
+outputs = (; ω=vorticity, b, pe, PE, u=u_center, v=v_center, w=w_center,
+           u_filt, v_filt, b_filt, ε̄, ε, Ri=Ri_field, S=S_field)
 
 using NCDatasets
 simulation_name = "khi_Nz$(params.Nz)_Ri$(@sprintf("%.2f", params.Ri))"

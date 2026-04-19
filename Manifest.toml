@@ -1,6 +1,6 @@
 # This file is machine-generated - editing it directly is not advised
 
-julia_version = "1.12.5"
+julia_version = "1.12.6"
 manifest_format = "2.0"
 project_hash = "f25fac1aaab14553f787da0a0c06e3a861c3bfe5"
 
@@ -1326,7 +1326,9 @@ version = "0.106.4"
 
 [[deps.Oceanostics]]
 deps = ["DocStringExtensions", "Oceananigans", "Printf", "SeawaterPolynomials"]
-git-tree-sha1 = "f7d88bd8ee52279846fe92c80da6c014befb5e9f"
+git-tree-sha1 = "0fd64be61a1db6861084ca285e0f27e84f8a0413"
+repo-rev = "tc/box-filter"
+repo-url = "https://github.com/tomchor/Oceanostics.jl.git"
 uuid = "d0ccf422-c8fb-49b5-a76d-74acdde946ac"
 version = "0.16.11"
 
