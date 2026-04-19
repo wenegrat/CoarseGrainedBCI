@@ -7,6 +7,7 @@ Calculate SFS APE budget from Kelvin-Helmholtz simulation output
 import gc
 import logging
 import os
+import shutil
 from pathlib import Path
 import time
 import xarray as xr
@@ -254,6 +255,6 @@ print(f"  Integrated saved to: {integrated_filename}")
 
 print("\nDeleting intermediate checkpoint files...")
 for f in checkpoint_files:
-    f.unlink(missing_ok=True)
+    shutil.rmtree(f, ignore_errors=True)
     print(f"  Deleted: {f.name}")
 #---

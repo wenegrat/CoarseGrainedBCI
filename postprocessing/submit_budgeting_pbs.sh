@@ -1,8 +1,8 @@
 #!/bin/bash -l
 #PBS -A UMCP0028
-#PBS -N budgeting_Nz512_Ri0.10
-#PBS -o logs/budgeting_Nz512_Ri0.10.log
-#PBS -e logs/budgeting_Nz512_Ri0.10.log
+#PBS -N budgeting_Nz2048_Ri0.10
+#PBS -o logs/budgeting_Nz2048_Ri0.10.log
+#PBS -e logs/budgeting_Nz2048_Ri0.10.log
 #PBS -l walltime=23:59:00
 #PBS -q casper
 #PBS -M tchor@umd.edu
@@ -11,7 +11,7 @@
 #PBS -l select=1:ncpus=18:mem=730GB:ngpus=0
 #PBS -l job_priority=premium
 
-NZ=${NZ:-512}
+NZ=${NZ:-2048}
 SIM=Nz${NZ}_Ri0.10
 PYTHON=/glade/u/home/tomasc/miniconda3/envs/py313/bin/python
 
