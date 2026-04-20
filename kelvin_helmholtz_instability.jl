@@ -66,7 +66,7 @@ let s = ArgParseSettings()
             help = "Half-width (in physical length units) of the BoxFilter applied to u, v, b outputs. Converted to cells using the grid spacing (default: 0.8)"
             arg_type = Float64
             required = false
-            default = 0.8
+            default = 2
     end
     global parsed_args = parse_args(s, as_symbols=true)
 end
