@@ -10,18 +10,23 @@ from aux03_plotting import budget_colors, run_label
 #+++ Configuration
 import argparse
 parser = argparse.ArgumentParser(description="Plot SFS KE and APE budget terms from saved budget files")
-parser.add_argument("--filename", default="output/khi_90x1x256.nc",
+parser.add_argument("--filename", default="output/khi_Nz1024_Ri0.10.nc",
                     help="Path to simulation NetCDF file (used to derive budget filenames)")
+parser.add_argument("--fixed-reference", action="store_true", default=False,
+                    help="Load the fixed-in-time reference profile outputs (produced by pipeline with --fixed-reference)")
 args = parser.parse_args()
+print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
+fixed_reference = args.fixed_reference
+ref_suffix = "_fixed_ref" if fixed_reference else ""
 #---
 
 #+++ Load budget data
 print("Loading budget data...")
-ke_filename  = str(PP_OUTPUT / (Path(filename).stem + "_sfs_ke_budget_integrated.nc"))
-ape_filename = str(PP_OUTPUT / (Path(filename).stem + "_sfs_ape_budget_integrated.nc"))
+ke_filename  = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ke_budget_integrated{ref_suffix}.nc"))
+ape_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ape_budget_integrated{ref_suffix}.nc"))
 ke_budget  = xr.open_dataset(ke_filename,  decode_timedelta=False)
 ape_budget = xr.open_dataset(ape_filename, decode_timedelta=False)
 filter_length_scales = ke_budget.filter_length_scale.values
@@ -75,10 +80,16 @@ for ℓ in filter_length_scales:
     axes[1, 0].set_ylim(ymin, ymax)
     axes[1, 1].set_ylim(ymin, ymax)
 
-    if label:
+    if label and fixed_reference:
+        fig.suptitle(f"{label} (fixed reference)", fontsize=11)
+    elif label:
         fig.suptitle(label, fontsize=11)
+    elif fixed_reference:
+        fig.suptitle("(fixed reference)", fontsize=11)
 
-    plot_filename = str(REPO_ROOT / "figures" / (Path(filename).stem + f"_sfs_budgets_l{ℓ:.4f}.png"))
+    plot_filename = str(
+        REPO_ROOT / "figures" / (Path(filename).stem + f"_sfs_budgets_l{ℓ:.4f}{ref_suffix}.png")
+    )
     fig.savefig(plot_filename, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"  Plot saved to: {plot_filename}")
