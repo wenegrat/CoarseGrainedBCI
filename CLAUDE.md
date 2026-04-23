@@ -98,6 +98,7 @@ All post-processing scripts accept `--filename`, `--filter-scales`, `--n-workers
 
 ## Code Style
 
+- Do not break a command/statement into multiple lines if it fits within 140 columns.
 - Always delimit code sections with `#+++` on the opening line and `#---` on the closing line:
   ```python
   #+++ Section name
