@@ -10,13 +10,11 @@ from aux03_plotting import budget_colors, run_label
 #+++ Configuration
 import argparse
 parser = argparse.ArgumentParser(description="Plot 2x2 panel of SFS KE and APE budgets at two filter scales")
-parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc",
-                    help="Path to simulation NetCDF file (used to derive budget filenames)")
-parser.add_argument("--fixed-reference", action="store_true", default=False,
-                    help="Load the fixed-in-time reference profile outputs")
-parser.add_argument("--filter-scales", type=float, nargs=2, default=[0.4, 2.0],
-                    help="Two filter length scales for left and right columns (default: 0.4 2.0)")
+parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file (used to derive budget filenames)")
+parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load the fixed-in-time reference profile outputs")
+parser.add_argument("--filter-scales", type=float, nargs=2, default=[0.4, 2.0], help="Two filter length scales for left and right columns (default: 0.4 2.0)")
 args = parser.parse_args()
+
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
@@ -98,14 +96,10 @@ for col in range(2):
 #---
 
 #+++ Legend and labels
-handles, labels = axes[0, 0].get_legend_handles_labels()
-handles2, labels2 = axes[1, 0].get_legend_handles_labels()
-for h, l in zip(handles2, labels2):
-    if l not in labels:
-        handles.append(h)
-        labels.append(l)
-fig.legend(handles, labels, loc="lower center", ncol=len(labels), fontsize=11,
-           bbox_to_anchor=(0.5, -0.05), frameon=True, fancybox=True)
+ke_handles, ke_labels = axes[0, 0].get_legend_handles_labels()
+ape_handles, ape_labels = axes[1, 0].get_legend_handles_labels()
+axes[0, 0].legend(ke_handles, ke_labels, fontsize=13, loc="upper right", frameon=True, fancybox=True)
+axes[1, 0].legend(ape_handles, ape_labels, fontsize=13, loc="upper right", frameon=True, fancybox=True)
 
 for ax, letter in zip(axes.flat, "abcd"):
     ax.text(0.02, 0.97, f"({letter})", transform=ax.transAxes,
