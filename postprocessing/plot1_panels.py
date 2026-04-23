@@ -16,16 +16,12 @@ print = logging.info
 #+++ Configuration
 import argparse
 parser = argparse.ArgumentParser(description="Plot 4-panel snapshot of local SFS budget terms")
-parser.add_argument("--filename", default="output/khi_Nz4096_Ri0.10.nc",
-                    help="Path to simulation NetCDF file")
-parser.add_argument("--time", type=float, default=50.0,
-                    help="Target time for snapshot (nearest available will be used)")
-parser.add_argument("--filter-scale", type=float, default=0.5,
-                    help="Target filter length scale (nearest available will be used)")
-parser.add_argument("--clim-percentile", type=float, default=98.0,
-                    help="Percentile of |data| used to set symmetric color limits")
+parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file")
+parser.add_argument("--time", type=float, default=86, help="Target time for snapshot (nearest available will be used)")
+parser.add_argument("--filter-scale", type=float, default=0.4, help="Target filter length scale (nearest available will be used)")
+parser.add_argument("--clim-percentile", type=float, default=99.5, help="Percentile of |data| used to set symmetric color limits")
 args = parser.parse_args()
-print("\\n" + "="*70 + f"\\n  {Path(__file__).name}\\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\\n" + "="*70)
+print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
@@ -40,8 +36,8 @@ print("Loading KE and APE budgets...")
 ke_budget  = xr.open_dataset(str(PP_OUTPUT / f"{stem}_sfs_ke_budget_fields.nc"),  decode_times=False)
 ape_budget = xr.open_dataset(str(PP_OUTPUT / f"{stem}_sfs_ape_budget_fields.nc"), decode_times=False)
 
-ke_budget = ke_budget.sel(z_aac=slice(-3, +3))
-ape_budget = ape_budget.sel(z_aac=slice(-3, +3))
+ke_budget = ke_budget.sel(z_aac=slice(-4, +4))
+ape_budget = ape_budget.sel(z_aac=slice(-4, +4))
 print("Done.")
 #---
 
@@ -65,7 +61,7 @@ chi_s    = ape_budget["χₛ"].sel(**sel).squeeze()                # APE dissipa
 #+++ Load buoyancy field for contours
 print("Loading buoyancy field...")
 ds = load_dataset_and_grid(filename)
-b = ds["b"].sel(time=t_sel, method="nearest").sel(z_aac=slice(-3, +3)).squeeze()
+b = ds["b"].sel(time=t_sel, method="nearest").squeeze()
 print("Done.")
 #---
 
@@ -110,9 +106,6 @@ for ax, (field, title) in zip(axes.flat, panels):
         cmap = "inferno"
         vmin = 0
         vmax = np.nanpercentile(data, args.clim_percentile)
-    elif field is pi_ape:
-        cmap = "RdBu_r"
-        vmin, vmax = -pi_ape_vmax, pi_ape_vmax
     else:
         cmap = "RdBu_r"
         vmin, vmax = -pi_ke_vmax, pi_ke_vmax
@@ -125,7 +118,7 @@ for ax, (field, title) in zip(axes.flat, panels):
     ax.set_xlabel("x")
     ax.set_ylabel("z")
     ax.set_title(title)
-    ax.set_ylim(-2.5, +2.5)
+    ax.set_ylim(-3.5, +3.5)
 
 for ax, letter in zip(axes.flat, "abcd"):
     ax.text(0.02, 0.97, f"({letter})", transform=ax.transAxes,
