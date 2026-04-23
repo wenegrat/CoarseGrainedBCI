@@ -72,11 +72,21 @@ for row, budget, terms, row_title in budget_configs:
             lw = 1.0 if "residual" in var else 1.5
             ax.plot(data.time, data.values, label=label, color=color, ls=ls, lw=lw)
 
-        ax.set_ylabel("Budget terms [W]")
-        ax.set_xlabel("Time")
+        if col == 0:
+            ax.set_ylabel(row_title + " [W]", fontsize=13)
+        else:
+            ax.set_ylabel("")
+        if row == 1:
+            ax.set_xlabel("Time", fontsize=13)
+        else:
+            ax.set_xlabel("")
+            ax.tick_params(labelbottom=False)
         ax.grid(True, alpha=0.3, lw=0.5)
-        actual_ℓ = float(budget.filter_length_scale.sel(filter_length_scale=ℓ, method="nearest"))
-        ax.set_title(f"{row_title}  ($\\ell = {actual_ℓ:.1f}$)")
+        ax.set_title("")
+
+for col, ℓ in enumerate([ℓ_left, ℓ_right]):
+    actual_ℓ = float(ke_budget.filter_length_scale.sel(filter_length_scale=ℓ, method="nearest"))
+    axes[0, col].set_title(f"$\\ell = {actual_ℓ:.1f}$", fontsize=14)
 #---
 
 #+++ Share y-axis within each column
@@ -94,8 +104,8 @@ for h, l in zip(handles2, labels2):
     if l not in labels:
         handles.append(h)
         labels.append(l)
-fig.legend(handles, labels, loc="lower center", ncol=len(labels), fontsize=9,
-           bbox_to_anchor=(0.5, -0.04), frameon=True, fancybox=True)
+fig.legend(handles, labels, loc="lower center", ncol=len(labels), fontsize=11,
+           bbox_to_anchor=(0.5, -0.05), frameon=True, fancybox=True)
 
 for ax, letter in zip(axes.flat, "abcd"):
     ax.text(0.02, 0.97, f"({letter})", transform=ax.transAxes,
@@ -109,7 +119,7 @@ if label:
 if fixed_reference:
     suptitle_parts.append("(fixed reference)")
 if suptitle_parts:
-    fig.suptitle("  ".join(suptitle_parts), fontsize=11)
+    fig.suptitle("  ".join(suptitle_parts), fontsize=14)
 #---
 
 #+++ Save
