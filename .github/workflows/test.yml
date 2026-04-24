@@ -48,7 +48,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: simulation-output
-          path: output/khi_Nz512_Ri0.10.nc
+          path: |
+            output/khi_Nz512_Ri0.10.nc
+            output/khi_Nz512_Ri0.10_2d.nc
           compression-level: 9
 
   # ---------------------------------------------------------------------------
@@ -95,11 +97,18 @@ jobs:
         id: pytest
         run: pytest tests/ -v -s
 
+      - name: Generate animation
+        if: always() && steps.pytest.outcome == 'success'
+        working-directory: postprocessing
+        run: python anim1_panels.py --filename output/khi_Nz512_Ri0.10.nc --filter-scale 0.8 --dpi 100 --fps 8
+
       - name: List output files
         if: always()
         run: |
           echo "=== figures/ ==="
           ls -la figures/ || echo "(directory missing)"
+          echo "=== animations/ ==="
+          ls -la animations/ || echo "(directory missing)"
           echo "=== postprocessing/output/ ==="
           ls -la postprocessing/output/ || echo "(directory missing)"
 
@@ -109,6 +118,14 @@ jobs:
         with:
           name: budget-plots-time-varying
           path: figures/*.png
+          if-no-files-found: warn
+
+      - name: Upload animation
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: animation-time-varying
+          path: animations/*.mp4
           if-no-files-found: warn
 
       - name: Upload postprocessing NetCDF files
@@ -189,11 +206,18 @@ jobs:
         id: pytest
         run: pytest tests/ -v -s --ref-suffix _fixed_ref
 
+      - name: Generate animation (fixed reference)
+        if: always() && steps.pytest.outcome == 'success'
+        working-directory: postprocessing
+        run: python anim1_panels.py --filename output/khi_Nz512_Ri0.10.nc --filter-scale 0.8 --dpi 100 --fps 8 --fixed-reference
+
       - name: List output files
         if: always()
         run: |
           echo "=== figures/ ==="
           ls -la figures/ || echo "(directory missing)"
+          echo "=== animations/ ==="
+          ls -la animations/ || echo "(directory missing)"
           echo "=== postprocessing/output/ ==="
           ls -la postprocessing/output/ || echo "(directory missing)"
 
@@ -203,6 +227,14 @@ jobs:
         with:
           name: budget-plots-fixed-ref
           path: figures/*.png
+          if-no-files-found: warn
+
+      - name: Upload animation (fixed reference)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: animation-fixed-ref
+          path: animations/*.mp4
           if-no-files-found: warn
 
       - name: Upload postprocessing NetCDF files
