@@ -2,6 +2,7 @@ slurm-*.out
 *.pyc
 *.swp
 *.nc
+*.zarr
 *.nc.bkp
 *.nc_bkp
 *.jld2
