@@ -117,7 +117,7 @@ def get_frame(ds, var, xdim, zdim, idx):
 print("Setting up figure...")
 fig = plt.figure(figsize=(16, 13))
 gs = gridspec.GridSpec(4, 3, figure=fig, height_ratios=[1, 1, 0.7, 0.7],
-                       hspace=0.30, wspace=0.05, left=0.04, right=0.96, top=0.94, bottom=0.05)
+                       hspace=0.22, wspace=0.05, left=0.06, right=0.99, top=0.95, bottom=0.05)
 
 snapshot_axes = np.array([[fig.add_subplot(gs[r, c]) for c in range(3)] for r in range(2)])
 ax_ke_budget = fig.add_subplot(gs[2, :])
@@ -147,9 +147,8 @@ for row, col, ds, var, title, cmap, vmin, vmax in panel_specs:
     ax.set_ylim(-args.zlim, args.zlim)
     ax.set_aspect("auto")
     ax.set_ylabel("z" if col == 0 else "")
-    ax.set_xlabel("x" if row == 1 else "")
-    if row == 0:
-        ax.tick_params(labelbottom=False)
+    ax.set_xlabel("")
+    ax.tick_params(labelbottom=(row == 1))
     meshes.append(im)
 
 for ax, letter in zip(snapshot_axes.flat, "abcdef"):
@@ -184,9 +183,11 @@ for ax, budget_ds, terms, ylabel in [
         lw = 1.0 if "residual" in var else 1.5
         ax.plot(data.time, data.values, label=label_str, color=color, ls=ls, lw=lw)
     ax.set_ylabel(ylabel, fontsize=12)
-    ax.set_xlabel("Time", fontsize=12)
     ax.grid(True, alpha=0.3, lw=0.5)
     ax.legend(fontsize=10, loc="upper right", frameon=True, fancybox=True)
+
+ax_ke_budget.tick_params(labelbottom=False)
+ax_ape_budget.set_xlabel("Time", fontsize=12)
 
 ymin = min(ax_ke_budget.get_ylim()[0], ax_ape_budget.get_ylim()[0])
 ymax = max(ax_ke_budget.get_ylim()[1], ax_ape_budget.get_ylim()[1])
