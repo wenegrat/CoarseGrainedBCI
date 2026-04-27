@@ -74,7 +74,7 @@ panels = [
     (chi_s,    r"$\chi_s$  (Small-scale APE dissipation)"),
 ]
 
-fig, axes = plt.subplots(2, 2, figsize=(14, 10), constrained_layout=True)
+fig, axes = plt.subplots(2, 2, figsize=(14, 10), constrained_layout=True, gridspec_kw=dict(wspace=0))
 
 x_dim = next(d for d in pi_ke.dims if "x" in d)
 z_dim = next(d for d in pi_ke.dims if "z" in d)
@@ -112,26 +112,29 @@ for ax, (field, title) in zip(axes.flat, panels):
 
     im = ax.pcolormesh(x, z, data, cmap=cmap, vmin=vmin, vmax=vmax, rasterized=True)
     cax = ax.inset_axes([0.3, 0.07, 0.4, 0.03])
-    fig.colorbar(im, cax=cax, orientation="horizontal")
+    tick_color = "white" if is_dissipation else "black"
+    cb = fig.colorbar(im, cax=cax, orientation="horizontal")
+    cax.tick_params(colors=tick_color)
+    for spine in cax.spines.values():
+        spine.set_edgecolor(tick_color)
 
-    ax.contour(bx, bz, bdata, levels=blevels, colors="k", linewidths=0.6, alpha=0.5)
+    contour_color = "white" if is_dissipation else "k"
+    ax.contour(bx, bz, bdata, levels=blevels, colors=contour_color, linewidths=0.6, alpha=0.5)
 
     ax.set_xlabel("x")
-    ax.set_ylabel("z")
     ax.set_title(title)
     ax.set_ylim(-4, +4)
     ax.set_aspect("equal")
+
+for row in range(2):
+    axes[row, 0].set_ylabel("z")
+    axes[row, 1].set_ylabel("")
+    axes[row, 1].tick_params(labelleft=False)
 
 for ax, letter in zip(axes.flat, "abcd"):
     ax.text(0.02, 0.97, f"({letter})", transform=ax.transAxes,
             fontsize=12, fontweight="bold", va="top", ha="left",
             bbox=dict(facecolor="white", edgecolor="none", pad=1.5))
-
-label = run_label(ke_budget.attrs)
-suptitle = f"t = {t_sel:.1f},  ℓ = {ℓ_sel:.4f}"
-if label:
-    suptitle += f"\n{label}"
-fig.suptitle(suptitle, fontsize=11)
 
 outfile = str(FIGURES / f"{stem}_panels_t{t_sel:.1f}_l{ℓ_sel:.4f}.png")
 fig.savefig(outfile, dpi=150, bbox_inches="tight")
