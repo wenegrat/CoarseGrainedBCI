@@ -25,34 +25,35 @@ ref_suffix = "_fixed_ref" if args.fixed_reference else ""
 print("Loading energy transfer data...")
 input_filename = str(PP_OUTPUT / (Path(filename).stem + f"_energy_transfer_sweep{ref_suffix}.nc"))
 et = xr.open_dataset(input_filename, decode_timedelta=False)
-et = et.sel(time=[50], method="nearest")
+et = et.sel(time=50, method="nearest")
 
 # Add 1/ℓ as a non-dimension coordinate so plot.line can use it as the x axis
 et = et.assign_coords(inv_scale=("filter_length_scale", 1.0 / et.filter_length_scale.values))
 et["inv_scale"].attrs = {"long_name": "Inverse of filter scale 1/ℓ",}
 print(f"  Loaded: {input_filename}")
-print(f"  Time steps: {len(et.time)}   Filter scales: {len(et.filter_length_scale)}")
+print(f"  Time step: {et.time.values}   Filter scales: {et.filter_length_scale.values}")
 #---
 
 #+++ Plot
-fig, axes = plt.subplots(1, 2, figsize=(12, 5), constrained_layout=True, sharey=True)
+fig, ax = plt.subplots(figsize=(6, 4.5), constrained_layout=True)
 
-for ax, var in zip(axes, ["∫Π_KE dV", "∫Π_APE dV"]):
-    et[var].plot.line(x="inv_scale", hue="time", ax=ax)
-    ax.axhline(0, color="k", lw=0.8, ls="--")
-    for ℓ in [0.4, 5.0]:
-        ax.axvline(1.0 / ℓ, color="k", lw=0.8, ls="--")
-    ax.set_xscale("log")
-    ax.set_yscale("symlog", linthresh=1e-2)
-    ax.grid(True, alpha=0.3)
-    ax2 = ax.secondary_xaxis("top", functions=(lambda x: 1/x, lambda x: 1/x))
-    ax2.set_xlabel("Filter scale ℓ")
+for var, color, label_str in [("∫Π_KE dV", "C0", r"$\Pi_{KE}$"), ("∫Π_APE dV", "C1", r"$\Pi_{APE}$")]:
+    ax.plot(et.inv_scale, et[var].values, color=color, label=label_str)
+ax.axhline(0, color="k", lw=0.8, ls="--")
+for ℓ in [0.4, 5.0]:
+    ax.axvline(1.0 / ℓ, color="k", lw=0.8, ls="--")
+ax.set_xscale("log")
+ax.set_yscale("symlog", linthresh=1e-2)
+ax.grid(True, alpha=0.3)
+ax.set_xlabel("Inverse of filter scale 1/ℓ")
+ax.legend()
+ax2 = ax.secondary_xaxis("top", functions=(lambda x: 1/x, lambda x: 1/x))
+ax2.set_xlabel("Filter scale ℓ")
 
-axes[0].set_title("KE cross-scale transfer spectrum")
-axes[1].set_title("APE cross-scale transfer spectrum")
+ax.set_title("Cross-scale transfer spectrum")
 label = run_label(et.attrs)
 if label:
-    fig.suptitle(label, fontsize=11)
+    ax.text(0.98, 0.04, label, transform=ax.transAxes, fontsize=10, ha="right", va="bottom", bbox=dict(facecolor="white", edgecolor="none", pad=2, alpha=0.8))
 
 plot_filename = str(REPO_ROOT / "figures" / os.path.basename(input_filename).replace(".nc", ".png"))
 fig.savefig(plot_filename, dpi=150, bbox_inches="tight")
