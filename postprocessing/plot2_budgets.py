@@ -36,17 +36,17 @@ print(f"  Filter scales available: {ke_budget.filter_length_scale.values}")
 
 #+++ Define budget terms (shared colors across all panels)
 ke_terms = {
-    r"$-\partial_t$ SFS KE":   ("∫-∂ₜ SFS KE dV",    budget_colors["tendency"]),
-    r"$\Pi_{KE}$":             ("∫Π_KE dV",           budget_colors["flux"]),
-    r"$-\varepsilon_s$":       ("∫-εₛ dV",            budget_colors["dissipation"]),
-    r"SFS APE $\to$ KE":       ("∫(SFS APE->KE) dV",  budget_colors["exchange"]),
+    r"$\partial_t$ SFS KE":    ("∫-∂ₜ SFS KE dV",    budget_colors["tendency"], -1),
+    r"$\Pi_{KE}$":             ("∫Π_KE dV",           budget_colors["flux"],      1),
+    r"$-\varepsilon_s$":       ("∫-εₛ dV",            budget_colors["dissipation"], 1),
+    r"SFS APE $\to$ KE":       ("∫(SFS APE->KE) dV",  budget_colors["exchange"],  1),
 }
 ape_terms = {
-    r"$-\partial_t$ SFS APE":  ("∫-∂ₜ SFS APE dV",   budget_colors["tendency"]),
-    r"$\Pi_{APE}$":            ("∫Π_APE dV",          budget_colors["flux"]),
-    r"$-\chi_s$":              ("∫-χₛ dV",            budget_colors["dissipation"]),
-    r"SFS KE $\to$ APE":       ("∫(SFS KE->APE) dV",  budget_colors["exchange"]),
-    r"$R^s$":                  ("∫Rˢ dV",             "C4"),
+    r"$\partial_t$ SFS APE":   ("∫-∂ₜ SFS APE dV",   budget_colors["tendency"], -1),
+    r"$\Pi_{APE}$":            ("∫Π_APE dV",          budget_colors["flux"],      1),
+    r"$-\chi_s$":              ("∫-χₛ dV",            budget_colors["dissipation"], 1),
+    r"SFS KE $\to$ APE":       ("∫(SFS KE->APE) dV",  budget_colors["exchange"],  1),
+    r"$R^s$":                  ("∫Rˢ dV",             "C4",                       1),
 }
 #---
 
@@ -63,11 +63,9 @@ for row, budget, terms, row_title in budget_configs:
     for col, ℓ in enumerate([ℓ_right, ℓ_left]):
         ax = axes[row, col]
         ax.axhline(0, color="k", lw=0.8, ls="--", zorder=0)
-        for label, (var, color) in terms.items():
+        for label, (var, color, sign) in terms.items():
             data = budget[var].sel(filter_length_scale=ℓ, method="nearest").dropna("time").isel(time=slice(1, None))
-            ls = "--" if "residual" in var else "-"
-            lw = 1.0 if "residual" in var else 1.5
-            ax.plot(data.time, data.values, label=label, color=color, ls=ls, lw=lw)
+            ax.plot(data.time, sign * data.values, label=label, color=color, lw=1.5)
 
         if col == 0:
             ax.set_ylabel(row_title, fontsize=13)
