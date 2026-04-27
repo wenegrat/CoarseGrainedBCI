@@ -74,7 +74,7 @@ panels = [
     (chi_s,    r"$\chi_s$  (Small-scale APE dissipation)"),
 ]
 
-fig, axes = plt.subplots(2, 2, figsize=(14, 10), constrained_layout=True, gridspec_kw=dict(wspace=0))
+fig, axes = plt.subplots(2, 2, figsize=(12, 8), constrained_layout=True, gridspec_kw=dict(wspace=0))
 
 x_dim = next(d for d in pi_ke.dims if "x" in d)
 z_dim = next(d for d in pi_ke.dims if "z" in d)
@@ -111,7 +111,7 @@ for ax, (field, title) in zip(axes.flat, panels):
         vmin, vmax = -pi_ke_vmax, pi_ke_vmax
 
     im = ax.pcolormesh(x, z, data, cmap=cmap, vmin=vmin, vmax=vmax, rasterized=True)
-    cax = ax.inset_axes([0.3, 0.07, 0.4, 0.03])
+    cax = ax.inset_axes([0.3, 0.09, 0.4, 0.03])
     tick_color = "white" if is_dissipation else "black"
     cb = fig.colorbar(im, cax=cax, orientation="horizontal")
     cax.tick_params(colors=tick_color)
@@ -129,7 +129,7 @@ for ax, (field, title) in zip(axes.flat, panels):
 for row in range(2):
     axes[row, 0].set_ylabel("z")
     axes[row, 1].set_ylabel("")
-    axes[row, 1].tick_params(labelleft=False)
+    axes[row, 1].tick_params(labelleft=False, left=False)
 
 for ax, letter in zip(axes.flat, "abcd"):
     ax.text(0.02, 0.97, f"({letter})", transform=ax.transAxes,
