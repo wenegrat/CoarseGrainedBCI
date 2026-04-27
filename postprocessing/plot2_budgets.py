@@ -62,6 +62,7 @@ budget_configs = [
 for row, budget, terms, row_title in budget_configs:
     for col, ℓ in enumerate([ℓ_right, ℓ_left]):
         ax = axes[row, col]
+        ax.axhline(0, color="k", lw=0.8, ls="--", zorder=0)
         for label, (var, color) in terms.items():
             data = budget[var].sel(filter_length_scale=ℓ, method="nearest").dropna("time").isel(time=slice(1, None))
             ls = "--" if "residual" in var else "-"
