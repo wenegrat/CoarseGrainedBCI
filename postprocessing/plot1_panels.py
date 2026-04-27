@@ -127,6 +127,9 @@ for ax, (field, title) in zip(axes.flat, panels):
     ax.set_ylim(-4, +4)
     ax.set_aspect("equal")
 
+for ax in axes.flat:
+    ax.set_yticks([-3, -1, 1, 3])
+
 for row in range(2):
     axes[row, 0].set_ylabel("z")
     axes[row, 1].set_ylabel("")
