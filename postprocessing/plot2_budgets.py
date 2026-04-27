@@ -40,7 +40,6 @@ ke_terms = {
     r"$\Pi_{KE}$":             ("∫Π_KE dV",           budget_colors["flux"]),
     r"$-\varepsilon_s$":       ("∫-εₛ dV",            budget_colors["dissipation"]),
     r"SFS APE $\to$ KE":       ("∫(SFS APE->KE) dV",  budget_colors["exchange"]),
-    r"residual":               ("residual_KE",         budget_colors["residual"]),
 }
 ape_terms = {
     r"$-\partial_t$ SFS APE":  ("∫-∂ₜ SFS APE dV",   budget_colors["tendency"]),
@@ -48,7 +47,6 @@ ape_terms = {
     r"$-\chi_s$":              ("∫-χₛ dV",            budget_colors["dissipation"]),
     r"SFS KE $\to$ APE":       ("∫(SFS KE->APE) dV",  budget_colors["exchange"]),
     r"$R^s$":                  ("∫Rˢ dV",             "C4"),
-    r"residual":               ("residual_APE",        budget_colors["residual"]),
 }
 #---
 
@@ -97,10 +95,10 @@ for col in range(2):
 #---
 
 #+++ Legend and labels
-ke_handles, ke_labels = axes[0, 0].get_legend_handles_labels()
-ape_handles, ape_labels = axes[1, 0].get_legend_handles_labels()
-axes[0, 0].legend(ke_handles, ke_labels, fontsize=13, loc="upper right", frameon=True, fancybox=True)
-axes[1, 0].legend(ape_handles, ape_labels, fontsize=13, loc="upper right", frameon=True, fancybox=True)
+ke_handles, ke_labels = axes[0, 1].get_legend_handles_labels()
+ape_handles, ape_labels = axes[1, 1].get_legend_handles_labels()
+axes[0, 1].legend(ke_handles, ke_labels, fontsize=13, loc="upper right", frameon=True, fancybox=True)
+axes[1, 1].legend(ape_handles, ape_labels, fontsize=13, loc="upper right", frameon=True, fancybox=True)
 
 for ax, letter in zip(axes.flat, "abcd"):
     ax.text(0.02, 0.97, f"({letter})", transform=ax.transAxes,
@@ -108,13 +106,13 @@ for ax, letter in zip(axes.flat, "abcd"):
             bbox=dict(facecolor="white", edgecolor="none", pad=1.5, alpha=0.8))
 
 label = run_label(ke_budget.attrs)
-suptitle_parts = []
+info_parts = []
 if label:
-    suptitle_parts.append(label)
+    info_parts.append(label)
 if fixed_reference:
-    suptitle_parts.append("(fixed reference)")
-if suptitle_parts:
-    fig.suptitle("  ".join(suptitle_parts), fontsize=14)
+    info_parts.append("(fixed reference)")
+if info_parts:
+    axes[0, 0].text(0.98, 0.97, "  ".join(info_parts), transform=axes[0, 0].transAxes, fontsize=11, ha="right", va="top", bbox=dict(facecolor="white", edgecolor="none", pad=2, alpha=0.8))
 #---
 
 #+++ Save
