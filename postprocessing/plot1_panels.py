@@ -111,14 +111,15 @@ for ax, (field, title) in zip(axes.flat, panels):
         vmin, vmax = -pi_ke_vmax, pi_ke_vmax
 
     im = ax.pcolormesh(x, z, data, cmap=cmap, vmin=vmin, vmax=vmax, rasterized=True)
-    fig.colorbar(im, ax=ax, shrink=0.8, label="[m² s⁻³]")
+    cax = ax.inset_axes([0.3, 0.07, 0.4, 0.03])
+    fig.colorbar(im, cax=cax, orientation="horizontal")
 
     ax.contour(bx, bz, bdata, levels=blevels, colors="k", linewidths=0.6, alpha=0.5)
 
     ax.set_xlabel("x")
     ax.set_ylabel("z")
     ax.set_title(title)
-    ax.set_ylim(-3.5, +3.5)
+    ax.set_ylim(-4, +4)
     ax.set_aspect("equal")
 
 for ax, letter in zip(axes.flat, "abcd"):
