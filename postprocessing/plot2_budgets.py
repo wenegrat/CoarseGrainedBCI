@@ -54,24 +54,24 @@ ape_terms = {
 
 #+++ Plot 2×2 figure
 print("Creating 2×2 budget panel plot...")
-fig, axes = plt.subplots(2, 2, figsize=(14, 9), constrained_layout=True)
+fig, axes = plt.subplots(2, 2, figsize=(14, 8), constrained_layout=True)
 
 budget_configs = [
-    (0, ke_budget,  ke_terms,  "SFS KE budget"),
-    (1, ape_budget, ape_terms, "SFS APE budget"),
+    (0, ke_budget,  ke_terms,  "SFS KE budget terms"),
+    (1, ape_budget, ape_terms, "SFS APE budget terms"),
 ]
 
 for row, budget, terms, row_title in budget_configs:
-    for col, ℓ in enumerate([ℓ_left, ℓ_right]):
+    for col, ℓ in enumerate([ℓ_right, ℓ_left]):
         ax = axes[row, col]
         for label, (var, color) in terms.items():
-            data = budget[var].sel(filter_length_scale=ℓ, method="nearest").dropna("time")
+            data = budget[var].sel(filter_length_scale=ℓ, method="nearest").dropna("time").isel(time=slice(1, None))
             ls = "--" if "residual" in var else "-"
             lw = 1.0 if "residual" in var else 1.5
             ax.plot(data.time, data.values, label=label, color=color, ls=ls, lw=lw)
 
         if col == 0:
-            ax.set_ylabel(row_title + " [W]", fontsize=13)
+            ax.set_ylabel(row_title, fontsize=13)
         else:
             ax.set_ylabel("")
         if row == 1:
@@ -79,10 +79,11 @@ for row, budget, terms, row_title in budget_configs:
         else:
             ax.set_xlabel("")
             ax.tick_params(labelbottom=False)
+        ax.set_xlim(right=140)
         ax.grid(True, alpha=0.3, lw=0.5)
         ax.set_title("")
 
-for col, ℓ in enumerate([ℓ_left, ℓ_right]):
+for col, ℓ in enumerate([ℓ_right, ℓ_left]):
     actual_ℓ = float(ke_budget.filter_length_scale.sel(filter_length_scale=ℓ, method="nearest"))
     axes[0, col].set_title(f"$\\ell = {actual_ℓ:.1f}$", fontsize=14)
 #---
@@ -119,6 +120,5 @@ if suptitle_parts:
 #+++ Save
 outfile = str(FIGURES / f"{stem}_sfs_budgets_2x2{ref_suffix}.png")
 fig.savefig(outfile, dpi=200, bbox_inches="tight")
-plt.close(fig)
 print(f"Figure saved to: {outfile}")
 #---
