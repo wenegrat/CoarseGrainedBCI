@@ -21,8 +21,8 @@ parser.add_argument("--time", type=float, default=78, help="Target time for snap
 parser.add_argument("--filter-scale", type=float, default=0.4, help="Target filter length scale (nearest available will be used)")
 parser.add_argument("--clim-percentile", type=float, default=99.5, help="Percentile of |data| used to set symmetric color limits")
 args = parser.parse_args()
-print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
 
+print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
 FIGURES   = REPO_ROOT / "figures"
@@ -119,6 +119,7 @@ for ax, (field, title) in zip(axes.flat, panels):
     ax.set_ylabel("z")
     ax.set_title(title)
     ax.set_ylim(-3.5, +3.5)
+    ax.set_aspect("equal")
 
 for ax, letter in zip(axes.flat, "abcd"):
     ax.text(0.02, 0.97, f"({letter})", transform=ax.transAxes,

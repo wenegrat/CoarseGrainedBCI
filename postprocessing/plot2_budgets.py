@@ -52,7 +52,7 @@ ape_terms = {
 
 #+++ Plot 2×2 figure
 print("Creating 2×2 budget panel plot...")
-fig, axes = plt.subplots(2, 2, figsize=(14, 8), constrained_layout=True)
+fig, axes = plt.subplots(2, 2, figsize=(14, 7), constrained_layout=True)
 
 budget_configs = [
     (0, ke_budget,  ke_terms,  "SFS KE budget terms"),
