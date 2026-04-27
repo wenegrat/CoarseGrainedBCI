@@ -74,7 +74,7 @@ panels = [
     (chi_s,    r"$\chi_s$  (Small-scale APE dissipation)"),
 ]
 
-fig, axes = plt.subplots(2, 2, figsize=(12, 8), constrained_layout=True, gridspec_kw=dict(wspace=0))
+fig, axes = plt.subplots(2, 2, figsize=(12, 7), constrained_layout=True, gridspec_kw=dict(wspace=0, hspace=0))
 
 x_dim = next(d for d in pi_ke.dims if "x" in d)
 z_dim = next(d for d in pi_ke.dims if "z" in d)
@@ -121,8 +121,9 @@ for ax, (field, title) in zip(axes.flat, panels):
     contour_color = "white" if is_dissipation else "k"
     ax.contour(bx, bz, bdata, levels=blevels, colors=contour_color, linewidths=0.6, alpha=0.5)
 
-    ax.set_xlabel("x")
-    ax.set_title(title)
+    title_color = "white" if is_dissipation else "black"
+    ax.text(0.5, 0.97, title, transform=ax.transAxes, fontsize=11, ha="center", va="top", color=title_color, bbox=dict(facecolor="black" if is_dissipation else "white", edgecolor="none", pad=2, alpha=0.6))
+    ax.set_title("")
     ax.set_ylim(-4, +4)
     ax.set_aspect("equal")
 
@@ -130,6 +131,11 @@ for row in range(2):
     axes[row, 0].set_ylabel("z")
     axes[row, 1].set_ylabel("")
     axes[row, 1].tick_params(labelleft=False, left=False)
+
+for col in range(2):
+    axes[0, col].set_xlabel("")
+    axes[0, col].tick_params(labelbottom=False, bottom=False)
+    axes[1, col].set_xlabel("x")
 
 for ax, letter in zip(axes.flat, "abcd"):
     ax.text(0.02, 0.97, f"({letter})", transform=ax.transAxes,
