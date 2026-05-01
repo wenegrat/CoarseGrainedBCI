@@ -43,7 +43,7 @@ print("\n" + "="*60)
 print("Loading pre-filtered fields...")
 t0 = time.time()
 filtered_filename = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities_sweep.nc"))
-ds_filt = xr.open_dataset(filtered_filename, decode_times=False).chunk(chunks)
+ds_filt = xr.open_dataset(filtered_filename, decode_times=False).chunk(dict(time=1, filter_length_scale=1))
 ds = ds.reindex(time=ds_filt.time).chunk(chunks)
 
 filter_length_scales = ds_filt.filter_length_scale.values
@@ -79,7 +79,21 @@ print("\n" + "="*60)
 print("Saving results...")
 energy_transfer.attrs.update(ds.attrs)
 output_filename = str(PP_OUTPUT / (Path(filename).stem + f"_energy_transfer_sweep{ref_suffix}.nc"))
+tmp_dir = PP_OUTPUT / (Path(output_filename).stem + "_tmp")
+tmp_dir.mkdir(exist_ok=True)
+tmp_files = []
 with ProgressBar(minimum=5, dt=5):
-    energy_transfer.to_netcdf(output_filename)
+    for i in range(energy_transfer.sizes["time"]):
+        tmp_f = str(tmp_dir / f"t{i:04d}.nc")
+        energy_transfer.isel(time=[i]).to_netcdf(tmp_f)
+        tmp_files.append(tmp_f)
+        print(f"  wrote time {i+1}/{energy_transfer.sizes['time']}")
+
+print("Merging per-timestep files...")
+with xr.open_mfdataset(tmp_files, combine="by_coords") as merged:
+    merged.load().to_netcdf(output_filename)
+for f in tmp_files:
+    os.remove(f)
+tmp_dir.rmdir()
 print(f"Results saved to: {output_filename}")
 #---

@@ -13,6 +13,7 @@ parser = argparse.ArgumentParser(description="Plot cross-scale KE and APE transf
 parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file (used to derive energy transfer filename)")
 parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load output produced with the fixed-in-time reference profile")
 args = parser.parse_args()
+
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
@@ -35,17 +36,16 @@ print(f"  Time steps: {len(et.time)}   Filter scales: {len(et.filter_length_scal
 #+++ Plot
 fig, axes = plt.subplots(1, 2, figsize=(12, 5), constrained_layout=True, sharey=True)
 
+vmax = float(max(abs(et["∫Π_KE dV"]).max(), abs(et["∫Π_APE dV"]).max()))
 for ax, var in zip(axes, ["∫Π_KE dV", "∫Π_APE dV"]):
-    et[var].plot.line(x="inv_scale", hue="time", ax=ax)
-    ax.axhline(0, color="k", lw=0.8, ls="--")
-    ax.set_xscale("log")
-    ax.set_yscale("symlog", linthresh=1e-2)
-    ax.grid(True, alpha=0.3)
-    ax2 = ax.secondary_xaxis("top", functions=(lambda x: 1/x, lambda x: 1/x))
-    ax2.set_xlabel("ℓ  [m]")
+    et[var].plot.pcolormesh(x="time", y="filter_length_scale", ax=ax,
+                            cmap="RdBu_r", vmin=-vmax, vmax=vmax,
+                            norm=plt.matplotlib.colors.SymLogNorm(linthresh=1e-2, vmin=-vmax, vmax=vmax))
+    ax.set_yscale("log")
+    ax.set_ylabel("ℓ  [m]")
 
-axes[0].set_title("KE cross-scale transfer spectrum")
-axes[1].set_title("APE cross-scale transfer spectrum")
+axes[0].set_title("KE cross-scale transfer (Hovmöller)")
+axes[1].set_title("APE cross-scale transfer (Hovmöller)")
 label = run_label(et.attrs)
 if label:
     fig.suptitle(label, fontsize=11)
