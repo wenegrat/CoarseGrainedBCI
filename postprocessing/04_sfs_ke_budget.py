@@ -17,10 +17,8 @@ from aux02_ke_functions import (
 #+++ Configuration
 import argparse
 parser = argparse.ArgumentParser(description="Calculate SFS KE budget from Kelvin-Helmholtz simulation output")
-parser.add_argument("--filename", default="output/khi_Nz256_Ri0.10.nc",
-                    help="Path to simulation NetCDF file")
-parser.add_argument("--fixed-reference", action="store_true", default=False,
-                    help="Load the fixed-in-time reference profile (produced by 01 with --fixed-reference)")
+parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file")
+parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load the fixed-in-time reference profile (produced by 01 with --fixed-reference)")
 args = parser.parse_args()
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -123,8 +121,8 @@ for ℓ in filter_length_scales:
     int_ape_to_ke_exchange = integrate(ape_to_ke_exchange.reindex(time=dKE_dt.time), dV)
     int_sfs_ke_dissipation = integrate(sfs_ke_dissipation.reindex(time=dKE_dt.time), dV)
 
-    Π_KE_ℓ     = energy_transfer["Π_KE"].sel(filter_length_scale=ℓ)
-    int_Π_KE_ℓ = energy_transfer["∫Π_KE dV"].sel(filter_length_scale=ℓ)
+    Π_KE_ℓ     = energy_transfer["Π_KE"].sel(filter_length_scale=ℓ, method="nearest", tolerance=1e-6)
+    int_Π_KE_ℓ = energy_transfer["∫Π_KE dV"].sel(filter_length_scale=ℓ, method="nearest", tolerance=1e-6)
     residual   = -int_dKE_dt + int_Π_KE_ℓ.reindex(time=dKE_dt.time) + int_ape_to_ke_exchange - int_sfs_ke_dissipation
 
     budget_ℓ = xr.Dataset({

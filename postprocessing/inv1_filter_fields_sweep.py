@@ -10,9 +10,10 @@ from aux00_utils import load_dataset_and_grid, filter_fields
 #+++ Configuration
 import argparse
 parser = argparse.ArgumentParser(description="Filter velocity and buoyancy fields for cross-scale energy transfer sweep")
-parser.add_argument("--filename", default="output/khi_Nz256_Ri0.10.nc",
-                    help="Path to simulation NetCDF file")
+parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file")
+parser.add_argument("--n-time-skip", type=int, default=1, help="Keep every n-th (consecutive) time step")
 args = parser.parse_args()
+
 print("\\n" + "="*70 + f"\\n  {Path(__file__).name}\\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\\n" + "="*70)
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
@@ -26,7 +27,9 @@ print("Loading data and grid...")
 ds = load_dataset_and_grid(filename)
 ds = ds.chunk(dict(time=1))
 
-ds = ds.sel(time=[40, 50, 60, 70, 80, 100], method="nearest")
+i = np.arange(ds.sizes["time"])
+n_time_skip = args.n_time_skip
+ds = ds.isel(time=(i // 2) % n_time_skip == 0)
 print(f"Dataset loaded: {len(ds.time)} time steps")
 #---
 
