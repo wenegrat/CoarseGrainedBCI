@@ -113,7 +113,7 @@ for ax, (field, title) in zip(axes.flat, panels):
     im = ax.pcolormesh(x, z, data, cmap=cmap, vmin=vmin, vmax=vmax, rasterized=True)
     cax = ax.inset_axes([0.2, 0.09, 0.6, 0.03])
     tick_color = "white" if is_dissipation else "black"
-    cb = fig.colorbar(im, cax=cax, orientation="horizontal")
+    cb = fig.colorbar(im, cax=cax, orientation="horizontal", extend="both")
     cax.tick_params(colors=tick_color)
     for spine in cax.spines.values():
         spine.set_edgecolor(tick_color)
