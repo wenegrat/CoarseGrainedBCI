@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 import matplotlib.pyplot as plt
+from matplotlib.ticker import MaxNLocator
 from aux00_utils import load_dataset_and_grid
 from aux03_plotting import run_label
 #---
@@ -52,10 +53,10 @@ print(f"Selected ℓ   = {ℓ_sel:.4f}  (requested {args.filter_scale})")
 print("Selecting fields...")
 sel = dict(time=t_sel, filter_scale=ℓ_sel, method="nearest")
 
-Π_K      = ke_budget["Π_K"].sel(**sel).squeeze()                # cross-scale KE flux
+Π_K      = ke_budget["Π_K"].sel(**sel).squeeze()                  # cross-scale KE flux
 exchange = ke_budget["SFS APE->KE exchange"].sel(**sel).squeeze() # APE->KE exchange
-Π_A      = ape_budget["Π_A"].sel(**sel).squeeze()               # cross-scale APE flux
-ε_A      = ape_budget["ε_A"].sel(**sel).squeeze()               # APE dissipation
+Π_A      = ape_budget["Π_A"].sel(**sel).squeeze()                 # cross-scale APE flux
+ε_A      = ape_budget["ε_A"].sel(**sel).squeeze()                 # APE dissipation
 #---
 
 #+++ Load buoyancy field for contours
@@ -114,6 +115,8 @@ for ax, (field, title) in zip(axes.flat, panels):
     cax = ax.inset_axes([0.2, 0.09, 0.6, 0.03])
     tick_color = "white" if is_dissipation else "black"
     cb = fig.colorbar(im, cax=cax, orientation="horizontal", extend="both")
+    cb.locator = MaxNLocator(nbins=4)
+    cb.update_ticks()
     cax.tick_params(colors=tick_color)
     for spine in cax.spines.values():
         spine.set_edgecolor(tick_color)
