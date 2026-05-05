@@ -94,10 +94,10 @@ b_vmax = global_clim_symmetric(ds_2d["b"].squeeze("y_aca", drop=True), sample_id
 Π_K_vmax = max(global_clim_symmetric(ke_budget["Π_K"].squeeze("y_aca"), sample_idx, pct),
                global_clim_symmetric(ke_budget["SFS APE->KE exchange"].squeeze("y_aca"), sample_idx, pct))
 Π_A_vmax = global_clim_symmetric(ape_budget["Π_A"].squeeze("y_aca"), sample_idx, pct)
-ε_A_vmax = global_clim_positive(ape_budget["ε_A"].squeeze("y_aca"), sample_idx, pct)
+ε_Aˢ_vmax = global_clim_positive(ape_budget["ε_Aˢ"].squeeze("y_aca"), sample_idx, pct)
 
 print(f"  ω: ±{omega_vmax:.3e},  b: ±{b_vmax:.3e}")
-print(f"  Π_K/exchange: ±{Π_K_vmax:.3e},  Π_A: ±{Π_A_vmax:.3e},  ε_A: 0–{ε_A_vmax:.3e}")
+print(f"  Π_K/exchange: ±{Π_K_vmax:.3e},  Π_A: ±{Π_A_vmax:.3e},  ε_Aˢ: 0–{ε_Aˢ_vmax:.3e}")
 #---
 
 #+++ Helper functions
@@ -131,7 +131,7 @@ panel_specs = [
     (0, 2, ke_budget,  "Π_K",                  r"$\Pi_K$ (cross-scale KE flux)",          "RdBu_r",  -Π_K_vmax, Π_K_vmax),
     (1, 0, ape_budget, "Π_A",                  r"$\Pi_A$ (cross-scale APE flux)",         "RdBu_r",  -Π_A_vmax, Π_A_vmax),
     (1, 1, ke_budget,  "SFS APE->KE exchange", r"Small-scale APE$\to$KE exchange",        "RdBu_r",  -Π_K_vmax, Π_K_vmax),
-    (1, 2, ape_budget, "ε_A",                  r"$\varepsilon_A$ (small-scale APE dissipation)", "inferno", 0,    ε_A_vmax),
+    (1, 2, ape_budget, "ε_Aˢ",                 r"$\varepsilon_A^s$ (small-scale APE dissipation)", "inferno", 0,    ε_Aˢ_vmax),
 ]
 
 meshes = []
@@ -160,14 +160,14 @@ for ax, letter in zip(snapshot_axes.flat, "abcdef"):
 ke_terms = {
     r"$-\partial_t$ SFS KE":  ("∫-∂ₜ SFS KE dV",    budget_colors["tendency"]),
     r"$\Pi_K$":                ("∫Π_K dV",            budget_colors["flux"]),
-    r"$-\varepsilon_K$":       ("∫-ε_K dV",           budget_colors["dissipation"]),
+    r"$-\varepsilon_K^s$":     ("∫-ε_Kˢ dV",          budget_colors["dissipation"]),
     r"SFS APE $\to$ KE":       ("∫(SFS APE->KE) dV",  budget_colors["exchange"]),
     r"residual":               ("residual_K",          budget_colors["residual"]),
 }
 ape_terms = {
     r"$-\partial_t$ SFS APE":  ("∫-∂ₜ SFS APE dV",   budget_colors["tendency"]),
     r"$\Pi_A$":                ("∫Π_A dV",            budget_colors["flux"]),
-    r"$-\varepsilon_A$":       ("∫-ε_A dV",           budget_colors["dissipation"]),
+    r"$-\varepsilon_A^s$":     ("∫-ε_Aˢ dV",          budget_colors["dissipation"]),
     r"SFS KE $\to$ APE":       ("∫(SFS KE->APE) dV",  budget_colors["exchange"]),
     r"$R^s$":                  ("∫Rˢ dV",             "C4"),
     r"residual":               ("residual_A",          budget_colors["residual"]),

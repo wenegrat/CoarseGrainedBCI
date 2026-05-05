@@ -131,12 +131,12 @@ for ℓ in filter_scales:
         # Local budget terms
         "∂ₜ SFS KE": dKE_dt,
         "Π_K": Π_K_ℓ,
-        "ε_K": sfs_ke_dissipation,
+        "ε_Kˢ": sfs_ke_dissipation,
         "SFS APE->KE exchange": ape_to_ke_exchange,
         # Integrated budget terms
         "∫-∂ₜ SFS KE dV": -int_dKE_dt,
         "∫Π_K dV": int_Π_K_ℓ,
-        "∫-ε_K dV": -int_sfs_ke_dissipation,
+        "∫-ε_Kˢ dV": -int_sfs_ke_dissipation,
         "∫(SFS APE->KE) dV": int_ape_to_ke_exchange,
         "residual_K": residual,
     }).reindex(time=dKE_dt.time)
