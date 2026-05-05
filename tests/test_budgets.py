@@ -66,7 +66,7 @@ def load(suffix, ref_suffix=""):
 KE_BUDGET_VARS = [
     "∫-∂ₜ SFS KE dV",
     "∫Π_K dV",
-    "∫-ε_K dV",
+    "∫-ε_Kˢ dV",
     "∫(SFS APE->KE) dV",
 ]
 
@@ -93,7 +93,7 @@ def test_ke_budget_residual(ke_budget, l_idx):
 APE_BUDGET_VARS = [
     "∫-∂ₜ SFS APE dV",
     "∫Π_A dV",
-    "∫-ε_A dV",
+    "∫-ε_Aˢ dV",
     "∫(SFS KE->APE) dV",
     "∫Rˢ dV",
 ]

@@ -195,13 +195,13 @@ for ℓ in filter_scales:
         # Local budget terms
         "∂ₜ SFS APE": dAPE_dt,
         "Π_A": Π_A_ℓ,
-        "ε_A": sfs_ape_dissipation,
+        "ε_Aˢ": sfs_ape_dissipation,
         "SFS KE->APE exchange": -ape_to_ke_exchange,
         "Rˢ": R_s,
         # Integrated budget terms
         "∫-∂ₜ SFS APE dV": -int_dAPE_dt,
         "∫Π_A dV": int_Π_A_ℓ,
-        "∫-ε_A dV": -int_sfs_ape_dissipation,
+        "∫-ε_Aˢ dV": -int_sfs_ape_dissipation,
         "∫(SFS KE->APE) dV": -int_ape_to_ke_exchange,
         "∫Rˢ dV": int_R_s,
         "residual_A": residual,

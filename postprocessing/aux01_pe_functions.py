@@ -747,12 +747,12 @@ def calculate_sfs_ape_dissipation(rho, upsilon, upsilon_l, kappa, filter,
                                   filter_dims=["x_caa", "y_aca"],
                                   filtered_density=None, index_dim="i"):
     """
-    Calculate the SFS APE dissipation ε_A = filtered(κ ∇ρ · ∇Υ) - κ ∇ρ̄ · ∇Υˡ
+    Calculate the SFS APE dissipation ε_Aˢ = filtered(κ ∇ρ · ∇Υ) - κ ∇ρ̄ · ∇Υˡ
 
     The SFS APE dissipation quantifies the removal of large-scale APE by
     subfilter-scale diffusive processes:
 
-        ε_A = filtered(κ ∇ρ · ∇Υ) - κ ∇ρ̄ · ∇Υˡ
+        ε_Aˢ = filtered(κ ∇ρ · ∇Υ) - κ ∇ρ̄ · ∇Υˡ
 
     where:
         Υ  = g (z - z_*(ρ)) / ρ₀   — displacement potential using full density
@@ -784,7 +784,7 @@ def calculate_sfs_ape_dissipation(rho, upsilon, upsilon_l, kappa, filter,
     Returns
     -------
     xr.DataArray
-        SFS APE dissipation ε_A [J m⁻³ s⁻¹] with the same spatial dimensions as rho
+        SFS APE dissipation ε_Aˢ [J m⁻³ s⁻¹] with the same spatial dimensions as rho
     """
     # Term 1: filtered(κ ∇ρ · ∇Υ)
     grad_rho = calculate_gradient(rho)

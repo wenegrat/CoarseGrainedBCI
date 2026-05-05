@@ -55,8 +55,8 @@ sel = dict(time=t_sel, filter_scale=ℓ_sel, method="nearest")
 
 Π_K      = ke_budget["Π_K"].sel(**sel).squeeze()                  # cross-scale KE flux
 exchange = ke_budget["SFS APE->KE exchange"].sel(**sel).squeeze() # APE->KE exchange
-Π_A      = ape_budget["Π_A"].sel(**sel).squeeze()                 # cross-scale APE flux
-ε_A      = ape_budget["ε_A"].sel(**sel).squeeze()                 # APE dissipation
+Π_A      = ape_budget["Π_A"].sel(**sel).squeeze()               # cross-scale APE flux
+ε_Aˢ     = ape_budget["ε_Aˢ"].sel(**sel).squeeze()              # SFS APE dissipation
 #---
 
 #+++ Load buoyancy field for contours
@@ -72,7 +72,7 @@ panels = [
     (Π_K,      r"$\Pi_K$  (cross-scale KE flux)"),
     (Π_A,      r"$\Pi_A$  (cross-scale APE flux)"),
     (exchange, r"Small-scale APE$\to$KE exchange"),
-    (ε_A,      r"$\varepsilon_A$  (Small-scale APE dissipation)"),
+    (ε_Aˢ,     r"$\varepsilon_A^s$  (Small-scale APE dissipation)"),
 ]
 
 fig, axes = plt.subplots(2, 2, figsize=(12, 7), constrained_layout=True, gridspec_kw=dict(wspace=0, hspace=0))
@@ -102,7 +102,7 @@ exchange_data = exchange.transpose(x_dim, z_dim).values.T
 for ax, (field, title) in zip(axes.flat, panels):
     data = field.transpose(x_dim, z_dim).values.T  # → (nz, nx)
 
-    is_dissipation = field is ε_A
+    is_dissipation = field is ε_Aˢ
     if is_dissipation:
         cmap = "inferno"
         vmin = 0
