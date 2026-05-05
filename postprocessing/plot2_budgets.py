@@ -37,14 +37,14 @@ print(f"  Filter scales available: {ke_budget.filter_scale.values}")
 #+++ Define budget terms (shared colors across all panels)
 ke_terms = {
     r"$-\partial_t$ SFS KE":   ("∫-∂ₜ SFS KE dV",    budget_colors["tendency"]),
-    r"$\Pi_{KE}$":             ("∫Π_KE dV",           budget_colors["flux"]),
-    r"$-\varepsilon_s$":       ("∫-εₛ dV",            budget_colors["dissipation"]),
+    r"$\Pi_K$":                ("∫Π_K dV",            budget_colors["flux"]),
+    r"$-\varepsilon_K$":       ("∫-ε_K dV",           budget_colors["dissipation"]),
     r"SFS APE $\to$ KE":       ("∫(SFS APE->KE) dV",  budget_colors["exchange"]),
 }
 ape_terms = {
     r"$-\partial_t$ SFS APE":  ("∫-∂ₜ SFS APE dV",   budget_colors["tendency"]),
-    r"$\Pi_{APE}$":            ("∫Π_APE dV",          budget_colors["flux"]),
-    r"$-\chi_s$":              ("∫-χₛ dV",            budget_colors["dissipation"]),
+    r"$\Pi_A$":                ("∫Π_A dV",            budget_colors["flux"]),
+    r"$-\varepsilon_A$":       ("∫-ε_A dV",           budget_colors["dissipation"]),
     r"SFS KE $\to$ APE":       ("∫(SFS KE->APE) dV",  budget_colors["exchange"]),
     r"$R^s$":                  ("∫Rˢ dV",             "C4"),
 }
@@ -55,8 +55,8 @@ print("Creating 2×2 budget panel plot...")
 fig, axes = plt.subplots(2, 2, figsize=(14, 7), constrained_layout=True)
 
 budget_configs = [
-    (0, ke_budget,  ke_terms,  "residual_KE",  "SFS KE budget terms"),
-    (1, ape_budget, ape_terms, "residual_APE", "SFS APE budget terms"),
+    (0, ke_budget,  ke_terms,  "residual_K",  "SFS KE budget terms"),
+    (1, ape_budget, ape_terms, "residual_A", "SFS APE budget terms"),
 ]
 
 for row, budget, terms, residual_var, row_title in budget_configs:

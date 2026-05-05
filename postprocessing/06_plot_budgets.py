@@ -36,18 +36,18 @@ print(f"  Filter scales: {filter_scales}")
 #+++ Define budget terms and colors
 ke_vars = {
     "∫-∂ₜ SFS KE dV":    budget_colors["tendency"],
-    "∫Π_KE dV":          budget_colors["flux"],
-    "∫-εₛ dV":           budget_colors["dissipation"],
+    "∫Π_K dV":           budget_colors["flux"],
+    "∫-ε_K dV":          budget_colors["dissipation"],
     "∫(SFS APE->KE) dV": budget_colors["exchange"],
-    "residual_KE":        budget_colors["residual"],
+    "residual_K":         budget_colors["residual"],
 }
 ape_vars = {
     "∫-∂ₜ SFS APE dV":  budget_colors["tendency"],
-    "∫Π_APE dV":         budget_colors["flux"],
-    "∫-χₛ dV":           budget_colors["dissipation"],
+    "∫Π_A dV":           budget_colors["flux"],
+    "∫-ε_A dV":          budget_colors["dissipation"],
     "∫(SFS KE->APE) dV": budget_colors["exchange"],
     "∫Rˢ dV":            "C4",
-    "residual_APE":       budget_colors["residual"],
+    "residual_A":         budget_colors["residual"],
 }
 #---
 

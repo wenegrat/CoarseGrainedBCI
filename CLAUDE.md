@@ -73,7 +73,7 @@ Sequential numbered scripts (01-06), each reading the previous step's output. `0
 |--------|---------|
 | `01_filter_fields.py` | Gaussian-filter velocity and buoyancy at multiple length scales |
 | `02_sort_density.py` | Sort density to compute reference state (Winters et al. 1995) |
-| `03_energy_transfer.py` | Cross-scale KE and APE transfer terms (Pi_KE, Pi_APE) |
+| `03_energy_transfer.py` | Cross-scale KE and APE transfer terms (Π_K, Π_A) |
 | `04_sfs_ke_budget.py` | Sub-filter-scale KE budget terms |
 | `05_sfs_ape_budget.py` | Sub-filter-scale APE budget terms |
 | `06_plot_budgets.py` | Plot budget time series |
@@ -114,7 +114,7 @@ The sorted density (`*_sorted_density.nc`) produced by step 02 is reused by step
 - **TPE** = integral of g*rho*z dV  (total potential energy)
 - **RPE** = minimum PE achievable by adiabatic rearrangement (from sorted reference state)
 - **APE** = TPE - RPE  (available for conversion to KE)
-- **Pi_KE**, **Pi_APE** -- cross-scale energy transfer (sub-filter to resolved)
+- **Π_K**, **Π_A** -- cross-scale energy transfer (sub-filter to resolved)
 - Physical constants: `g=9.81`, `rho_0=1025`
 
 ## Code Style

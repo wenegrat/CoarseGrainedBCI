@@ -91,13 +91,13 @@ pct = args.clim_percentile
 omega_vmax = global_clim_symmetric(ds_2d["ω"].squeeze("y_aca", drop=True), sample_idx, pct)
 b_vmax = global_clim_symmetric(ds_2d["b"].squeeze("y_aca", drop=True), sample_idx, pct)
 
-pi_ke_vmax = max(global_clim_symmetric(ke_budget["Π_KE"].squeeze("y_aca"), sample_idx, pct),
-                 global_clim_symmetric(ke_budget["SFS APE->KE exchange"].squeeze("y_aca"), sample_idx, pct))
-pi_ape_vmax = global_clim_symmetric(ape_budget["Π_APE"].squeeze("y_aca"), sample_idx, pct)
-chi_s_vmax = global_clim_positive(ape_budget["χₛ"].squeeze("y_aca"), sample_idx, pct)
+Π_K_vmax = max(global_clim_symmetric(ke_budget["Π_K"].squeeze("y_aca"), sample_idx, pct),
+               global_clim_symmetric(ke_budget["SFS APE->KE exchange"].squeeze("y_aca"), sample_idx, pct))
+Π_A_vmax = global_clim_symmetric(ape_budget["Π_A"].squeeze("y_aca"), sample_idx, pct)
+ε_A_vmax = global_clim_positive(ape_budget["ε_A"].squeeze("y_aca"), sample_idx, pct)
 
 print(f"  ω: ±{omega_vmax:.3e},  b: ±{b_vmax:.3e}")
-print(f"  Π_KE/exchange: ±{pi_ke_vmax:.3e},  Π_APE: ±{pi_ape_vmax:.3e},  χₛ: 0–{chi_s_vmax:.3e}")
+print(f"  Π_K/exchange: ±{Π_K_vmax:.3e},  Π_A: ±{Π_A_vmax:.3e},  ε_A: 0–{ε_A_vmax:.3e}")
 #---
 
 #+++ Helper functions
@@ -128,10 +128,10 @@ ax_ape_budget = fig.add_subplot(gs[3, :])
 panel_specs = [
     (0, 0, ds_2d,      "ω",                    r"Vorticity ($\omega$)",                   "RdBu_r",  -omega_vmax, omega_vmax),
     (0, 1, ds_2d,      "b",                    r"Buoyancy ($b$)",                         "RdBu_r",  -b_vmax,     b_vmax),
-    (0, 2, ke_budget,  "Π_KE",                 r"$\Pi_{KE}$ (cross-scale KE flux)",       "RdBu_r",  -pi_ke_vmax, pi_ke_vmax),
-    (1, 0, ape_budget, "Π_APE",                r"$\Pi_{APE}$ (cross-scale APE flux)",     "RdBu_r",  -pi_ape_vmax, pi_ape_vmax),
-    (1, 1, ke_budget,  "SFS APE->KE exchange", r"Small-scale APE$\to$KE exchange",        "RdBu_r",  -pi_ke_vmax, pi_ke_vmax),
-    (1, 2, ape_budget, "χₛ",                   r"$\chi_s$ (small-scale APE dissipation)",  "inferno", 0,          chi_s_vmax),
+    (0, 2, ke_budget,  "Π_K",                  r"$\Pi_K$ (cross-scale KE flux)",          "RdBu_r",  -Π_K_vmax, Π_K_vmax),
+    (1, 0, ape_budget, "Π_A",                  r"$\Pi_A$ (cross-scale APE flux)",         "RdBu_r",  -Π_A_vmax, Π_A_vmax),
+    (1, 1, ke_budget,  "SFS APE->KE exchange", r"Small-scale APE$\to$KE exchange",        "RdBu_r",  -Π_K_vmax, Π_K_vmax),
+    (1, 2, ape_budget, "ε_A",                  r"$\varepsilon_A$ (small-scale APE dissipation)", "inferno", 0,    ε_A_vmax),
 ]
 
 meshes = []
@@ -159,18 +159,18 @@ for ax, letter in zip(snapshot_axes.flat, "abcdef"):
 #+++ Budget time-series panels (rows 2–3)
 ke_terms = {
     r"$-\partial_t$ SFS KE":  ("∫-∂ₜ SFS KE dV",    budget_colors["tendency"]),
-    r"$\Pi_{KE}$":             ("∫Π_KE dV",           budget_colors["flux"]),
-    r"$-\varepsilon_s$":       ("∫-εₛ dV",            budget_colors["dissipation"]),
+    r"$\Pi_K$":                ("∫Π_K dV",            budget_colors["flux"]),
+    r"$-\varepsilon_K$":       ("∫-ε_K dV",           budget_colors["dissipation"]),
     r"SFS APE $\to$ KE":       ("∫(SFS APE->KE) dV",  budget_colors["exchange"]),
-    r"residual":               ("residual_KE",         budget_colors["residual"]),
+    r"residual":               ("residual_K",          budget_colors["residual"]),
 }
 ape_terms = {
     r"$-\partial_t$ SFS APE":  ("∫-∂ₜ SFS APE dV",   budget_colors["tendency"]),
-    r"$\Pi_{APE}$":            ("∫Π_APE dV",          budget_colors["flux"]),
-    r"$-\chi_s$":              ("∫-χₛ dV",            budget_colors["dissipation"]),
+    r"$\Pi_A$":                ("∫Π_A dV",            budget_colors["flux"]),
+    r"$-\varepsilon_A$":       ("∫-ε_A dV",           budget_colors["dissipation"]),
     r"SFS KE $\to$ APE":       ("∫(SFS KE->APE) dV",  budget_colors["exchange"]),
     r"$R^s$":                  ("∫Rˢ dV",             "C4"),
-    r"residual":               ("residual_APE",        budget_colors["residual"]),
+    r"residual":               ("residual_A",          budget_colors["residual"]),
 }
 
 for ax, budget_ds, terms, ylabel in [

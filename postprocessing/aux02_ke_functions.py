@@ -278,7 +278,7 @@ def calculate_energy_transfer(ds, filter_scales,
     Returns
     -------
     xr.Dataset
-        Dataset with Π_KE, Π_APE, ∫Π_KE dV, ∫Π_APE dV indexed by
+        Dataset with Π_K, Π_A, ∫Π_K dV, ∫Π_A dV indexed by
         filter_scale.
     """
     filtered_dimensions = ["x_caa", "z_aac"]
@@ -318,8 +318,8 @@ def calculate_energy_transfer(ds, filter_scales,
                                                         filter_dims=filtered_dimensions,
                                                         filtered_u_i=ds_filt_ℓ["ūᵢ"])
         strain_rate_tensor_l = calculate_strain_tensor(ds_filt_ℓ["ūᵢ"], dimensions=tensor_dimensions)
-        # Π_KE = -τⁱʲ : S̄ⁱʲ
-        Π_KE = calculate_cross_scale_ke_flux(sfs_stress_tensor, strain_rate_tensor_l)
+        # Π_K = -τⁱʲ : S̄ⁱʲ
+        Π_K = calculate_cross_scale_ke_flux(sfs_stress_tensor, strain_rate_tensor_l)
 
         # --- APE cross-scale transfer ---
         # Compute ρ̄ and the large-scale reference state z₀(ρ̄) → Υˡ
@@ -329,20 +329,20 @@ def calculate_energy_transfer(ds, filter_scales,
                                                              rho_sorted=rho_sorted,
                                                              dz_sorted=dz_sorted,
                                                              n_workers=n_workers)
-        # Π_APE = -(filter(ρuᵢ) - ρ̄ūᵢ) · ∇Υˡ
-        Π_APE = calculate_cross_scale_ape_flux(ds_full.ρ, ds_full["uᵢ"], filt_local_pes.upsilon,
-                                               gaussian_filter, filter_dims=filtered_dimensions,
-                                               filtered_density=ds_filt_ℓ.ρ̄,
-                                               filtered_velocity_vector=ds_filt_ℓ["ūᵢ"])
+        # Π_A = -(filter(ρuᵢ) - ρ̄ūᵢ) · ∇Υˡ
+        Π_A = calculate_cross_scale_ape_flux(ds_full.ρ, ds_full["uᵢ"], filt_local_pes.upsilon,
+                                              gaussian_filter, filter_dims=filtered_dimensions,
+                                              filtered_density=ds_filt_ℓ.ρ̄,
+                                              filtered_velocity_vector=ds_filt_ℓ["ūᵢ"])
 
-        int_Π_KE  = integrate(Π_KE, dV)
-        int_Π_APE = integrate(Π_APE, dV)
+        int_Π_K = integrate(Π_K, dV)
+        int_Π_A = integrate(Π_A, dV)
 
         transfer_list.append(xr.Dataset({
-            "Π_KE":       Π_KE,
-            "Π_APE":      Π_APE,
-            "∫Π_KE dV":  int_Π_KE,
-            "∫Π_APE dV": int_Π_APE,
+            "Π_K":      Π_K,
+            "Π_A":      Π_A,
+            "∫Π_K dV":  int_Π_K,
+            "∫Π_A dV":  int_Π_A,
         }))
 
     scale_coord = xr.DataArray(filter_scales, dims="filter_scale",

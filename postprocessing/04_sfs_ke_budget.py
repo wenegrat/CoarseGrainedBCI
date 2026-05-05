@@ -121,24 +121,24 @@ for ℓ in filter_scales:
     int_ape_to_ke_exchange = integrate(ape_to_ke_exchange.reindex(time=dKE_dt.time), dV)
     int_sfs_ke_dissipation = integrate(sfs_ke_dissipation.reindex(time=dKE_dt.time), dV)
 
-    Π_KE_ℓ     = energy_transfer["Π_KE"].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6)
-    int_Π_KE_ℓ = energy_transfer["∫Π_KE dV"].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6)
-    residual   = -int_dKE_dt + int_Π_KE_ℓ.reindex(time=dKE_dt.time) + int_ape_to_ke_exchange - int_sfs_ke_dissipation
+    Π_K_ℓ     = energy_transfer["Π_K"].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6)
+    int_Π_K_ℓ = energy_transfer["∫Π_K dV"].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6)
+    residual  = -int_dKE_dt + int_Π_K_ℓ.reindex(time=dKE_dt.time) + int_ape_to_ke_exchange - int_sfs_ke_dissipation
 
     budget_ℓ = xr.Dataset({
         # Local KE fields
         "KE_of_sfs_flow": sfs_ke_density,
         # Local budget terms
         "∂ₜ SFS KE": dKE_dt,
-        "Π_KE": Π_KE_ℓ,
-        "εₛ": sfs_ke_dissipation,
+        "Π_K": Π_K_ℓ,
+        "ε_K": sfs_ke_dissipation,
         "SFS APE->KE exchange": ape_to_ke_exchange,
         # Integrated budget terms
         "∫-∂ₜ SFS KE dV": -int_dKE_dt,
-        "∫Π_KE dV": int_Π_KE_ℓ,
-        "∫-εₛ dV": -int_sfs_ke_dissipation,
+        "∫Π_K dV": int_Π_K_ℓ,
+        "∫-ε_K dV": -int_sfs_ke_dissipation,
         "∫(SFS APE->KE) dV": int_ape_to_ke_exchange,
-        "residual_KE": residual,
+        "residual_K": residual,
     }).reindex(time=dKE_dt.time)
 
     budget_list.append(budget_ℓ)

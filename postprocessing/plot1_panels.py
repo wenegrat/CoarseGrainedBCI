@@ -52,10 +52,10 @@ print(f"Selected ℓ   = {ℓ_sel:.4f}  (requested {args.filter_scale})")
 print("Selecting fields...")
 sel = dict(time=t_sel, filter_scale=ℓ_sel, method="nearest")
 
-pi_ke    = ke_budget["Π_KE"].sel(**sel).squeeze()               # cross-scale KE flux
+Π_K      = ke_budget["Π_K"].sel(**sel).squeeze()                # cross-scale KE flux
 exchange = ke_budget["SFS APE->KE exchange"].sel(**sel).squeeze() # APE->KE exchange
-pi_ape   = ape_budget["Π_APE"].sel(**sel).squeeze()             # cross-scale APE flux
-chi_s    = ape_budget["χₛ"].sel(**sel).squeeze()                # APE dissipation
+Π_A      = ape_budget["Π_A"].sel(**sel).squeeze()               # cross-scale APE flux
+ε_A      = ape_budget["ε_A"].sel(**sel).squeeze()               # APE dissipation
 #---
 
 #+++ Load buoyancy field for contours
@@ -68,18 +68,18 @@ print("Done.")
 #+++ Plot
 print("Plotting...")
 panels = [
-    (pi_ke,    r"$\Pi_{KE}$  (cross-scale KE flux)"),
-    (pi_ape,   r"$\Pi_{APE}$  (cross-scale APE flux)"),
+    (Π_K,      r"$\Pi_K$  (cross-scale KE flux)"),
+    (Π_A,      r"$\Pi_A$  (cross-scale APE flux)"),
     (exchange, r"Small-scale APE$\to$KE exchange"),
-    (chi_s,    r"$\chi_s$  (Small-scale APE dissipation)"),
+    (ε_A,      r"$\varepsilon_A$  (Small-scale APE dissipation)"),
 ]
 
 fig, axes = plt.subplots(2, 2, figsize=(12, 7), constrained_layout=True, gridspec_kw=dict(wspace=0, hspace=0))
 
-x_dim = next(d for d in pi_ke.dims if "x" in d)
-z_dim = next(d for d in pi_ke.dims if "z" in d)
-x = pi_ke[x_dim].values
-z = pi_ke[z_dim].values
+x_dim = next(d for d in Π_K.dims if "x" in d)
+z_dim = next(d for d in Π_K.dims if "z" in d)
+x = Π_K[x_dim].values
+z = Π_K[z_dim].values
 
 bx_dim = next(d for d in b.dims if "x" in d)
 bz_dim = next(d for d in b.dims if "z" in d)
@@ -89,26 +89,26 @@ bz      = b[bz_dim].values
 blevels = np.linspace(np.nanpercentile(bdata, 2), np.nanpercentile(bdata, 98), 12)
 
 # Shared clim for cross-scale KE flux and APE->KE conversion
-pi_ke_data   = pi_ke.transpose(x_dim, z_dim).values.T
+Π_K_data     = Π_K.transpose(x_dim, z_dim).values.T
 exchange_data = exchange.transpose(x_dim, z_dim).values.T
-pi_ke_vmax = max(np.nanpercentile(np.abs(pi_ke_data),    args.clim_percentile),
-                 np.nanpercentile(np.abs(exchange_data), args.clim_percentile))
+Π_K_vmax = max(np.nanpercentile(np.abs(Π_K_data),     args.clim_percentile),
+               np.nanpercentile(np.abs(exchange_data), args.clim_percentile))
 
 # Independent clim for cross-scale APE flux
-pi_ape_data = pi_ape.transpose(x_dim, z_dim).values.T
-pi_ape_vmax = np.nanpercentile(np.abs(pi_ape_data), args.clim_percentile)
+Π_A_data = Π_A.transpose(x_dim, z_dim).values.T
+Π_A_vmax = np.nanpercentile(np.abs(Π_A_data), args.clim_percentile)
 
 for ax, (field, title) in zip(axes.flat, panels):
     data = field.transpose(x_dim, z_dim).values.T  # → (nz, nx)
 
-    is_dissipation = field is chi_s
+    is_dissipation = field is ε_A
     if is_dissipation:
         cmap = "inferno"
         vmin = 0
         vmax = np.nanpercentile(data, args.clim_percentile)
     else:
         cmap = "RdBu_r"
-        vmin, vmax = -pi_ke_vmax, pi_ke_vmax
+        vmin, vmax = -Π_K_vmax, Π_K_vmax
 
     im = ax.pcolormesh(x, z, data, cmap=cmap, vmin=vmin, vmax=vmax, rasterized=True)
     cax = ax.inset_axes([0.2, 0.09, 0.6, 0.03])
