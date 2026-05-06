@@ -12,7 +12,7 @@ import argparse
 parser = argparse.ArgumentParser(description="Plot 2x2 panel of SFS KE and APE budgets at two filter scales")
 parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file (used to derive budget filenames)")
 parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load the fixed-in-time reference profile outputs")
-parser.add_argument("--filter-scales", type=float, nargs=2, default=[1, 7], help="Two filter length scales for left and right columns")
+parser.add_argument("--filter-scales", type=float, nargs=2, default=[7, 1], help="Two filter length scales for left and right columns")
 args = parser.parse_args()
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
@@ -24,7 +24,6 @@ filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) el
 stem = Path(filename).stem
 fixed_reference = args.fixed_reference
 ref_suffix = "_fixed_ref" if fixed_reference else ""
-ℓ_left, ℓ_right = args.filter_scales
 #---
 
 #+++ Load budget data
@@ -60,13 +59,13 @@ budget_configs = [
 ]
 
 for row, budget, terms, residual_var, row_title in budget_configs:
-    for col, ℓ in enumerate([ℓ_right, ℓ_left]):
+    for col, ℓ in enumerate(args.filter_scales):
         ax = axes[row, col]
         for label, (var, color) in terms.items():
             data = budget[var].sel(filter_scale=ℓ, method="nearest").dropna("time").isel(time=slice(1, None))
             ax.plot(data.time, data.values, label=label, color=color, lw=1.5)
         residual = budget[residual_var].sel(filter_scale=ℓ, method="nearest").dropna("time").isel(time=slice(1, None))
-        ax.plot(residual.time, residual.values, label="residual", color="k", ls="--", lw=1.0, zorder=0)
+        ax.plot(residual.time, residual.values, color="k", ls="--", lw=1.0, zorder=0)
 
         if col == 0:
             ax.set_ylabel(row_title, fontsize=13)
@@ -81,7 +80,7 @@ for row, budget, terms, residual_var, row_title in budget_configs:
         ax.grid(True, alpha=0.3, lw=0.5)
         ax.set_title("")
 
-for col, ℓ in enumerate([ℓ_right, ℓ_left]):
+for col, ℓ in enumerate(args.filter_scales):
     actual_ℓ = float(ke_budget.filter_scale.sel(filter_scale=ℓ, method="nearest"))
     axes[0, col].set_title(f"$\\ell = {actual_ℓ:.1f}$", fontsize=14)
 #---
