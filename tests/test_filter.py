@@ -10,7 +10,7 @@ import xarray as xr
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "postprocessing"))
-from aux00_utils import GaussianFilter
+from src.aux00_utils import GaussianFilter
 
 
 def _measure_fwhm(values, coords):
