@@ -35,17 +35,17 @@ print(f"  Filter scales available: {ke_budget.filter_scale.values}")
 
 #+++ Define budget terms (shared colors across all panels)
 ke_terms = {
-    r"$-\partial_t$ SFS KE":   ("∫-∂ₜ SFS KE dV",    budget_colors["tendency"]),
-    r"$\Pi_K$":                ("∫Π_K dV",            budget_colors["flux"]),
-    r"$-\varepsilon_K^s$":     ("∫-ε_Kˢ dV",          budget_colors["dissipation"]),
-    r"SFS APE $\to$ KE":       ("∫(SFS APE->KE) dV",  budget_colors["exchange"]),
+    r"$-\partial_t E_K^s$":   ("∫-∂ₜ SFS KE dV",    budget_colors["tendency"]),
+    r"$\Pi_K$":               ("∫Π_K dV",           budget_colors["flux"]),
+    r"$-\varepsilon_K^s$":    ("∫-ε_Kˢ dV",         budget_colors["dissipation"]),
+    r"$E_A^s \to E_K^s$":     ("∫(SFS APE->KE) dV", budget_colors["exchange"]),
 }
 ape_terms = {
-    r"$-\partial_t$ SFS APE":  ("∫-∂ₜ SFS APE dV",   budget_colors["tendency"]),
-    r"$\Pi_A$":                ("∫Π_A dV",            budget_colors["flux"]),
-    r"$-\varepsilon_A^s$":     ("∫-ε_Aˢ dV",          budget_colors["dissipation"]),
-    r"SFS KE $\to$ APE":       ("∫(SFS KE->APE) dV",  budget_colors["exchange"]),
-    r"$R^s$":                  ("∫Rˢ dV",             "C4"),
+    r"$-\partial_t E_A^s$":  ("∫-∂ₜ SFS APE dV",    budget_colors["tendency"]),
+    r"$\Pi_A$":              ("∫Π_A dV",            budget_colors["flux"]),
+    r"$-\varepsilon_A^s$":   ("∫-ε_Aˢ dV",          budget_colors["dissipation"]),
+    r"$E_K^s \to E_A^s$":    ("∫(SFS KE->APE) dV",  budget_colors["exchange"]),
+    r"$R^s$":                ("∫Rˢ dV",             "C4"),
 }
 #---
 
