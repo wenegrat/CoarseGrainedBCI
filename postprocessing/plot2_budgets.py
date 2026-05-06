@@ -103,8 +103,8 @@ rs_handle = ape_handles.pop(rs_idx)
 rs_label  = ape_labels.pop(rs_idx)
 blank = Line2D([], [], linestyle="None")
 n_pad = len(ape_handles) - 1
-ape_handles += [rs_handle] + [blank] * n_pad
-ape_labels  += [rs_label]  + [""]    * n_pad
+ape_handles = [rs_handle] + [blank] * n_pad + ape_handles
+ape_labels  = [rs_label]  + [""]    * n_pad + ape_labels
 axes[1, 1].legend(ape_handles, ape_labels, fontsize=13, loc="upper right", frameon=True, fancybox=True, framealpha=0.1, ncol=2)
 
 for ax, letter in zip(axes.flat, "abcd"):
