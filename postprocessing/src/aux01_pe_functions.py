@@ -8,7 +8,7 @@ following Winters et al. (1995).
 import numpy as np
 import xarray as xr
 import concurrent.futures
-from aux00_utils import integrate, calculate_gradient
+from src.aux00_utils import integrate, calculate_gradient
 
 # Physical constants
 g = 9.81  # gravitational acceleration [m/s^2]

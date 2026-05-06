@@ -3,8 +3,8 @@
 import os
 from pathlib import Path
 from dask.diagnostics.progress import ProgressBar
-from aux00_utils import load_dataset_and_grid
-from aux01_pe_functions import calculate_density_fields_from_buoyancy, sorted_timeseries
+from src.aux00_utils import load_dataset_and_grid
+from src.aux01_pe_functions import calculate_density_fields_from_buoyancy, sorted_timeseries
 #---
 
 #+++ Configuration

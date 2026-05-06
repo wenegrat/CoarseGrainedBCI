@@ -4,9 +4,9 @@ import os
 from pathlib import Path
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
-from aux00_utils import load_dataset_and_grid, condense_uw_velocities, integrate, make_gaussian_filter, load_energy_transfer
-from aux01_pe_functions import calculate_density_fields_from_buoyancy, calculate_b_r, calculate_b_r_simple, calculate_ape_to_ke_exchange_term
-from aux02_ke_functions import (
+from src.aux00_utils import load_dataset_and_grid, condense_uw_velocities, integrate, make_gaussian_filter, load_energy_transfer
+from src.aux01_pe_functions import calculate_density_fields_from_buoyancy, calculate_b_r, calculate_b_r_simple, calculate_ape_to_ke_exchange_term
+from src.aux02_ke_functions import (
     calculate_sfs_stress_tensor,
     calculate_strain_tensor,
     calculate_sfs_ke_dissipation,

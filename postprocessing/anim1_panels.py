@@ -8,8 +8,7 @@ import xarray as xr
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from matplotlib.animation import FuncAnimation, FFMpegWriter
-from aux00_utils import load_dataset_and_grid
-from aux03_plotting import run_label, budget_colors
+from src.aux03_plotting import run_label, budget_colors
 #---
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s", datefmt="%H:%M:%S")

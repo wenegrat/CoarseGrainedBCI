@@ -7,8 +7,8 @@ import numpy as np
 import xarray as xr
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
-from aux00_utils import load_dataset_and_grid
-from aux03_plotting import run_label
+from src.aux00_utils import load_dataset_and_grid
+from src.aux03_plotting import run_label
 #---
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s", datefmt="%H:%M:%S")

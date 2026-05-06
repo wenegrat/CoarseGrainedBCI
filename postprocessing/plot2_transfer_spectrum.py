@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 import xarray as xr
 import matplotlib.pyplot as plt
-from aux03_plotting import run_label
+from src.aux03_plotting import run_label
 #---
 
 #+++ Configuration

@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 import xarray as xr
 import matplotlib.pyplot as plt
-from aux03_plotting import budget_colors, run_label
+from src.aux03_plotting import budget_colors, run_label
 #---
 
 #+++ Configuration

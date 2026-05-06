@@ -5,10 +5,10 @@ This module contains functions for calculating kinetic energy (KE).
 """
 
 import xarray as xr
-from aux00_utils import (integrate, calculate_gradient,
+from src.aux00_utils import (integrate, calculate_gradient,
                          condense_uw_velocities,
                          make_gaussian_filter, filter_fields)
-from aux01_pe_functions import (calculate_density_fields_from_buoyancy,
+from src.aux01_pe_functions import (calculate_density_fields_from_buoyancy,
                                 sorted_timeseries,
                                 local_potential_energies_timeseries,
                                 calculate_cross_scale_ape_flux)
