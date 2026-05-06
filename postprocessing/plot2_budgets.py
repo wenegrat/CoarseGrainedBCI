@@ -14,6 +14,7 @@ parser = argparse.ArgumentParser(description="Plot 2x2 panel of SFS KE and APE b
 parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file (used to derive budget filenames)")
 parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load the fixed-in-time reference profile outputs")
 parser.add_argument("--filter-scales", type=float, nargs=2, default=[7, 1], help="Two filter length scales for left and right columns")
+parser.add_argument("--tendency-sign", choices=["negative", "positive"], default="negative", help="Plot -∂ₜE (negative — sums to zero with other terms) or ∂ₜE (positive)")
 args = parser.parse_args()
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
@@ -35,14 +36,19 @@ print(f"  Filter scales available: {ke_budget.filter_scale.values}")
 #---
 
 #+++ Define budget terms (shared colors across all panels)
+positive_tendency = args.tendency_sign == "positive"
+tendency_sign = -1 if positive_tendency else 1
+ke_tendency_label  = r"$\partial_t E_K^s$"  if positive_tendency else r"$-\partial_t E_K^s$"
+ape_tendency_label = r"$\partial_t E_A^s$"  if positive_tendency else r"$-\partial_t E_A^s$"
+
 ke_terms = {
-    r"$-\partial_t E_K^s$":   ("∫-∂ₜ SFS KE dV",    budget_colors["tendency"]),
+    ke_tendency_label:        ("∫-∂ₜ SFS KE dV",    budget_colors["tendency"]),
     r"$\Pi_K$":               ("∫Π_K dV",           budget_colors["flux"]),
     r"$-\varepsilon_K^s$":    ("∫-ε_Kˢ dV",         budget_colors["dissipation"]),
     r"$E_A^s \to E_K^s$":     ("∫(SFS APE->KE) dV", budget_colors["exchange"]),
 }
 ape_terms = {
-    r"$-\partial_t E_A^s$":  ("∫-∂ₜ SFS APE dV",    budget_colors["tendency"]),
+    ape_tendency_label:      ("∫-∂ₜ SFS APE dV",    budget_colors["tendency"]),
     r"$\Pi_A$":              ("∫Π_A dV",            budget_colors["flux"]),
     r"$-\varepsilon_A^s$":   ("∫-ε_Aˢ dV",          budget_colors["dissipation"]),
     r"$E_K^s \to E_A^s$":    ("∫(SFS KE->APE) dV",  budget_colors["exchange"]),
@@ -64,7 +70,8 @@ for row, budget, terms, residual_var, row_title in budget_configs:
         ax = axes[row, col]
         for label, (var, color) in terms.items():
             data = budget[var].sel(filter_scale=ℓ, method="nearest").dropna("time").isel(time=slice(1, None))
-            ax.plot(data.time, data.values, label=label, color=color, lw=1.5)
+            sign = tendency_sign if var.startswith("∫-∂ₜ") else 1
+            ax.plot(data.time, sign * data.values, label=label, color=color, lw=1.5)
         residual = budget[residual_var].sel(filter_scale=ℓ, method="nearest").dropna("time").isel(time=slice(1, None))
         ax.plot(residual.time, residual.values, color="k", ls="--", lw=1.0, zorder=0)
 
