@@ -13,7 +13,7 @@ import xarray as xr
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "postprocessing"))
-from aux00_utils import GaussianFilter
+from src.aux00_utils import GaussianFilter
 
 FIGURES_DIR = Path(__file__).resolve().parent.parent / "figures"
 

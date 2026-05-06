@@ -65,8 +65,8 @@ def load(suffix, ref_suffix=""):
 # ---------------------------------------------------------------------------
 KE_BUDGET_VARS = [
     "∫-∂ₜ SFS KE dV",
-    "∫Π_KE dV",
-    "∫-εₛ dV",
+    "∫Π_K dV",
+    "∫-ε_Kˢ dV",
     "∫(SFS APE->KE) dV",
 ]
 
@@ -78,9 +78,9 @@ def ke_budget(ref_suffix):
 def test_ke_budget_residual(ke_budget, l_idx):
     l = ke_budget.filter_scale.values[l_idx]
     ds_l = ke_budget.sel(filter_scale=l)
-    rel = relative_residual(ds_l, "residual_KE", KE_BUDGET_VARS)
+    rel = relative_residual(ds_l, "residual_K", KE_BUDGET_VARS)
     print(f"\nKE budget  (l={l:.4f})")
-    print_budget_summary(ds_l, "residual_KE", KE_BUDGET_VARS, rel)
+    print_budget_summary(ds_l, "residual_K", KE_BUDGET_VARS, rel)
     assert rel < THRESHOLD, (
         f"KE budget residual too large at l={l:.4f}: "
         f"relative residual = {rel:.3%} > {THRESHOLD:.0%}"
@@ -92,8 +92,8 @@ def test_ke_budget_residual(ke_budget, l_idx):
 # ---------------------------------------------------------------------------
 APE_BUDGET_VARS = [
     "∫-∂ₜ SFS APE dV",
-    "∫Π_APE dV",
-    "∫-χₛ dV",
+    "∫Π_A dV",
+    "∫-ε_Aˢ dV",
     "∫(SFS KE->APE) dV",
     "∫Rˢ dV",
 ]
@@ -106,9 +106,9 @@ def ape_budget(ref_suffix):
 def test_ape_budget_residual(ape_budget, l_idx):
     l = ape_budget.filter_scale.values[l_idx]
     ds_l = ape_budget.sel(filter_scale=l)
-    rel = relative_residual(ds_l, "residual_APE", APE_BUDGET_VARS)
+    rel = relative_residual(ds_l, "residual_A", APE_BUDGET_VARS)
     print(f"\nAPE budget  (l={l:.4f})")
-    print_budget_summary(ds_l, "residual_APE", APE_BUDGET_VARS, rel)
+    print_budget_summary(ds_l, "residual_A", APE_BUDGET_VARS, rel)
     assert rel < THRESHOLD, (
         f"APE budget residual too large at l={l:.4f}: "
         f"relative residual = {rel:.3%} > {THRESHOLD:.0%}"

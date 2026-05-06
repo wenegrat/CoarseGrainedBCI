@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 import xarray as xr
 import matplotlib.pyplot as plt
-from aux03_plotting import run_label
+from src.aux03_plotting import run_label
 #---
 
 #+++ Configuration
@@ -36,8 +36,8 @@ print(f"  Time steps: {len(et.time)}   Filter scales: {len(et.filter_scale)}")
 #+++ Plot
 fig, axes = plt.subplots(1, 2, figsize=(12, 5), constrained_layout=True, sharey=True)
 
-vmax = float(max(abs(et["∫Π_KE dV"]).max(), abs(et["∫Π_APE dV"]).max()))
-for ax, var in zip(axes, ["∫Π_KE dV", "∫Π_APE dV"]):
+vmax = float(max(abs(et["∫Π_K dV"]).max(), abs(et["∫Π_A dV"]).max()))
+for ax, var in zip(axes, ["∫Π_K dV", "∫Π_A dV"]):
     et[var].plot.pcolormesh(x="time", y="filter_scale", ax=ax,
                             cmap="RdBu_r", vmin=-vmax, vmax=vmax,
                             norm=plt.matplotlib.colors.SymLogNorm(linthresh=1e-2, vmin=-vmax, vmax=vmax))

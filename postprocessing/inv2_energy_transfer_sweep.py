@@ -5,8 +5,8 @@ from pathlib import Path
 import time
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
-from aux00_utils import load_dataset_and_grid
-from aux02_ke_functions import calculate_energy_transfer
+from src.aux00_utils import load_dataset_and_grid
+from src.aux02_ke_functions import calculate_energy_transfer
 #---
 
 #+++ Configuration

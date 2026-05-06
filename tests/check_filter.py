@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 import numpy as np
 import xarray as xr
-from aux00_utils import load_dataset_and_grid, make_gaussian_filter
+from src.aux00_utils import load_dataset_and_grid, make_gaussian_filter
 #---
 
 #+++ Configuration
