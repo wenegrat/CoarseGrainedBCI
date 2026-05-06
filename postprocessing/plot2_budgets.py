@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import xarray as xr
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 from aux03_plotting import budget_colors, run_label
 #---
 
@@ -96,8 +97,15 @@ for col in range(2):
 #+++ Legend and labels
 ke_handles, ke_labels = axes[0, 1].get_legend_handles_labels()
 ape_handles, ape_labels = axes[1, 1].get_legend_handles_labels()
-axes[0, 1].legend(ke_handles, ke_labels, fontsize=13, loc="upper right", frameon=True, fancybox=True)
-axes[1, 1].legend(ape_handles, ape_labels, fontsize=13, loc="upper right", frameon=True, fancybox=True)
+axes[0, 1].legend(ke_handles, ke_labels, fontsize=13, loc="upper right", frameon=True, fancybox=True, framealpha=0.1)
+rs_idx = ape_labels.index(r"$R^s$")
+rs_handle = ape_handles.pop(rs_idx)
+rs_label  = ape_labels.pop(rs_idx)
+blank = Line2D([], [], linestyle="None")
+n_pad = len(ape_handles) - 1
+ape_handles += [rs_handle] + [blank] * n_pad
+ape_labels  += [rs_label]  + [""]    * n_pad
+axes[1, 1].legend(ape_handles, ape_labels, fontsize=13, loc="upper right", frameon=True, fancybox=True, framealpha=0.1, ncol=2)
 
 for ax, letter in zip(axes.flat, "abcd"):
     ax.text(0.02, 0.97, f"({letter})", transform=ax.transAxes,
