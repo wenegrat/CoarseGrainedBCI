@@ -51,7 +51,12 @@ print(f"  Filter scales: {et.filter_scale.values}")
 #+++ Plot
 fig, ax = plt.subplots(figsize=(6, 3.5), constrained_layout=True)
 
-for var, color, label_str in [("∫Π_K dV", "#2166ac", r"$\Pi_K$"), ("∫Π_A dV", "#d6604d", r"$\Pi_A$")]:
+for var, color, label_str in [
+    ("∫Π_K dV",           "#2166ac", r"$\Pi_K$"),
+    ("∫Π_A dV",           "#d6604d", r"$\Pi_A$"),
+    ("∫(SFS APE->KE) dV", "#1b7837", r"SFS APE$\to$KE: $\overline{w\,b_r} - \bar{w}\,\bar{b}_r$"),
+    ("∫w̄·b̄_r dV",         "#762a83", r"Resolved conversion: $\bar{w}\,\bar{b}_r$"),
+]:
     ax.plot(et.inv_scale, et[var].values, color=color, label=label_str)
 ax.axhline(0, color="k", lw=0.8, ls="--")
 for ℓ in [1, 7]:
