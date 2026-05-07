@@ -281,7 +281,7 @@ def calculate_energy_transfer(ds, filter_scales,
     -------
     xr.Dataset
         Dataset with Π_K, Π_A, the SFS APE->KE exchange term and the resolved
-        conversion w̄·b̄_r (plus their volume integrals) indexed by filter_scale.
+        conversion w̄·b̄ᵣ (plus their volume integrals) indexed by filter_scale.
     """
     filtered_dimensions = ["x_caa", "z_aac"]
     tensor_dimensions   = ("x_caa", "z_aac")
@@ -337,7 +337,7 @@ def calculate_energy_transfer(ds, filter_scales,
                                                                 filter_dims=filtered_dimensions,
                                                                 filtered_w=w_bar,
                                                                 filtered_b=b_r_bar)
-        wbar_b_r_bar = (w_bar * b_r_bar).rename("w̄·b̄_r")
+        wbar_b_r_bar = (w_bar * b_r_bar).rename("w̄·b̄ᵣ")
 
         # --- APE cross-scale transfer ---
         # Compute ρ̄ and the large-scale reference state z₀(ρ̄) → Υˡ
@@ -353,20 +353,20 @@ def calculate_energy_transfer(ds, filter_scales,
                                               filtered_density=ds_filt_ℓ.ρ̄,
                                               filtered_velocity_vector=ds_filt_ℓ["ūᵢ"])
 
-        int_Π_K               = integrate(Π_K, dV)
-        int_Π_A               = integrate(Π_A, dV)
+        int_Π_K                = integrate(Π_K, dV)
+        int_Π_A                = integrate(Π_A, dV)
         int_ape_to_ke_exchange = integrate(ape_to_ke_exchange, dV)
-        int_wbar_b_r_bar      = integrate(wbar_b_r_bar, dV)
+        int_wbar_b_r_bar       = integrate(wbar_b_r_bar, dV)
 
         transfer_list.append(xr.Dataset({
             "Π_K":                  Π_K,
             "Π_A":                  Π_A,
             "SFS APE->KE exchange": ape_to_ke_exchange,
-            "w̄·b̄_r":                wbar_b_r_bar,
+            "w̄·b̄ᵣ":                 wbar_b_r_bar,
             "∫Π_K dV":              int_Π_K,
             "∫Π_A dV":              int_Π_A,
             "∫(SFS APE->KE) dV":    int_ape_to_ke_exchange,
-            "∫w̄·b̄_r dV":            int_wbar_b_r_bar,
+            "∫w̄·b̄ᵣ dV":             int_wbar_b_r_bar,
         }))
 
     scale_coord = xr.DataArray(filter_scales, dims="filter_scale",
