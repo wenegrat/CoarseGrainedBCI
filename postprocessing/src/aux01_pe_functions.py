@@ -591,7 +591,7 @@ def calculate_sfs_R_correction(full_rho_sorted, full_z0, filt_z0, full_dz_sorted
         R_s = filter(R) - R_l
 
     where:
-        R   = -(g/ρ₀) ∫_{z_*(ρ)}^{z}  ∂ρ_*/∂t dz̃   (total,      uses full z₀)
+        R   = -(g/ρ₀) ∫_{z_*(ρ)}^{z} ∂ρ_*/∂t dz̃   (total,      uses full z₀)
         R_l = -(g/ρ₀) ∫_{z_*(ρ̄)}^{z} ∂ρ_*/∂t dz̃   (large-scale, uses filtered z₀)
 
     Parameters
