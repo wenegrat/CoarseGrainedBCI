@@ -49,7 +49,7 @@ print(f"  Filter scales: {et.filter_scale.values}")
 #---
 
 #+++ Plot
-fig, ax = plt.subplots(figsize=(6, 3.5), constrained_layout=True)
+fig, (ax, ax_b) = plt.subplots(2, 1, figsize=(6, 7), constrained_layout=True, sharex=True)
 
 for var, color, label_str in [
     ("∫Π_K dV",           "#2166ac", r"$\Pi_K$"),
@@ -64,7 +64,6 @@ for ℓ in [1, 7]:
 ax.set_xscale("log")
 ax.set_yscale("symlog", linthresh=1e-2)
 ax.grid(True, alpha=0.3)
-ax.set_xlabel("Inverse of filter scale 1/ℓ")
 ax.legend()
 ax2 = ax.secondary_xaxis("top", functions=(lambda x: 1/x, lambda x: 1/x))
 ax2.set_xlabel("Filter scale ℓ")
@@ -75,6 +74,23 @@ if label:
     info_parts.append(label)
 info_parts.append(time_label)
 ax.text(0.98, 0.04, ",  ".join(info_parts), transform=ax.transAxes, fontsize=10, ha="right", va="bottom", bbox=dict(facecolor="white", edgecolor="none", pad=2, alpha=0.8))
+
+#+++ Bottom panel: Π_K, Π_A, and d/dℓ of both APE->KE exchange rates
+d_sfs   = et["∫(SFS APE->KE) dV"].differentiate("filter_scale")
+d_resol = et["∫w̄·b̄ᵣ dV"].differentiate("filter_scale")
+ax_b.plot(et.inv_scale, et["∫Π_K dV"].values, color="#2166ac", label=r"$\Pi_K$")
+ax_b.plot(et.inv_scale, et["∫Π_A dV"].values, color="#d6604d", label=r"$\Pi_A$")
+ax_b.plot(et.inv_scale, d_sfs.values,   color="#1b7837", label=r"$\partial_\ell$ SFS APE$\to$KE")
+ax_b.plot(et.inv_scale, d_resol.values, color="#762a83", label=r"$\partial_\ell\,\bar{w}\,\bar{b}_r$")
+ax_b.axhline(0, color="k", lw=0.8, ls="--")
+for ℓ in [1, 7]:
+    ax_b.axvline(1.0 / ℓ, color="k", lw=0.8, ls="--")
+ax_b.set_xscale("log")
+ax_b.set_yscale("symlog", linthresh=1e-2)
+ax_b.grid(True, alpha=0.3)
+ax_b.set_xlabel("Inverse of filter scale 1/ℓ")
+ax_b.legend()
+#---
 
 plot_filename = str(REPO_ROOT / "figures" / os.path.basename(input_filename).replace("energy_transfer_sweep", "cross-scale_transfer_spectrum").replace(".nc", ".png"))
 fig.savefig(plot_filename, dpi=150, bbox_inches="tight")
