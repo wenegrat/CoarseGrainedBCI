@@ -72,7 +72,7 @@ Output files are suffixed with `_fixed_ref` when `FIXED_REF=1`.
 
 ### Run sweep only
 
-The sweep is split into two PBS jobs to avoid race conditions when running both `FIXED_REF` variants simultaneously: the field-filtering step (`inv1`) runs once and is shared, while the energy transfer and plotting steps (`inv2`+`inv3`) run separately per variant.
+The sweep is split into two PBS jobs to avoid race conditions when running both `FIXED_REF` variants simultaneously: the field-filtering step (`sweep1`) runs once and is shared, while the energy transfer and plotting steps (`sweep2`+`sweep3`) run separately per variant.
 
 ```bash
 cd postprocessing

@@ -11,8 +11,8 @@ from pathlib import Path
 import time
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
-from aux00_utils import load_dataset_and_grid, condense_uw_velocities, integrate, make_gaussian_filter, load_energy_transfer
-from aux01_pe_functions import (
+from src.aux00_utils import load_dataset_and_grid, condense_uw_velocities, integrate, make_gaussian_filter, load_energy_transfer
+from src.aux01_pe_functions import (
     calculate_density_fields_from_buoyancy,
     local_potential_energies_timeseries,  # used for filtered density in loop
     calculate_sfs_ape_tendency,
@@ -174,9 +174,9 @@ for ℓ in filter_scales:
     int_sfs_ape_dissipation = integrate(sfs_ape_dissipation.reindex(time=dAPE_dt.time), dV)
     int_R_s                 = integrate(R_s.reindex(time=dAPE_dt.time), dV)
 
-    Π_APE_ℓ     = energy_transfer["Π_APE"].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6)
-    int_Π_APE_ℓ = energy_transfer["∫Π_APE dV"].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6)
-    residual    = -int_dAPE_dt - int_ape_to_ke_exchange.reindex(time=dAPE_dt.time) + int_Π_APE_ℓ.reindex(time=dAPE_dt.time) - int_sfs_ape_dissipation + int_R_s
+    Π_A_ℓ     = energy_transfer["Π_A"].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6)
+    int_Π_A_ℓ = energy_transfer["∫Π_A dV"].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6)
+    residual  = -int_dAPE_dt - int_ape_to_ke_exchange.reindex(time=dAPE_dt.time) + int_Π_A_ℓ.reindex(time=dAPE_dt.time) - int_sfs_ape_dissipation + int_R_s
 
     budget_ℓ = xr.Dataset({
         # Density fields
@@ -194,17 +194,17 @@ for ℓ in filter_scales:
         "Eaˢ(ρ, z)": subfilter_local_ape,
         # Local budget terms
         "∂ₜ SFS APE": dAPE_dt,
-        "Π_APE": Π_APE_ℓ,
-        "χₛ": sfs_ape_dissipation,
+        "Π_A": Π_A_ℓ,
+        "ε_Aˢ": sfs_ape_dissipation,
         "SFS KE->APE exchange": -ape_to_ke_exchange,
         "Rˢ": R_s,
         # Integrated budget terms
         "∫-∂ₜ SFS APE dV": -int_dAPE_dt,
-        "∫Π_APE dV": int_Π_APE_ℓ,
-        "∫-χₛ dV": -int_sfs_ape_dissipation,
+        "∫Π_A dV": int_Π_A_ℓ,
+        "∫-ε_Aˢ dV": -int_sfs_ape_dissipation,
         "∫(SFS KE->APE) dV": -int_ape_to_ke_exchange,
         "∫Rˢ dV": int_R_s,
-        "residual_APE": residual,
+        "residual_A": residual,
     }).reindex(time=dAPE_dt.time)
 
     print(f"  Saving checkpoint...")
@@ -218,7 +218,7 @@ for ℓ in filter_scales:
     del sfs_ape_dissipation, R_s, dAPE_dt, budget_ℓ
     del ape_to_ke_exchange, int_ape_to_ke_exchange
     del int_dAPE_dt, int_sfs_ape_dissipation, int_R_s
-    del Π_APE_ℓ, int_Π_APE_ℓ, residual
+    del Π_A_ℓ, int_Π_A_ℓ, residual
     gc.collect()
 
     budget_list.append(xr.open_dataset(str(checkpoint_path), decode_times=False).chunk({"time": 1}))

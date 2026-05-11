@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Submit sweep jobs: shared filter step (inv1) once, then per-FIXED_REF transfer steps (inv2+inv3).
+# Submit sweep jobs: shared filter step (sweep1) once, then per-FIXED_REF transfer steps (sweep2+sweep3).
 # Usage: bash submit_sweep.sh [NZ=2048] [FIXED_REF=0|1|both]
 #   FIXED_REF=both  submits transfer jobs for both 0 and 1 (filter runs only once)
 NZ=2048; FIXED_REF=0; N_TIME_SKIP=2

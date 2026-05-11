@@ -3,7 +3,7 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 
-PP_OUTPUT = Path(__file__).resolve().parent / "output"
+PP_OUTPUT = Path(__file__).resolve().parent.parent / "output"
 
 #+++ Integrations and sums
 def integrate(da, dV, dims=("x_caa", "y_aca", "z_aac")):

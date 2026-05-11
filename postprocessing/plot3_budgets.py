@@ -4,7 +4,8 @@ import os
 from pathlib import Path
 import xarray as xr
 import matplotlib.pyplot as plt
-from aux03_plotting import budget_colors, run_label
+from matplotlib.lines import Line2D
+from src.aux03_plotting import budget_colors, run_label
 #---
 
 #+++ Configuration
@@ -12,7 +13,8 @@ import argparse
 parser = argparse.ArgumentParser(description="Plot 2x2 panel of SFS KE and APE budgets at two filter scales")
 parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file (used to derive budget filenames)")
 parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load the fixed-in-time reference profile outputs")
-parser.add_argument("--filter-scales", type=float, nargs=2, default=[1, 7], help="Two filter length scales for left and right columns")
+parser.add_argument("--filter-scales", type=float, nargs=2, default=[7, 1], help="Two filter length scales for left and right columns")
+parser.add_argument("--tendency-sign", choices=["negative", "positive"], default="positive", help="Plot -∂ₜE (negative — sums to zero with other terms) or ∂ₜE (positive)")
 args = parser.parse_args()
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
@@ -24,7 +26,6 @@ filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) el
 stem = Path(filename).stem
 fixed_reference = args.fixed_reference
 ref_suffix = "_fixed_ref" if fixed_reference else ""
-ℓ_left, ℓ_right = args.filter_scales
 #---
 
 #+++ Load budget data
@@ -35,18 +36,23 @@ print(f"  Filter scales available: {ke_budget.filter_scale.values}")
 #---
 
 #+++ Define budget terms (shared colors across all panels)
+positive_tendency = args.tendency_sign == "positive"
+tendency_sign = -1 if positive_tendency else 1
+ke_tendency_label  = r"$\partial_t E_K^s$"  if positive_tendency else r"$-\partial_t E_K^s$"
+ape_tendency_label = r"$\partial_t E_A^s$"  if positive_tendency else r"$-\partial_t E_A^s$"
+
 ke_terms = {
-    r"$-\partial_t$ SFS KE":   ("∫-∂ₜ SFS KE dV",    budget_colors["tendency"]),
-    r"$\Pi_{KE}$":             ("∫Π_KE dV",           budget_colors["flux"]),
-    r"$-\varepsilon_s$":       ("∫-εₛ dV",            budget_colors["dissipation"]),
-    r"SFS APE $\to$ KE":       ("∫(SFS APE->KE) dV",  budget_colors["exchange"]),
+    ke_tendency_label:        ("∫-∂ₜ SFS KE dV",    budget_colors["tendency"]),
+    r"$\Pi_K$":               ("∫Π_K dV",           budget_colors["flux"]),
+    r"$-\varepsilon_K^s$":    ("∫-ε_Kˢ dV",         budget_colors["dissipation"]),
+    r"$E_A^s \to E_K^s$":     ("∫(SFS APE->KE) dV", budget_colors["exchange"]),
 }
 ape_terms = {
-    r"$-\partial_t$ SFS APE":  ("∫-∂ₜ SFS APE dV",   budget_colors["tendency"]),
-    r"$\Pi_{APE}$":            ("∫Π_APE dV",          budget_colors["flux"]),
-    r"$-\chi_s$":              ("∫-χₛ dV",            budget_colors["dissipation"]),
-    r"SFS KE $\to$ APE":       ("∫(SFS KE->APE) dV",  budget_colors["exchange"]),
-    r"$R^s$":                  ("∫Rˢ dV",             "C4"),
+    ape_tendency_label:      ("∫-∂ₜ SFS APE dV",    budget_colors["tendency"]),
+    r"$\Pi_A$":              ("∫Π_A dV",            budget_colors["flux"]),
+    r"$-\varepsilon_A^s$":   ("∫-ε_Aˢ dV",          budget_colors["dissipation"]),
+    r"$E_K^s \to E_A^s$":    ("∫(SFS KE->APE) dV",  budget_colors["exchange"]),
+    r"$R^s$":                ("∫Rˢ dV",             "C4"),
 }
 #---
 
@@ -55,18 +61,19 @@ print("Creating 2×2 budget panel plot...")
 fig, axes = plt.subplots(2, 2, figsize=(14, 7), constrained_layout=True)
 
 budget_configs = [
-    (0, ke_budget,  ke_terms,  "residual_KE",  "SFS KE budget terms"),
-    (1, ape_budget, ape_terms, "residual_APE", "SFS APE budget terms"),
+    (0, ke_budget,  ke_terms,  "residual_K",  "SFS KE budget terms"),
+    (1, ape_budget, ape_terms, "residual_A", "SFS APE budget terms"),
 ]
 
 for row, budget, terms, residual_var, row_title in budget_configs:
-    for col, ℓ in enumerate([ℓ_right, ℓ_left]):
+    for col, ℓ in enumerate(args.filter_scales):
         ax = axes[row, col]
         for label, (var, color) in terms.items():
             data = budget[var].sel(filter_scale=ℓ, method="nearest").dropna("time").isel(time=slice(1, None))
-            ax.plot(data.time, data.values, label=label, color=color, lw=1.5)
+            sign = tendency_sign if var.startswith("∫-∂ₜ") else 1
+            ax.plot(data.time, sign * data.values, label=label, color=color, lw=1.5)
         residual = budget[residual_var].sel(filter_scale=ℓ, method="nearest").dropna("time").isel(time=slice(1, None))
-        ax.plot(residual.time, residual.values, label="residual", color="k", ls="--", lw=1.0, zorder=0)
+        ax.plot(residual.time, residual.values, color="k", ls="--", lw=1.0, zorder=0)
 
         if col == 0:
             ax.set_ylabel(row_title, fontsize=13)
@@ -81,7 +88,7 @@ for row, budget, terms, residual_var, row_title in budget_configs:
         ax.grid(True, alpha=0.3, lw=0.5)
         ax.set_title("")
 
-for col, ℓ in enumerate([ℓ_right, ℓ_left]):
+for col, ℓ in enumerate(args.filter_scales):
     actual_ℓ = float(ke_budget.filter_scale.sel(filter_scale=ℓ, method="nearest"))
     axes[0, col].set_title(f"$\\ell = {actual_ℓ:.1f}$", fontsize=14)
 #---
@@ -97,8 +104,15 @@ for col in range(2):
 #+++ Legend and labels
 ke_handles, ke_labels = axes[0, 1].get_legend_handles_labels()
 ape_handles, ape_labels = axes[1, 1].get_legend_handles_labels()
-axes[0, 1].legend(ke_handles, ke_labels, fontsize=13, loc="upper right", frameon=True, fancybox=True)
-axes[1, 1].legend(ape_handles, ape_labels, fontsize=13, loc="upper right", frameon=True, fancybox=True)
+axes[0, 1].legend(ke_handles, ke_labels, fontsize=13, loc="upper right", frameon=True, fancybox=True, framealpha=0.1)
+rs_idx = ape_labels.index(r"$R^s$")
+rs_handle = ape_handles.pop(rs_idx)
+rs_label  = ape_labels.pop(rs_idx)
+blank = Line2D([], [], linestyle="None")
+n_pad = len(ape_handles) - 1
+ape_handles = [rs_handle] + [blank] * n_pad + ape_handles
+ape_labels  = [rs_label]  + [""]    * n_pad + ape_labels
+axes[1, 1].legend(ape_handles, ape_labels, fontsize=13, loc="upper right", frameon=True, fancybox=True, framealpha=0.1, ncol=2)
 
 for ax, letter in zip(axes.flat, "abcd"):
     ax.text(0.02, 0.97, f"({letter})", transform=ax.transAxes,
@@ -116,7 +130,7 @@ if info_parts:
 #---
 
 #+++ Save
-outfile = str(FIGURES / f"{stem}_sfs_budgets_2x2{ref_suffix}.png")
+outfile = str(FIGURES / f"{stem}_sfs_budgets_2x2{ref_suffix}.pdf")
 fig.savefig(outfile, dpi=200, bbox_inches="tight")
 print(f"Figure saved to: {outfile}")
 #---

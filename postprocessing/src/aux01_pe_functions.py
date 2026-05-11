@@ -8,7 +8,7 @@ following Winters et al. (1995).
 import numpy as np
 import xarray as xr
 import concurrent.futures
-from aux00_utils import integrate, calculate_gradient
+from src.aux00_utils import integrate, calculate_gradient
 
 # Physical constants
 g = 9.81  # gravitational acceleration [m/s^2]
@@ -591,7 +591,7 @@ def calculate_sfs_R_correction(full_rho_sorted, full_z0, filt_z0, full_dz_sorted
         R_s = filter(R) - R_l
 
     where:
-        R   = -(g/ρ₀) ∫_{z_*(ρ)}^{z}  ∂ρ_*/∂t dz̃   (total,      uses full z₀)
+        R   = -(g/ρ₀) ∫_{z_*(ρ)}^{z} ∂ρ_*/∂t dz̃   (total,      uses full z₀)
         R_l = -(g/ρ₀) ∫_{z_*(ρ̄)}^{z} ∂ρ_*/∂t dz̃   (large-scale, uses filtered z₀)
 
     Parameters
@@ -747,12 +747,12 @@ def calculate_sfs_ape_dissipation(rho, upsilon, upsilon_l, kappa, filter,
                                   filter_dims=["x_caa", "y_aca"],
                                   filtered_density=None, index_dim="i"):
     """
-    Calculate the SFS APE dissipation ε_s = filtered(κ ∇ρ · ∇Υ) - κ ∇ρ̄ · ∇Υˡ
+    Calculate the SFS APE dissipation ε_Aˢ = filtered(κ ∇ρ · ∇Υ) - κ ∇ρ̄ · ∇Υˡ
 
     The SFS APE dissipation quantifies the removal of large-scale APE by
     subfilter-scale diffusive processes:
 
-        ε_s = filtered(κ ∇ρ · ∇Υ) - κ ∇ρ̄ · ∇Υˡ
+        ε_Aˢ = filtered(κ ∇ρ · ∇Υ) - κ ∇ρ̄ · ∇Υˡ
 
     where:
         Υ  = g (z - z_*(ρ)) / ρ₀   — displacement potential using full density
@@ -784,7 +784,7 @@ def calculate_sfs_ape_dissipation(rho, upsilon, upsilon_l, kappa, filter,
     Returns
     -------
     xr.DataArray
-        SFS APE dissipation ε_s [J m⁻³ s⁻¹] with the same spatial dimensions as rho
+        SFS APE dissipation ε_Aˢ [J m⁻³ s⁻¹] with the same spatial dimensions as rho
     """
     # Term 1: filtered(κ ∇ρ · ∇Υ)
     grad_rho = calculate_gradient(rho)

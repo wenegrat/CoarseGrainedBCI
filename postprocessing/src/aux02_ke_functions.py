@@ -5,13 +5,15 @@ This module contains functions for calculating kinetic energy (KE).
 """
 
 import xarray as xr
-from aux00_utils import (integrate, calculate_gradient,
+from src.aux00_utils import (integrate, calculate_gradient,
                          condense_uw_velocities,
                          make_gaussian_filter, filter_fields)
-from aux01_pe_functions import (calculate_density_fields_from_buoyancy,
+from src.aux01_pe_functions import (calculate_density_fields_from_buoyancy,
                                 sorted_timeseries,
                                 local_potential_energies_timeseries,
-                                calculate_cross_scale_ape_flux)
+                                calculate_cross_scale_ape_flux,
+                                calculate_b_r,
+                                calculate_ape_to_ke_exchange_term)
 
 # Physical constants
 ρ0 = 1025  # reference density [kg/m^3]
@@ -278,8 +280,8 @@ def calculate_energy_transfer(ds, filter_scales,
     Returns
     -------
     xr.Dataset
-        Dataset with Π_KE, Π_APE, ∫Π_KE dV, ∫Π_APE dV indexed by
-        filter_scale.
+        Dataset with Π_K, Π_A, the SFS APE->KE exchange term and the coarse
+        conversion w̄·b̄ᵣ (plus their volume integrals) indexed by filter_scale.
     """
     filtered_dimensions = ["x_caa", "z_aac"]
     tensor_dimensions   = ("x_caa", "z_aac")
@@ -301,6 +303,10 @@ def calculate_energy_transfer(ds, filter_scales,
         rho_sorted = _full_sorted.rho_sorted
         dz_sorted  = _full_sorted.dz_sorted
 
+    # Relative buoyancy b_r is scale-independent — compute once outside the loop
+    b_r = calculate_b_r(ds_full.ρ, rho_sorted)
+    w_full = ds_full["uᵢ"].sel(i=3)
+
     dV = ds_full.dV
     transfer_list = []
 
@@ -318,8 +324,20 @@ def calculate_energy_transfer(ds, filter_scales,
                                                         filter_dims=filtered_dimensions,
                                                         filtered_u_i=ds_filt_ℓ["ūᵢ"])
         strain_rate_tensor_l = calculate_strain_tensor(ds_filt_ℓ["ūᵢ"], dimensions=tensor_dimensions)
-        # Π_KE = -τⁱʲ : S̄ⁱʲ
-        Π_KE = calculate_cross_scale_ke_flux(sfs_stress_tensor, strain_rate_tensor_l)
+        # Π_K = -τⁱʲ : S̄ⁱʲ
+        Π_K = calculate_cross_scale_ke_flux(sfs_stress_tensor, strain_rate_tensor_l)
+
+        # --- APE->KE conversion terms ---
+        # SFS exchange:        filter(w·b_r) - filter(w)·filter(b_r)
+        # Coarse conversion: filter(w) · filter(b_r)
+        w_bar   = ds_filt_ℓ["ūᵢ"].sel(i=3)
+        b_r_bar = gaussian_filter.apply(b_r, dims=filtered_dimensions)
+        ape_to_ke_exchange = calculate_ape_to_ke_exchange_term(w_full, b_r,
+                                                                gaussian_filter,
+                                                                filter_dims=filtered_dimensions,
+                                                                filtered_w=w_bar,
+                                                                filtered_b=b_r_bar)
+        wbar_b_r_bar = (w_bar * b_r_bar).rename("w̄·b̄ᵣ")
 
         # --- APE cross-scale transfer ---
         # Compute ρ̄ and the large-scale reference state z₀(ρ̄) → Υˡ
@@ -329,20 +347,26 @@ def calculate_energy_transfer(ds, filter_scales,
                                                              rho_sorted=rho_sorted,
                                                              dz_sorted=dz_sorted,
                                                              n_workers=n_workers)
-        # Π_APE = -(filter(ρuᵢ) - ρ̄ūᵢ) · ∇Υˡ
-        Π_APE = calculate_cross_scale_ape_flux(ds_full.ρ, ds_full["uᵢ"], filt_local_pes.upsilon,
-                                               gaussian_filter, filter_dims=filtered_dimensions,
-                                               filtered_density=ds_filt_ℓ.ρ̄,
-                                               filtered_velocity_vector=ds_filt_ℓ["ūᵢ"])
+        # Π_A = -(filter(ρuᵢ) - ρ̄ūᵢ) · ∇Υˡ
+        Π_A = calculate_cross_scale_ape_flux(ds_full.ρ, ds_full["uᵢ"], filt_local_pes.upsilon,
+                                              gaussian_filter, filter_dims=filtered_dimensions,
+                                              filtered_density=ds_filt_ℓ.ρ̄,
+                                              filtered_velocity_vector=ds_filt_ℓ["ūᵢ"])
 
-        int_Π_KE  = integrate(Π_KE, dV)
-        int_Π_APE = integrate(Π_APE, dV)
+        int_Π_K                = integrate(Π_K, dV)
+        int_Π_A                = integrate(Π_A, dV)
+        int_ape_to_ke_exchange = integrate(ape_to_ke_exchange, dV)
+        int_wbar_b_r_bar       = integrate(wbar_b_r_bar, dV)
 
         transfer_list.append(xr.Dataset({
-            "Π_KE":       Π_KE,
-            "Π_APE":      Π_APE,
-            "∫Π_KE dV":  int_Π_KE,
-            "∫Π_APE dV": int_Π_APE,
+            "Π_K":                  Π_K,
+            "Π_A":                  Π_A,
+            "SFS APE->KE exchange": ape_to_ke_exchange,
+            "w̄·b̄ᵣ":                 wbar_b_r_bar,
+            "∫Π_K dV":              int_Π_K,
+            "∫Π_A dV":              int_Π_A,
+            "∫(SFS APE->KE) dV":    int_ape_to_ke_exchange,
+            "∫w̄·b̄ᵣ dV":             int_wbar_b_r_bar,
         }))
 
     scale_coord = xr.DataArray(filter_scales, dims="filter_scale",

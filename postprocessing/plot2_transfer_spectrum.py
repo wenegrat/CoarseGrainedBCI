@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 import xarray as xr
 import matplotlib.pyplot as plt
-from aux03_plotting import run_label
+from src.aux03_plotting import run_label
 #---
 
 #+++ Configuration
@@ -51,7 +51,10 @@ print(f"  Filter scales: {et.filter_scale.values}")
 #+++ Plot
 fig, ax = plt.subplots(figsize=(6, 3.5), constrained_layout=True)
 
-for var, color, label_str in [("∫Π_KE dV", "#2166ac", r"$\Pi_{KE}$"), ("∫Π_APE dV", "#d6604d", r"$\Pi_{APE}$")]:
+for var, color, label_str in [
+    ("∫Π_K dV", "#2166ac", r"$\Pi_K$"),
+    ("∫Π_A dV", "#d6604d", r"$\Pi_A$"),
+]:
     ax.plot(et.inv_scale, et[var].values, color=color, label=label_str)
 ax.axhline(0, color="k", lw=0.8, ls="--")
 for ℓ in [1, 7]:
@@ -71,7 +74,7 @@ if label:
 info_parts.append(time_label)
 ax.text(0.98, 0.04, ",  ".join(info_parts), transform=ax.transAxes, fontsize=10, ha="right", va="bottom", bbox=dict(facecolor="white", edgecolor="none", pad=2, alpha=0.8))
 
-plot_filename = str(REPO_ROOT / "figures" / os.path.basename(input_filename).replace("energy_transfer_sweep", "cross-scale_transfer_spectrum").replace(".nc", ".png"))
+plot_filename = str(REPO_ROOT / "figures" / os.path.basename(input_filename).replace("energy_transfer_sweep", "cross-scale_transfer_spectrum").replace(".nc", ".pdf"))
 fig.savefig(plot_filename, dpi=150, bbox_inches="tight")
 print(f"Plot saved to: {plot_filename}")
 #---
