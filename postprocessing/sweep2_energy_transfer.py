@@ -12,14 +12,12 @@ from src.aux02_ke_functions import calculate_energy_transfer
 #+++ Configuration
 import argparse
 parser = argparse.ArgumentParser(description="Calculate cross-scale KE and APE transfer terms")
-parser.add_argument("--filename", default="output/khi_Nz256_Ri0.10.nc",
-                    help="Path to simulation NetCDF file")
-parser.add_argument("--n-workers", type=int, default=18,
-                    help="Number of CPU workers for APE sorting (ThreadPoolExecutor)")
-parser.add_argument("--fixed-reference", action="store_true", default=False,
-                    help="Load the fixed-in-time reference profile (produced by 01 with --fixed-reference)")
+parser.add_argument("--filename", default="output/khi_Nz1024_Ri0.10.nc", help="Path to simulation NetCDF file")
+parser.add_argument("--n-workers", type=int, default=18, help="Number of CPU workers for APE sorting (ThreadPoolExecutor)")
+parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load the fixed-in-time reference profile (produced by 01 with --fixed-reference)")
 args = parser.parse_args()
-print("\\n" + "="*70 + f"\\n  {Path(__file__).name}\\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\\n" + "="*70)
+
+print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
@@ -90,8 +88,12 @@ with ProgressBar(minimum=5, dt=5):
         print(f"  wrote time {i+1}/{energy_transfer.sizes['time']}")
 
 print("Merging per-timestep files...")
-with xr.open_mfdataset(tmp_files, combine="by_coords") as merged:
-    merged.load().to_netcdf(output_filename)
+# Stream via dask (no .load(): the merged dataset is hundreds of GB and won't fit in RAM).
+with xr.open_mfdataset(tmp_files, combine="by_coords", decode_timedelta=False,
+                       parallel=False, chunks={"time": 1}) as merged:
+    write_job = merged.to_netcdf(output_filename, compute=False)
+    with ProgressBar(minimum=5, dt=5):
+        write_job.compute()
 for f in tmp_files:
     os.remove(f)
 tmp_dir.rmdir()

@@ -78,7 +78,7 @@ Sequential numbered scripts (01-06), each reading the previous step's output. `0
 | `05_sfs_ape_budget.py` | Sub-filter-scale APE budget terms |
 | `06_plot_budgets.py` | Plot budget time series |
 
-`inv*` scripts are the sweep variant (parameter sweep over filter scales): `inv1` filters, `inv2` computes transfer, `inv3` plots spectra.
+`sweep*` scripts are the sweep variant (parameter sweep over filter scales): `sweep1_filter_fields.py` filters, `sweep2_energy_transfer.py` computes transfer, `sweep3_plot_transfer_spectrum.py` plots spectra.
 
 Standalone visualization scripts (not part of the numbered pipeline):
 - `plot1_panels.py` -- 4-panel snapshot of local SFS budget fields
@@ -96,7 +96,7 @@ All post-processing scripts accept `--filename`, `--filter-scales`, `--n-workers
 
 ### Data flow between pipeline steps
 
-The sorted density (`*_sorted_density.nc`) produced by step 02 is reused by steps 03, 05, and the sweep pipeline (`inv2`), avoiding redundant sorts. When `--fixed-reference` is used, output files are suffixed `_fixed_ref`. The sweep's `inv2` with `--fixed-reference` expects the sorted density from the budget pipeline's step 02 to already exist.
+The sorted density (`*_sorted_density.nc`) produced by step 02 is reused by steps 03, 05, and the sweep pipeline (`sweep2_energy_transfer.py`), avoiding redundant sorts. When `--fixed-reference` is used, output files are suffixed `_fixed_ref`. The sweep's `sweep2_energy_transfer.py` with `--fixed-reference` expects the sorted density from the budget pipeline's step 02 to already exist.
 
 ### Julia layer
 - `kelvin_helmholtz_instability.jl` -- main simulation (Oceananigans.jl, WENO(5), adaptive timestep)
