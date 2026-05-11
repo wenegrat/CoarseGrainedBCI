@@ -48,7 +48,7 @@ fig, (ax_K, ax_A) = plt.subplots(1, 2, figsize=(11, 4.5), constrained_layout=Tru
 
 for ax, da, title in [(ax_K, pi_K, r"$\Pi_K$"), (ax_A, pi_A, r"$\Pi_A$")]:
     pcm = ax.pcolormesh(da.time.values, da.filter_scale.values, da.transpose("filter_scale", "time").values,
-                        norm=norm, cmap=cmap, shading="auto")
+                        norm=norm, cmap=cmap, shading="auto", rasterized=True)
     ax.set_yscale("log")
     ax.set_xlabel("Time")
     ax.set_title(title)
@@ -67,7 +67,7 @@ if label:
 #+++ Save
 figures_dir = REPO_ROOT / "figures"
 figures_dir.mkdir(exist_ok=True)
-plot_filename = str(figures_dir / os.path.basename(input_filename).replace("energy_transfer_sweep", "hovmoller_PiK_PiA").replace(".nc", ".png"))
+plot_filename = str(figures_dir / os.path.basename(input_filename).replace("energy_transfer_sweep", "hovmoller_PiK_PiA").replace(".nc", ".pdf"))
 fig.savefig(plot_filename, dpi=150, bbox_inches="tight")
 print(f"Plot saved to: {plot_filename}")
 #---

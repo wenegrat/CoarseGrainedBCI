@@ -14,7 +14,7 @@ parser = argparse.ArgumentParser(description="Plot 2x2 panel of SFS KE and APE b
 parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file (used to derive budget filenames)")
 parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load the fixed-in-time reference profile outputs")
 parser.add_argument("--filter-scales", type=float, nargs=2, default=[7, 1], help="Two filter length scales for left and right columns")
-parser.add_argument("--tendency-sign", choices=["negative", "positive"], default="negative", help="Plot -∂ₜE (negative — sums to zero with other terms) or ∂ₜE (positive)")
+parser.add_argument("--tendency-sign", choices=["negative", "positive"], default="positive", help="Plot -∂ₜE (negative — sums to zero with other terms) or ∂ₜE (positive)")
 args = parser.parse_args()
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
@@ -130,7 +130,7 @@ if info_parts:
 #---
 
 #+++ Save
-outfile = str(FIGURES / f"{stem}_sfs_budgets_2x2{ref_suffix}.png")
+outfile = str(FIGURES / f"{stem}_sfs_budgets_2x2{ref_suffix}.pdf")
 fig.savefig(outfile, dpi=200, bbox_inches="tight")
 print(f"Figure saved to: {outfile}")
 #---

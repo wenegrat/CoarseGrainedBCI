@@ -111,6 +111,6 @@ ax_bot.set_title("Filter-scale derivative of APE↔KE exchange terms")
 ax_bot.legend(loc="best", fontsize=9, framealpha=0.9)
 #---
 
-plot_filename = str(REPO_ROOT / "figures" / os.path.basename(input_filename).replace("energy_transfer_sweep", "S3_sweep").replace(".nc", ".png"))
+plot_filename = str(REPO_ROOT / "figures" / os.path.basename(input_filename).replace("energy_transfer_sweep", "S3_sweep").replace(".nc", ".pdf"))
 fig.savefig(plot_filename, dpi=150, bbox_inches="tight")
 print(f"Plot saved to: {plot_filename}")
