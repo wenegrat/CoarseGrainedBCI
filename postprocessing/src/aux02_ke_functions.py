@@ -280,7 +280,7 @@ def calculate_energy_transfer(ds, filter_scales,
     Returns
     -------
     xr.Dataset
-        Dataset with Π_K, Π_A, the SFS APE->KE exchange term and the resolved
+        Dataset with Π_K, Π_A, the SFS APE->KE exchange term and the coarse
         conversion w̄·b̄ᵣ (plus their volume integrals) indexed by filter_scale.
     """
     filtered_dimensions = ["x_caa", "z_aac"]
@@ -329,7 +329,7 @@ def calculate_energy_transfer(ds, filter_scales,
 
         # --- APE->KE conversion terms ---
         # SFS exchange:        filter(w·b_r) - filter(w)·filter(b_r)
-        # Resolved conversion: filter(w) · filter(b_r)
+        # Coarse conversion: filter(w) · filter(b_r)
         w_bar   = ds_filt_ℓ["ūᵢ"].sel(i=3)
         b_r_bar = gaussian_filter.apply(b_r, dims=filtered_dimensions)
         ape_to_ke_exchange = calculate_ape_to_ke_exchange_term(w_full, b_r,
