@@ -15,10 +15,10 @@ print = logging.info
 
 #+++ Configuration
 import argparse
-parser = argparse.ArgumentParser(description="2x4 panel snapshot: vorticity, buoyancy, total/SFS energy (KE top row, APE bottom row)")
+parser = argparse.ArgumentParser(description="2x3 panel snapshot: vorticity/buoyancy in col 1, total/SFS energy in cols 2-3 (KE top row, APE bottom row)")
 parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file")
 parser.add_argument("--time", type=float, default=50, help="Target time for snapshot (nearest available will be used)")
-parser.add_argument("--filter-scale", type=float, default=0.5, help="Target filter length scale (nearest available will be used)")
+parser.add_argument("--filter-scale", type=float, default=1.0, help="Target filter length scale (nearest available will be used)")
 parser.add_argument("--clim-percentile", type=float, default=99.5, help="Percentile of |data| used to set symmetric color limits")
 args = parser.parse_args()
 
@@ -86,19 +86,17 @@ def _xzdata(field):
 
 #+++ Plot
 print("Plotting...")
-fig, axes = plt.subplots(2, 4, figsize=(20, 7), constrained_layout=True, gridspec_kw=dict(wspace=0, hspace=0))
+fig, axes = plt.subplots(2, 3, figsize=(15, 6.3), constrained_layout=True, gridspec_kw=dict(wspace=0, hspace=0))
 
 # Panels: (row, col) -> (field, title, kind)
 #   kind in {"diverging", "buoyancy", "positive"}
 panels = {
     (0, 0): (ω,         r"$\omega$ (vorticity)",                                 "diverging"),
-    (0, 1): (b,         r"$b$ (buoyancy)",                                       "buoyancy"),
-    (0, 2): (KE_total,  r"Total KE: $\frac{1}{2}(u^2+w^2)$",                     "positive"),
-    (0, 3): (KE_sfs,    r"SFS KE: $\frac{1}{2}|\mathbf{u}-\bar{\mathbf{u}}|^2$", "positive"),
-    (1, 0): (ω,         r"$\omega$ (vorticity)",                                 "diverging"),
-    (1, 1): (b,         r"$b$ (buoyancy)",                                       "buoyancy"),
-    (1, 2): (APE_total, r"Total APE: $E_a(\rho, z)$",                            "positive"),
-    (1, 3): (APE_sfs,   r"SFS APE: $E_a^s(\rho, z)$",                            "positive"),
+    (0, 1): (KE_total,  r"Total KE: $\frac{1}{2}(u^2+w^2)$",                     "positive"),
+    (0, 2): (KE_sfs,    r"SFS KE: $\frac{1}{2}|\mathbf{u}-\bar{\mathbf{u}}|^2$", "positive"),
+    (1, 0): (b,         r"$b$ (buoyancy)",                                       "buoyancy"),
+    (1, 1): (APE_total, r"Total APE: $E_a(\rho, z)$",                            "positive"),
+    (1, 2): (APE_sfs,   r"SFS APE: $E_a^s(\rho, z)$",                            "positive"),
 }
 
 # Symmetric clim for vorticity, percentile-based clim for positive fields
@@ -152,21 +150,21 @@ for (row, col), (field, title, kind) in panels.items():
 
 for row in range(2):
     axes[row, 0].set_ylabel("z")
-    for col in range(1, 4):
+    for col in range(1, 3):
         axes[row, col].set_ylabel("")
         axes[row, col].tick_params(labelleft=False, left=False)
 
-for col in range(4):
+for col in range(3):
     axes[0, col].set_xlabel("")
     axes[0, col].tick_params(labelbottom=False, bottom=False)
     axes[1, col].set_xlabel("x")
 
-for ax, letter in zip(axes.flat, "abcdefgh"):
+for ax, letter in zip(axes.flat, "abcdef"):
     ax.text(0.02, 0.97, f"({letter})", transform=ax.transAxes,
             fontsize=12, fontweight="bold", va="top", ha="left",
             bbox=dict(facecolor="white", edgecolor="none", pad=1.5))
 
-outfile = str(FIGURES / f"{stem}_panels2x4_t{t_sel:.1f}_l{ℓ_sel:.4f}.png")
+outfile = str(FIGURES / f"{stem}_panels2x3_t{t_sel:.1f}_l{ℓ_sel:.4f}.png")
 fig.savefig(outfile, dpi=150, bbox_inches="tight")
 plt.close(fig)
 print(f"Figure saved to: {outfile}")
