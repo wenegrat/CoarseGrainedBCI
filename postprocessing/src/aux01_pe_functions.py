@@ -8,7 +8,7 @@ following Winters et al. (1995).
 import numpy as np
 import xarray as xr
 import concurrent.futures
-from aux00_utils import integrate, calculate_gradient
+from src.aux00_utils import integrate, calculate_gradient
 
 # Physical constants
 g = 9.81  # gravitational acceleration [m/s^2]
@@ -242,7 +242,8 @@ def _sort_single_timestep(rho_np, dz_flat_np, z_min):
 
 
 def sorted_timeseries(ds, field_to_sort="rho", dV_name="dV", LxLy_name="LxLy",
-                      z_min_name="z_min", n_workers=None, verbose_level=1):
+                      z_min_name="z_min", n_workers=None, verbose_level=1,
+                      fixed_reference=False):
     """
     Compute the sorted reference-density profile for every timestep.
 
@@ -265,6 +266,11 @@ def sorted_timeseries(ds, field_to_sort="rho", dV_name="dV", LxLy_name="LxLy",
         Thread-pool workers; None uses os.cpu_count(); 1 disables parallelism.
     verbose_level : int
         0 = quiet, 1 = progress messages.
+    fixed_reference : bool
+        If True, sort only the first time step (t=0) and broadcast that
+        reference profile to all time steps, yielding a time-invariant
+        reference state.  If False (default), sort each time step
+        independently.
 
     Returns
     -------
@@ -277,24 +283,30 @@ def sorted_timeseries(ds, field_to_sort="rho", dV_name="dV", LxLy_name="LxLy",
     rho_all  = ds[field_to_sort].values                    # (time, …)
     dz_flat  = (ds[dV_name] / ds[LxLy_name]).values       # (…)
 
-    def _run(i):
+    if fixed_reference:
         if verbose_level > 0:
-            print(f"  Sorting time step {i+1}/{n_times}", end="\r")
-        return _sort_single_timestep(rho_all[i], dz_flat, z_min)
-
-    if n_workers == 1 or n_times == 1:
-        results = [_run(i) for i in range(n_times)]
+            print("  Sorting t=0 only (fixed reference profile)...")
+        t0_result = _sort_single_timestep(rho_all[0], dz_flat, z_min)
+        results = [t0_result] * n_times
     else:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=n_workers) as pool:
-            futures = {pool.submit(_sort_single_timestep, rho_all[i], dz_flat, z_min): i
-                       for i in range(n_times)}
-            results_unordered = {}
-            for fut in concurrent.futures.as_completed(futures):
-                i = futures[fut]
-                results_unordered[i] = fut.result()
-                if verbose_level > 0:
-                    print(f"  Sorted time step {len(results_unordered)}/{n_times}", end="\r")
-        results = [results_unordered[i] for i in range(n_times)]
+        def _run(i):
+            if verbose_level > 0:
+                print(f"  Sorting time step {i+1}/{n_times}", end="\r")
+            return _sort_single_timestep(rho_all[i], dz_flat, z_min)
+
+        if n_workers == 1 or n_times == 1:
+            results = [_run(i) for i in range(n_times)]
+        else:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=n_workers) as pool:
+                futures = {pool.submit(_sort_single_timestep, rho_all[i], dz_flat, z_min): i
+                           for i in range(n_times)}
+                results_unordered = {}
+                for fut in concurrent.futures.as_completed(futures):
+                    i = futures[fut]
+                    results_unordered[i] = fut.result()
+                    if verbose_level > 0:
+                        print(f"  Sorted time step {len(results_unordered)}/{n_times}", end="\r")
+            results = [results_unordered[i] for i in range(n_times)]
 
     if verbose_level > 0:
         print("\nDone!")
@@ -579,7 +591,7 @@ def calculate_sfs_R_correction(full_rho_sorted, full_z0, filt_z0, full_dz_sorted
         R_s = filter(R) - R_l
 
     where:
-        R   = -(g/ρ₀) ∫_{z_*(ρ)}^{z}  ∂ρ_*/∂t dz̃   (total,      uses full z₀)
+        R   = -(g/ρ₀) ∫_{z_*(ρ)}^{z} ∂ρ_*/∂t dz̃   (total,      uses full z₀)
         R_l = -(g/ρ₀) ∫_{z_*(ρ̄)}^{z} ∂ρ_*/∂t dz̃   (large-scale, uses filtered z₀)
 
     Parameters
@@ -698,9 +710,9 @@ def calculate_subfilter_tracer_flux(rho, u_i, filter, filter_dims=["x_caa", "y_a
 def calculate_ape_to_ke_exchange_term(w, b, filter, filter_dims=["x_caa", "y_aca"],
                                       filtered_w=None, filtered_b=None):
     """
-    Calculate the SFS KE->APE exchange term +(filtered(w·b) - filtered(w)·filtered(b))
+    Calculate the SFS APE->KE exchange term +(filtered(w·b) - filtered(w)·filtered(b))
 
-    This represents the SFS flux of KE to APE: the rate at which small-scale KE is converted to APE.
+    Positive values mean sub-filter buoyancy does positive work (APE converted to KE).
 
     Parameters
     ----------
@@ -720,13 +732,13 @@ def calculate_ape_to_ke_exchange_term(w, b, filter, filter_dims=["x_caa", "y_aca
     Returns
     -------
     xr.DataArray
-        SFS KE->APE exchange term +(filtered(w·b) - filtered(w)·filtered(b))
+        SFS APE->KE exchange term +(filtered(w·b) - filtered(w)·filtered(b))
     """
     result = calculate_sfs_flux_tensor(w, b, filter,
                                        filter_dims=filter_dims,
                                        filtered_a=filtered_w,
                                        filtered_b=filtered_b)
-    result.name = "SFS KE->APE exchange"
+    result.name = "SFS APE->KE exchange"
     return result
 #---
 
@@ -735,12 +747,12 @@ def calculate_sfs_ape_dissipation(rho, upsilon, upsilon_l, kappa, filter,
                                   filter_dims=["x_caa", "y_aca"],
                                   filtered_density=None, index_dim="i"):
     """
-    Calculate the SFS APE dissipation ε_s = filtered(κ ∇ρ · ∇Υ) - κ ∇ρ̄ · ∇Υˡ
+    Calculate the SFS APE dissipation ε_Aˢ = filtered(κ ∇ρ · ∇Υ) - κ ∇ρ̄ · ∇Υˡ
 
     The SFS APE dissipation quantifies the removal of large-scale APE by
     subfilter-scale diffusive processes:
 
-        ε_s = filtered(κ ∇ρ · ∇Υ) - κ ∇ρ̄ · ∇Υˡ
+        ε_Aˢ = filtered(κ ∇ρ · ∇Υ) - κ ∇ρ̄ · ∇Υˡ
 
     where:
         Υ  = g (z - z_*(ρ)) / ρ₀   — displacement potential using full density
@@ -772,7 +784,7 @@ def calculate_sfs_ape_dissipation(rho, upsilon, upsilon_l, kappa, filter,
     Returns
     -------
     xr.DataArray
-        SFS APE dissipation ε_s [J m⁻³ s⁻¹] with the same spatial dimensions as rho
+        SFS APE dissipation ε_Aˢ [J m⁻³ s⁻¹] with the same spatial dimensions as rho
     """
     # Term 1: filtered(κ ∇ρ · ∇Υ)
     grad_rho = calculate_gradient(rho)

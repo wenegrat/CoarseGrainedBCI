@@ -4,9 +4,9 @@ import os
 from pathlib import Path
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
-from aux00_utils import load_dataset_and_grid, condense_uw_velocities, integrate, make_gaussian_filter, load_energy_transfer
-from aux01_pe_functions import calculate_density_fields_from_buoyancy, calculate_b_r, calculate_b_r_simple, calculate_ape_to_ke_exchange_term
-from aux02_ke_functions import (
+from src.aux00_utils import load_dataset_and_grid, condense_uw_velocities, integrate, make_gaussian_filter, load_energy_transfer
+from src.aux01_pe_functions import calculate_density_fields_from_buoyancy, calculate_b_r, calculate_b_r_simple, calculate_ape_to_ke_exchange_term
+from src.aux02_ke_functions import (
     calculate_sfs_stress_tensor,
     calculate_strain_tensor,
     calculate_sfs_ke_dissipation,
@@ -17,12 +17,14 @@ from aux02_ke_functions import (
 #+++ Configuration
 import argparse
 parser = argparse.ArgumentParser(description="Calculate SFS KE budget from Kelvin-Helmholtz simulation output")
-parser.add_argument("--filename", default="output/khi_Nz256_Ri0.10.nc",
-                    help="Path to simulation NetCDF file")
+parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file")
+parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load the fixed-in-time reference profile (produced by 01 with --fixed-reference)")
 args = parser.parse_args()
+print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
+fixed_reference = args.fixed_reference
 #---
 
 #+++ Load data and grid
@@ -40,18 +42,19 @@ print("Loading pre-filtered fields...")
 filtered_filename = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities.zarr"))
 ds_filt = xr.open_zarr(filtered_filename)
 filtered_dimensions = ["x_caa", "z_aac"]
-filter_length_scales = ds_filt.filter_length_scale.values
+filter_scales = ds_filt.filter_scale.values
 tensor_dimensions = ("x_caa", "z_aac")
 
 ds = condense_uw_velocities(ds, indices=[1, 3])
 ds_full = ds[["b", "dV", "uᵢ"]].copy()
 
-sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + "_sorted_density.zarr"))
+ref_suffix = "_fixed_ref" if fixed_reference else ""
+sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sorted_density{ref_suffix}.zarr"))
 ds_sorted = xr.open_zarr(sorted_density_filename)
 
 print(f"Pre-filtered fields loaded from: {filtered_filename}")
 print(f"Sorted density loaded from: {sorted_density_filename}")
-print(f"Filter length scales: {filter_length_scales}")
+print(f"Filter length scales: {filter_scales}")
 print(f"Filter dimensions: x and z")
 #---
 
@@ -74,17 +77,17 @@ print("Done!")
 print("\n" + "="*60)
 print("Calculating budget terms for each filter scale...")
 
-energy_transfer = load_energy_transfer(filename)
+energy_transfer = load_energy_transfer(filename, ref_suffix=ref_suffix)
 
 dV = ds_full.dV
 budget_list = []
 
-for ℓ in filter_length_scales:
-    print(f"\n--- filter_length_scale = {ℓ:.4f} ---")
+for ℓ in filter_scales:
+    print(f"\n--- filter_scale = {ℓ:.4f} ---")
 
     gaussian_filter = make_gaussian_filter(ℓ, ds)
 
-    ds_filt_ℓ = ds_filt.sel(filter_length_scale=ℓ)
+    ds_filt_ℓ = ds_filt.sel(filter_scale=ℓ)
 
     # τⁱʲ = filter(uⁱ uʲ) - ūⁱ ūʲ   shape: (i, j, time, z, y, x)
     print("  SFS stress tensor...")
@@ -118,31 +121,31 @@ for ℓ in filter_length_scales:
     int_ape_to_ke_exchange = integrate(ape_to_ke_exchange.reindex(time=dKE_dt.time), dV)
     int_sfs_ke_dissipation = integrate(sfs_ke_dissipation.reindex(time=dKE_dt.time), dV)
 
-    Π_KE_ℓ     = energy_transfer["Π_KE"].sel(filter_length_scale=ℓ)
-    int_Π_KE_ℓ = energy_transfer["∫Π_KE dV"].sel(filter_length_scale=ℓ)
-    residual   = -int_dKE_dt + int_Π_KE_ℓ.reindex(time=dKE_dt.time) + int_ape_to_ke_exchange - int_sfs_ke_dissipation
+    Π_K_ℓ     = energy_transfer["Π_K"].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6)
+    int_Π_K_ℓ = energy_transfer["∫Π_K dV"].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6)
+    residual  = -int_dKE_dt + int_Π_K_ℓ.reindex(time=dKE_dt.time) + int_ape_to_ke_exchange - int_sfs_ke_dissipation
 
     budget_ℓ = xr.Dataset({
         # Local KE fields
         "KE_of_sfs_flow": sfs_ke_density,
         # Local budget terms
         "∂ₜ SFS KE": dKE_dt,
-        "Π_KE": Π_KE_ℓ,
-        "εₛ": sfs_ke_dissipation,
+        "Π_K": Π_K_ℓ,
+        "ε_Kˢ": sfs_ke_dissipation,
         "SFS APE->KE exchange": ape_to_ke_exchange,
         # Integrated budget terms
         "∫-∂ₜ SFS KE dV": -int_dKE_dt,
-        "∫Π_KE dV": int_Π_KE_ℓ,
-        "∫-εₛ dV": -int_sfs_ke_dissipation,
+        "∫Π_K dV": int_Π_K_ℓ,
+        "∫-ε_Kˢ dV": -int_sfs_ke_dissipation,
         "∫(SFS APE->KE) dV": int_ape_to_ke_exchange,
-        "residual_KE": residual,
+        "residual_K": residual,
     }).reindex(time=dKE_dt.time)
 
     budget_list.append(budget_ℓ)
 
-sfs_ke_budget_terms = xr.concat(budget_list, dim=xr.DataArray(filter_length_scales,
-                                                              dims="filter_length_scale",
-                                                              name="filter_length_scale"))
+sfs_ke_budget_terms = xr.concat(budget_list, dim=xr.DataArray(filter_scales,
+                                                              dims="filter_scale",
+                                                              name="filter_scale"))
 sfs_ke_budget_terms.attrs.update(ds.attrs)
 print("\nDone!")
 #---
@@ -155,8 +158,8 @@ integrated_vars = [v for v in sfs_ke_budget_terms.data_vars if v.startswith("∫
 local_vars      = [v for v in sfs_ke_budget_terms.data_vars if v not in integrated_vars]
 
 sfs_ke_budget_terms = sfs_ke_budget_terms.chunk({d: (1 if d == "time" else -1) for d in sfs_ke_budget_terms.dims})
-fields_filename     = str(PP_OUTPUT / (Path(filename).stem + "_sfs_ke_budget_fields.zarr"))
-integrated_filename = str(PP_OUTPUT / (Path(filename).stem + "_sfs_ke_budget_integrated.zarr"))
+fields_filename     = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ke_budget_fields{ref_suffix}.zarr"))
+integrated_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ke_budget_integrated{ref_suffix}.zarr"))
 
 print("  Saving local fields...")
 with ProgressBar():

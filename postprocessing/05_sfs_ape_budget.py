@@ -12,8 +12,8 @@ from pathlib import Path
 import time
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
-from aux00_utils import load_dataset_and_grid, condense_uw_velocities, integrate, make_gaussian_filter, load_energy_transfer
-from aux01_pe_functions import (
+from src.aux00_utils import load_dataset_and_grid, condense_uw_velocities, integrate, make_gaussian_filter, load_energy_transfer
+from src.aux01_pe_functions import (
     calculate_density_fields_from_buoyancy,
     local_potential_energies_timeseries,  # used for filtered density in loop
     calculate_sfs_ape_tendency,
@@ -28,15 +28,17 @@ print = logging.info
 #+++ Configuration
 import argparse
 parser = argparse.ArgumentParser(description="Calculate SFS APE budget from Kelvin-Helmholtz simulation output")
-parser.add_argument("--filename", default="output/khi_Nz256_Ri0.10.nc",
-                    help="Path to simulation NetCDF file")
-parser.add_argument("--n-workers", type=int, default=18,
-                    help="Number of CPU workers for APE sorting (ThreadPoolExecutor)")
+parser.add_argument("--filename", default="output/khi_Nz256_Ri0.10.nc", help="Path to simulation NetCDF file")
+parser.add_argument("--n-workers", type=int, default=18, help="Number of CPU workers for APE sorting (ThreadPoolExecutor)")
+parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load the fixed-in-time reference profile (produced by 01 with --fixed-reference)")
 args = parser.parse_args()
+
+print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 n_workers = args.n_workers
+fixed_reference = args.fixed_reference
 #---
 
 #+++ Load data and grid
@@ -55,16 +57,17 @@ print("Loading pre-filtered fields and sorted density...")
 filtered_filename = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities.zarr"))
 t0 = time.time()
 ds_filt = xr.open_zarr(filtered_filename)
-filter_length_scales = ds_filt.filter_length_scale.values
+filter_scales = ds_filt.filter_scale.values
 filtered_dimensions = ["x_caa", "z_aac"]
 
 ds = condense_uw_velocities(ds, indices=[1, 3])
 ds_full = ds[["b", "dV", "LxLy", "uᵢ"]].copy()
 print(f"  Pre-filtered fields loaded from: {filtered_filename}  ({time.time()-t0:.1f}s)")
-print(f"  Filter length scales: {filter_length_scales}")
+print(f"  Filter length scales: {filter_scales}")
 print(f"  Filter dimensions: x and z")
 
-sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + "_sorted_density.zarr"))
+ref_suffix = "_fixed_ref" if fixed_reference else ""
+sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sorted_density{ref_suffix}.zarr"))
 t0 = time.time()
 ds_sorted = xr.open_zarr(sorted_density_filename)
 print(f"  Sorted density loaded from: {sorted_density_filename}  ({time.time()-t0:.1f}s)")
@@ -78,7 +81,7 @@ t0 = time.time()
 ds_full = calculate_density_fields_from_buoyancy(ds_full, buoyancy_name="b", density_name="ρ")
 print(f"  ρ calculated  ({time.time()-t0:.1f}s)")
 
-full_local_pes_checkpoint = PP_OUTPUT / (Path(filename).stem + "_full_local_pes_checkpoint.zarr")
+full_local_pes_checkpoint = PP_OUTPUT / (Path(filename).stem + f"_full_local_pes_checkpoint{ref_suffix}.zarr")
 if full_local_pes_checkpoint.exists():
     print(f"  Loading full_local_pes from checkpoint: {full_local_pes_checkpoint.name}")
     t0 = time.time()
@@ -105,10 +108,10 @@ else:
 print("\n" + "="*60)
 print("Calculating budget terms for each filter scale...")
 
-energy_transfer = load_energy_transfer(filename)
+energy_transfer = load_energy_transfer(filename, ref_suffix=ref_suffix)
 
-ke_fields_filename     = str(PP_OUTPUT / (Path(filename).stem + "_sfs_ke_budget_fields.zarr"))
-ke_integrated_filename = str(PP_OUTPUT / (Path(filename).stem + "_sfs_ke_budget_integrated.zarr"))
+ke_fields_filename     = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ke_budget_fields{ref_suffix}.zarr"))
+ke_integrated_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ke_budget_integrated{ref_suffix}.zarr"))
 ke_budget = xr.merge([
     xr.open_zarr(ke_fields_filename),
     xr.open_zarr(ke_integrated_filename),
@@ -119,20 +122,20 @@ dV = ds_full.dV
 budget_list = []
 checkpoint_files = [full_local_pes_checkpoint]
 
-for ℓ in filter_length_scales:
-    checkpoint_path = PP_OUTPUT / (Path(filename).stem + f"_sfs_ape_budget_checkpoint_l{ℓ:.4f}.zarr")
+for ℓ in filter_scales:
+    checkpoint_path = PP_OUTPUT / (Path(filename).stem + f"_sfs_ape_budget_checkpoint_l{ℓ:.4f}{ref_suffix}.zarr")
     checkpoint_files.append(checkpoint_path)
 
     if checkpoint_path.exists():
-        print(f"\n--- filter_length_scale = {ℓ:.4f} (loading from checkpoint) ---")
+        print(f"\n--- filter_scale = {ℓ:.4f} (loading from checkpoint) ---")
         budget_list.append(xr.open_zarr(str(checkpoint_path)))
         continue
 
-    print(f"\n--- filter_length_scale = {ℓ:.4f} ---")
+    print(f"\n--- filter_scale = {ℓ:.4f} ---")
 
     gaussian_filter = make_gaussian_filter(ℓ, ds)
 
-    ds_filt_ℓ = ds_filt.sel(filter_length_scale=ℓ).drop_vars("filter_length_scale")
+    ds_filt_ℓ = ds_filt.sel(filter_scale=ℓ).drop_vars("filter_scale")
     ds_filt_ℓ["LxLy"] = ds["LxLy"]
     ds_filt_ℓ.attrs.update(ds.attrs)
 
@@ -158,8 +161,8 @@ for ℓ in filter_length_scales:
     print(f"  sfs_ape_dissipation  ({time.time()-t0:.1f}s)")
 
     # Read APE->KE exchange term from KE budget (avoid redundant recalculation)
-    ape_to_ke_exchange     = ke_budget["SFS APE->KE exchange"].sel(filter_length_scale=ℓ)
-    int_ape_to_ke_exchange = ke_budget["∫(SFS APE->KE) dV"].sel(filter_length_scale=ℓ)
+    ape_to_ke_exchange     = ke_budget["SFS APE->KE exchange"].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6)
+    int_ape_to_ke_exchange = ke_budget["∫(SFS APE->KE) dV"].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6)
 
     t0 = time.time()
     R_s = calculate_sfs_R_correction(full_local_pes.rho_sorted, full_local_pes.z0, filt_local_pes.z0,
@@ -173,9 +176,9 @@ for ℓ in filter_length_scales:
     int_sfs_ape_dissipation = integrate(sfs_ape_dissipation.reindex(time=dAPE_dt.time), dV)
     int_R_s                 = integrate(R_s.reindex(time=dAPE_dt.time), dV)
 
-    Π_APE_ℓ     = energy_transfer["Π_APE"].sel(filter_length_scale=ℓ)
-    int_Π_APE_ℓ = energy_transfer["∫Π_APE dV"].sel(filter_length_scale=ℓ)
-    residual    = -int_dAPE_dt - int_ape_to_ke_exchange.reindex(time=dAPE_dt.time) + int_Π_APE_ℓ.reindex(time=dAPE_dt.time) - int_sfs_ape_dissipation + int_R_s
+    Π_A_ℓ     = energy_transfer["Π_A"].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6)
+    int_Π_A_ℓ = energy_transfer["∫Π_A dV"].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6)
+    residual  = -int_dAPE_dt - int_ape_to_ke_exchange.reindex(time=dAPE_dt.time) + int_Π_A_ℓ.reindex(time=dAPE_dt.time) - int_sfs_ape_dissipation + int_R_s
 
     budget_ℓ = xr.Dataset({
         # Density fields
@@ -193,17 +196,17 @@ for ℓ in filter_length_scales:
         "Eaˢ(ρ, z)": subfilter_local_ape,
         # Local budget terms
         "∂ₜ SFS APE": dAPE_dt,
-        "Π_APE": Π_APE_ℓ,
-        "χₛ": sfs_ape_dissipation,
+        "Π_A": Π_A_ℓ,
+        "ε_Aˢ": sfs_ape_dissipation,
         "SFS KE->APE exchange": -ape_to_ke_exchange,
         "Rˢ": R_s,
         # Integrated budget terms
         "∫-∂ₜ SFS APE dV": -int_dAPE_dt,
-        "∫Π_APE dV": int_Π_APE_ℓ,
-        "∫-χₛ dV": -int_sfs_ape_dissipation,
+        "∫Π_A dV": int_Π_A_ℓ,
+        "∫-ε_Aˢ dV": -int_sfs_ape_dissipation,
         "∫(SFS KE->APE) dV": -int_ape_to_ke_exchange,
         "∫Rˢ dV": int_R_s,
-        "residual_APE": residual,
+        "residual_A": residual,
     }).reindex(time=dAPE_dt.time)
 
     print(f"  Saving checkpoint...")
@@ -218,16 +221,16 @@ for ℓ in filter_length_scales:
     del sfs_ape_dissipation, R_s, dAPE_dt, budget_ℓ
     del ape_to_ke_exchange, int_ape_to_ke_exchange
     del int_dAPE_dt, int_sfs_ape_dissipation, int_R_s
-    del Π_APE_ℓ, int_Π_APE_ℓ, residual
+    del Π_A_ℓ, int_Π_A_ℓ, residual
     gc.collect()
 
     budget_list.append(xr.open_zarr(str(checkpoint_path)))
 
-sfs_ape_budget_terms = xr.concat(budget_list, dim=xr.DataArray(filter_length_scales,
-                                                               dims="filter_length_scale",
-                                                               name="filter_length_scale"))
+sfs_ape_budget_terms = xr.concat(budget_list, dim=xr.DataArray(filter_scales,
+                                                               dims="filter_scale",
+                                                               name="filter_scale"))
 sfs_ape_budget_terms.attrs.update(ds.attrs)
-# Scale-independent fields don't need filter_length_scale dimension
+# Scale-independent fields don't need filter_scale dimension
 sfs_ape_budget_terms["ρ"] = ds_full.ρ
 print("\nDone!")
 #---
@@ -240,8 +243,8 @@ integrated_vars = [v for v in sfs_ape_budget_terms.data_vars if v.startswith("�
 local_vars      = [v for v in sfs_ape_budget_terms.data_vars if v not in integrated_vars]
 
 sfs_ape_budget_terms = sfs_ape_budget_terms.chunk({d: (1 if d == "time" else -1) for d in sfs_ape_budget_terms.dims})
-fields_filename     = str(PP_OUTPUT / (Path(filename).stem + "_sfs_ape_budget_fields.zarr"))
-integrated_filename = str(PP_OUTPUT / (Path(filename).stem + "_sfs_ape_budget_integrated.zarr"))
+fields_filename     = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ape_budget_fields{ref_suffix}.zarr"))
+integrated_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ape_budget_integrated{ref_suffix}.zarr"))
 
 print("  Saving local fields...")
 with ProgressBar():

@@ -17,6 +17,11 @@ STEM      = "khi_Nz512_Ri0.10"
 THRESHOLD = 0.1
 
 
+@pytest.fixture(scope="session")
+def ref_suffix(request):
+    return request.config.getoption("--ref-suffix")
+
+
 def rms(arr):
     """Root mean square of an array, ignoring NaNs."""
     return np.sqrt(np.nanmean(arr**2))
@@ -25,11 +30,16 @@ def rms(arr):
 def relative_residual(ds, residual_var, budget_vars):
     """rms(residual) / min_v(rms(term_v))
 
-    The denominator is the smallest RMS among all budget terms.
-    This provides a stricter normalisation than dividing by the largest term.
+    The denominator is the smallest non-zero RMS among all budget terms.
+    Zero-rms terms (e.g. Rˢ with a fixed reference profile) are excluded
+    because they do not set a meaningful scale.
     """
-    residual = rms(ds[residual_var].values)
-    scale    = min(rms(ds[v].values) for v in budget_vars)
+    residual   = rms(ds[residual_var].values)
+    term_norms = [rms(ds[v].values) for v in budget_vars]
+    nonzero    = [s for s in term_norms if s > 0]
+    if not nonzero:
+        raise ValueError(f"All budget terms have zero RMS — cannot normalise residual.")
+    scale = min(nonzero)
     return residual / scale
 
 
@@ -44,8 +54,8 @@ def print_budget_summary(ds, residual_var, budget_vars, rel):
     print(f"  {'residual / min(terms)':<35}  {rel:.3%}  ({'PASS' if rel < THRESHOLD else 'FAIL'}, threshold={THRESHOLD:.0%})")
 
 
-def load(suffix):
-    path = PP_OUTPUT / f"{STEM}_{suffix}.nc"
+def load(suffix, ref_suffix=""):
+    path = PP_OUTPUT / f"{STEM}_{suffix}{ref_suffix}.nc"
     assert path.exists(), f"Output file not found: {path}"
     return xr.open_dataset(path, decode_timedelta=False)
 
@@ -55,23 +65,22 @@ def load(suffix):
 # ---------------------------------------------------------------------------
 KE_BUDGET_VARS = [
     "∫-∂ₜ SFS KE dV",
-    "∫Π_KE dV",
-    "∫-εₛ dV",
+    "∫Π_K dV",
+    "∫-ε_Kˢ dV",
     "∫(SFS APE->KE) dV",
 ]
 
 @pytest.fixture(scope="module")
-def ke_budget():
-    return load("sfs_ke_budget_integrated")
+def ke_budget(ref_suffix):
+    return load("sfs_ke_budget_integrated", ref_suffix)
 
 
-@pytest.mark.parametrize("l_idx", range(len(load("sfs_ke_budget_integrated").filter_length_scale)))
 def test_ke_budget_residual(ke_budget, l_idx):
-    l = ke_budget.filter_length_scale.values[l_idx]
-    ds_l = ke_budget.sel(filter_length_scale=l)
-    rel = relative_residual(ds_l, "residual_KE", KE_BUDGET_VARS)
+    l = ke_budget.filter_scale.values[l_idx]
+    ds_l = ke_budget.sel(filter_scale=l)
+    rel = relative_residual(ds_l, "residual_K", KE_BUDGET_VARS)
     print(f"\nKE budget  (l={l:.4f})")
-    print_budget_summary(ds_l, "residual_KE", KE_BUDGET_VARS, rel)
+    print_budget_summary(ds_l, "residual_K", KE_BUDGET_VARS, rel)
     assert rel < THRESHOLD, (
         f"KE budget residual too large at l={l:.4f}: "
         f"relative residual = {rel:.3%} > {THRESHOLD:.0%}"
@@ -83,24 +92,23 @@ def test_ke_budget_residual(ke_budget, l_idx):
 # ---------------------------------------------------------------------------
 APE_BUDGET_VARS = [
     "∫-∂ₜ SFS APE dV",
-    "∫Π_APE dV",
-    "∫-χₛ dV",
+    "∫Π_A dV",
+    "∫-ε_Aˢ dV",
     "∫(SFS KE->APE) dV",
     "∫Rˢ dV",
 ]
 
 @pytest.fixture(scope="module")
-def ape_budget():
-    return load("sfs_ape_budget_integrated")
+def ape_budget(ref_suffix):
+    return load("sfs_ape_budget_integrated", ref_suffix)
 
 
-@pytest.mark.parametrize("l_idx", range(len(load("sfs_ape_budget_integrated").filter_length_scale)))
 def test_ape_budget_residual(ape_budget, l_idx):
-    l = ape_budget.filter_length_scale.values[l_idx]
-    ds_l = ape_budget.sel(filter_length_scale=l)
-    rel = relative_residual(ds_l, "residual_APE", APE_BUDGET_VARS)
+    l = ape_budget.filter_scale.values[l_idx]
+    ds_l = ape_budget.sel(filter_scale=l)
+    rel = relative_residual(ds_l, "residual_A", APE_BUDGET_VARS)
     print(f"\nAPE budget  (l={l:.4f})")
-    print_budget_summary(ds_l, "residual_APE", APE_BUDGET_VARS, rel)
+    print_budget_summary(ds_l, "residual_A", APE_BUDGET_VARS, rel)
     assert rel < THRESHOLD, (
         f"APE budget residual too large at l={l:.4f}: "
         f"relative residual = {rel:.3%} > {THRESHOLD:.0%}"

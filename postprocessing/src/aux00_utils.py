@@ -3,7 +3,7 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 
-PP_OUTPUT = Path(__file__).resolve().parent / "output"
+PP_OUTPUT = Path(__file__).resolve().parent.parent / "output"
 
 #+++ Integrations and sums
 def integrate(da, dV, dims=("x_caa", "y_aca", "z_aac")):
@@ -160,6 +160,9 @@ def calculate_gradient(scalar, output_name="grad_scalar", dimensions=("x_caa", "
 #---
 
 #+++ Gaussian filter (x: periodic, z: bounded)
+# FWHM = 2√(2 ln 2) · σ  →  σ = FWHM / (2√(2 ln 2))
+_FWHM_TO_SIGMA = 1.0 / (2.0 * np.sqrt(2.0 * np.log(2.0)))
+
 class GaussianFilter:
     """Gaussian filter in x (periodic) and z (bounded) directions.
 
@@ -167,11 +170,11 @@ class GaussianFilter:
       - x: mode='wrap'    — periodic BC
       - z: mode='nearest' — extends with boundary value beyond domain walls
 
-    sigma = ℓ / dx_min in grid units, so the physical-space sigma equals ℓ.
+    ℓ is the FWHM of the kernel; σ = ℓ · _FWHM_TO_SIGMA is derived internally.
     """
     def __init__(self, ℓ, dx_min, dz_min):
-        self._sigma_x = ℓ / dx_min
-        self._sigma_z = ℓ / dz_min
+        self._sigma_x = ℓ * _FWHM_TO_SIGMA / dx_min
+        self._sigma_z = ℓ * _FWHM_TO_SIGMA / dz_min
 
     def apply(self, da, dims):
         """Apply filter in dims[0] (x, periodic) then dims[1] (z, bounded).
@@ -205,12 +208,12 @@ class GaussianFilter:
 
 
 def make_gaussian_filter(ℓ, ds):
-    """Return a GaussianFilter for length scale ℓ using grid spacing from ds.
+    """Return a GaussianFilter for FWHM ℓ using grid spacing from ds.
 
     Parameters
     ----------
     ℓ : float
-        Filter length scale in physical units.
+        Filter length scale (FWHM) in physical units.
     ds : xr.Dataset
         Simulation dataset (must contain Δx_caa and Δz_aac).
     """
@@ -219,35 +222,35 @@ def make_gaussian_filter(ℓ, ds):
     return GaussianFilter(ℓ, dx_min, dz_min)
 
 
-def filter_fields(ds, filter_length_scales):
+def filter_fields(ds, filter_scales):
     """Filter velocity and buoyancy fields at each length scale in x and z.
 
     Parameters
     ----------
     ds : xr.Dataset
         Dataset with velocity components (u, w) and buoyancy b.
-    filter_length_scales : array-like
-        Physical length scales at which to apply the filter.
+    filter_scales : array-like
+        Filter length scales (FWHM) in physical units.
 
     Returns
     -------
     ds_filt : xr.Dataset
-        Dataset with filtered fields ūᵢ and b̄ at each filter_length_scale,
+        Dataset with filtered fields ūᵢ and b̄ at each filter_scale,
         plus dV (scale-independent).
     """
     ds = condense_uw_velocities(ds, indices=(1, 3))
 
     ds_filt_list = []
-    for ℓ in filter_length_scales:
-        print(f"  filter_length_scale = {ℓ:.4f}...")
+    for ℓ in filter_scales:
+        print(f"  filter_scale = {ℓ:.4f}...")
         gf = make_gaussian_filter(ℓ, ds)
         ds_filt_list.append(xr.Dataset({
             "ūᵢ": gf.apply(ds["uᵢ"], dims=["x_caa", "z_aac"]),
             "b̄":  gf.apply(ds["b"],  dims=["x_caa", "z_aac"]),
         }))
 
-    scale_coord = xr.DataArray(filter_length_scales, dims="filter_length_scale",
-                               name="filter_length_scale")
+    scale_coord = xr.DataArray(filter_scales, dims="filter_scale",
+                               name="filter_scale")
     ds_filt = xr.concat(ds_filt_list, dim=scale_coord)
     ds_filt["dV"] = ds["dV"]
     ds_filt.attrs.update(ds.attrs)
@@ -281,8 +284,8 @@ class DaskParallelFilter:
 #---
 
 #+++ Pre-computed result loaders
-def load_energy_transfer(filename):
-    """Load the *_energy_transfer.nc file produced by 02_energy_transfer.py."""
-    et_filename = str(PP_OUTPUT / (Path(filename).stem + "_energy_transfer.zarr"))
+def load_energy_transfer(filename, ref_suffix=""):
+    """Load the *_energy_transfer.zarr file produced by 03_energy_transfer.py."""
+    et_filename = str(PP_OUTPUT / (Path(filename).stem + f"_energy_transfer{ref_suffix}.zarr"))
     return xr.open_zarr(et_filename)
 #---
