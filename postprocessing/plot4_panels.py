@@ -19,7 +19,7 @@ import argparse
 parser = argparse.ArgumentParser(description="Plot 4-panel snapshot of local SFS budget terms")
 parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file")
 parser.add_argument("--time", type=float, default=50, help="Target time for snapshot (nearest available will be used)")
-parser.add_argument("--filter-scale", type=float, default=0.5, help="Target filter length scale (nearest available will be used)")
+parser.add_argument("--filter-scale", type=float, default=1, help="Target filter length scale (nearest available will be used)")
 parser.add_argument("--clim-percentile", type=float, default=99.5, help="Percentile of |data| used to set symmetric color limits")
 args = parser.parse_args()
 
@@ -148,7 +148,7 @@ for ax, letter in zip(axes.flat, "abcd"):
             fontsize=12, fontweight="bold", va="top", ha="left",
             bbox=dict(facecolor="white", edgecolor="none", pad=1.5))
 
-outfile = str(FIGURES / f"{stem}_panels_t{t_sel:.1f}_l{ℓ_sel:.4f}.png")
+outfile = str(FIGURES / f"{stem}_panels_t{t_sel:.1f}_l{ℓ_sel:.4f}.pdf")
 fig.savefig(outfile, dpi=150, bbox_inches="tight")
 plt.close(fig)
 print(f"Figure saved to: {outfile}")
