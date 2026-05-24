@@ -5,7 +5,7 @@ using Printf
 using ArgParse
 using CUDA: has_cuda_gpu
 using Oceananigans.Architectures: on_architecture
-using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation, FlowDiagnostics, BoxFilter
+using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation, FlowDiagnostics, GaussianFilter
 using Oceanostics.ProgressMessengers
 @info "Finished loading packages"
 
@@ -112,26 +112,11 @@ Ny = closest_factor_number((2, 3, 5), Ny)
 
 params = (; params..., Nx, Ny)
 
-#+++ Convert physical filter widths to cell counts
-filter_widths = (0.4, 1.0, 5.0)
-Δz_est = params.Lz / params.Nz
-filter_cells = Tuple(max(1, round(Int, w / Δz_est)) for w in filter_widths)
-max_filter_cells = maximum(filter_cells)
-params = (; params...,
-           filter_width_1=filter_widths[1], filter_width_2=filter_widths[2], filter_width_3=filter_widths[3],
-           filter_cells_1=filter_cells[1],  filter_cells_2=filter_cells[2],  filter_cells_3=filter_cells[3],
-           Δz_est)
-for (w, c) in zip(filter_widths, filter_cells)
-    @info @sprintf("BoxFilter width: %.1f (physical) → %d cells (using Δz ≈ %.4f)", w, c, Δz_est)
-end
-#---
-
 grid = RectilinearGrid(arch; size=(params.Nx, params.Ny, params.Nz),
                        x=(-params.Lx/2, params.Lx/2),
                        y=(-params.Ly/2, params.Ly/2),
                        z=(-params.Lz/2, params.Lz/2),
-                       topology=(Periodic, Periodic, Bounded),
-                       halo=(max_filter_cells, 1, max_filter_cells))
+                       topology=(Periodic, Periodic, Bounded))
 #---
 
 #+++ Define Reynolds number, viscosity and diffusivity
@@ -226,25 +211,14 @@ PE = Integral(pe)
 
 vorticity = Field(∂z(u) - ∂x(w))
 
-#+++ Box-filtered u, v, b at three scales for subfilter-scale analysis 
-u_filt1 = BoxFilter(u_center; dims=(1, 3), width=params.filter_cells_1)
-v_filt1 = BoxFilter(v_center; dims=(1, 3), width=params.filter_cells_1)
-b_filt1 = BoxFilter(b;        dims=(1, 3), width=params.filter_cells_1)
-      
-u_filt2 = BoxFilter(u_center; dims=(1, 3), width=params.filter_cells_2) 
-v_filt2 = BoxFilter(v_center; dims=(1, 3), width=params.filter_cells_2) 
-b_filt2 = BoxFilter(b;        dims=(1, 3), width=params.filter_cells_2) 
-      
-u_filt3 = BoxFilter(u_center; dims=(1, 3), width=params.filter_cells_3) 
-v_filt3 = BoxFilter(v_center; dims=(1, 3), width=params.filter_cells_3) 
-b_filt3 = BoxFilter(b;        dims=(1, 3), width=params.filter_cells_3) 
+#+++ Gaussian-filtered u, v, w, b at multiple filter scales for subfilter-scale analysis
+filter_widths = (1, 7)
+_fields = (u=u_center, v=v_center, w=w_center, b=b)
+_filt_pairs = [Symbol("$(n)_σ$(σ)") => GaussianFilter(f; dims=(1, 3), σ=σ) for σ in filter_widths for (n, f) in pairs(_fields)]
+filtered_fields = (; _filt_pairs...)
 #---
 
-outputs = (; ω=vorticity, b, pe, PE, u=u_center, v=v_center, w=w_center,
-           u_filt1, v_filt1, b_filt1,
-           u_filt2, v_filt2, b_filt2,
-           u_filt3, v_filt3, b_filt3,
-           ε̄, ε, Ri=Ri_field, S=S_field)
+outputs = (; ω=vorticity, b, pe, PE, u=u_center, v=v_center, w=w_center, filtered_fields..., ε̄, ε, Ri=Ri_field, S=S_field)
 
 using NCDatasets
 simulation_name = "khi_Nz$(params.Nz)_Ri$(@sprintf("%.2f", params.Ri))"
@@ -278,7 +252,7 @@ NetCDFWriter(model, outputs,
 @info "Output will be saved to: $(output_filename).nc"
 #---
 
-# Run simulation
+#+++ Run simulation
 show_gpu_status()
 @info @sprintf("""
 ================================================================================
@@ -306,6 +280,7 @@ show_gpu_status()
     params.k_max, params.λ_max)
 @info "Running Kelvin-Helmholtz instability simulation..."
 run!(simulation)
+#---
 
 #+++ Plot results
 @info "Creating animation..."
