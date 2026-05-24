@@ -12,6 +12,33 @@ Computes Available Potential Energy (APE) from Kelvin-Helmholtz instability simu
    - `postprocessing/sweep_filter.pbs` — filters fields at all scales (shared; runs once regardless of `FIXED_REF`)
    - `postprocessing/sweep_transfer.pbs` — computes and plots energy transfer spectra (per `FIXED_REF` variant)
 
+## Post-processing scripts (`postprocessing/`)
+
+Scripts in `postprocessing/` follow a naming convention by purpose:
+
+| Prefix | Purpose |
+|--------|---------|
+| `01_…` – `06_…` | **Numbered post-processing pipeline.** Sequentially filter fields, sort density, compute cross-scale energy transfer, and compute SFS KE/APE budgets from the raw simulation output. Each step reads the previous step's output. |
+| `sweep1_…` – `sweep3_…` | **Parameter sweep pipeline** over filter scales: filter fields, compute cross-scale transfer at every scale, and plot transfer spectra. |
+| `plot2_…`, `plot3_…`, `plot4_…` | **Paper figure scripts.** Produce the figures used in the manuscript (cross-scale transfer spectrum, SFS KE/APE budget time series, local-field snapshot panels). Output goes to `figures/`. |
+| `anim1_…`, `S1_…`, `S2_…`, `S3_…` | **Supplementary material.** Animations (`anim*`, requires `ffmpeg`) and supplementary figures (`S1`–`S3`: Π hovmöllers, snapshot panels, sweep-spectrum figures). |
+| `aux*` (under `src/`) | Shared utilities reused across the pipeline (data loading, Gaussian filtering, spatial derivatives, PE/KE budget terms, plotting helpers). |
+| `00_get_budgets.sh`, `inv00_get_sweep.sh` | Local helpers that run the numbered pipeline or sweep pipeline end-to-end without PBS (see [Running locally](#running-locally-without-pbs)). |
+| `*.pbs`, `submit_*.sh` | PBS job scripts and their wrappers (see [Submitting jobs](#submitting-jobs)). |
+
+All Python scripts accept `--filename`, and most accept `--fixed-reference`, `--filter-scales`, and `--n-workers`. Run any script with `--help` for its full argument list.
+
+## Setup
+
+Create the conda environment for Python post-processing:
+
+```bash
+conda env create -f environment.yml   # creates env "py313"
+conda activate py313
+```
+
+The Julia simulation uses the project's `Project.toml`/`Manifest.toml` — instantiate with `julia --project -e 'using Pkg; Pkg.instantiate()'` on first use.
+
 ## Submitting jobs
 
 ### File naming convention
@@ -85,6 +112,36 @@ bash submit_sweep.sh NZ=2048 FIXED_REF=both  # submit both variants; filter runs
 `FIXED_REF=both` submits the filter job once and two transfer jobs (one for each variant) that both depend on the single filter job.
 
 When `FIXED_REF=1`, the transfer job loads the pre-sorted reference density from `_sorted_density_fixed_ref.nc` (produced by the budgeting pipeline). Run budgeting with `FIXED_REF=1` before submitting the sweep with `FIXED_REF=1`.
+
+## Running locally (without PBS)
+
+For development on a workstation (no PBS scheduler), run the simulation and post-processing pipeline directly.
+
+```bash
+# Julia simulation (CPU, small grid)
+julia --project -t 8 kelvin_helmholtz_instability.jl --Nz 512 --Ri 0.1 --stop_time 70
+
+# Numbered post-processing pipeline (01–06) on an existing NetCDF file
+cd postprocessing
+bash 00_get_budgets.sh output/khi_Nz512_Ri0.10.nc --filter-scales 0.8 2
+bash 00_get_budgets.sh output/khi_Nz512_Ri0.10.nc --filter-scales 0.8 2 --fixed-reference
+
+# Sweep pipeline (sweep1–sweep3)
+bash inv00_get_sweep.sh output/khi_Nz512_Ri0.10.nc
+```
+
+Set `N_WORKERS` to control Dask parallelism (default 1): `N_WORKERS=4 bash 00_get_budgets.sh ...`.
+
+## Tests
+
+The test suite checks SFS KE and APE budget closure (rms residual / min rms of terms < 10%) and expects post-processing output for `khi_Nz512_Ri0.10` in `postprocessing/output/`.
+
+```bash
+pytest tests/ -v -s                                  # time-varying reference (default)
+pytest tests/ -v -s --ref-suffix _fixed_ref          # fixed reference variant
+```
+
+CI (`.github/workflows/test.yml`) runs the full chain — Julia simulation (Nz=512) → post-processing (both reference variants in parallel) → pytest → animation — on push to `main` and on PR comments starting with `test`.
 
 ## Logs
 
