@@ -31,8 +31,8 @@ filter_widths = (1, 7)
 ω_timeseries = FieldTimeSeries(plot_filepath, "ω", architecture=CPU()) |> x -> on_architecture(CPU(), x)
 b_timeseries = FieldTimeSeries(plot_filepath, "b", architecture=CPU()) |> x -> on_architecture(CPU(), x)
 S_timeseries = FieldTimeSeries(plot_filepath, "S", architecture=CPU()) |> x -> on_architecture(CPU(), x)
-bσ1_timeseries = FieldTimeSeries(plot_filepath, "b_σ1", architecture=CPU()) |> x -> on_architecture(CPU(), x)
-bσ7_timeseries = FieldTimeSeries(plot_filepath, "b_σ7", architecture=CPU()) |> x -> on_architecture(CPU(), x)
+bℓ1_timeseries = FieldTimeSeries(plot_filepath, "b_ℓ1", architecture=CPU()) |> x -> on_architecture(CPU(), x)
+bℓ7_timeseries = FieldTimeSeries(plot_filepath, "b_ℓ7", architecture=CPU()) |> x -> on_architecture(CPU(), x)
 
 times = ω_timeseries.times
 #---
@@ -43,8 +43,8 @@ n = Observable(1)
 ωₙ   = @lift view(ω_timeseries[$n], :, 1, :)
 bₙ   = @lift view(b_timeseries[$n], :, 1, :)
 Sₙ   = @lift view(S_timeseries[$n], :, 1, :)
-bσ1ₙ = @lift view(bσ1_timeseries[$n], :, 1, :)
-bσ7ₙ = @lift view(bσ7_timeseries[$n], :, 1, :)
+bℓ1ₙ = @lift view(bℓ1_timeseries[$n], :, 1, :)
+bℓ7ₙ = @lift view(bℓ7_timeseries[$n], :, 1, :)
 
 fig = Figure(size=(1200, 900))
 
@@ -68,12 +68,12 @@ Colorbar(fig[2, 4], hm_b)
 hm_S = heatmap!(ax_S, Sₙ; colormap=:thermal)
 Colorbar(fig[2, 6], hm_S)
 
-ax_bf1 = Axis(fig[3, 1]; title="Filtered b (σ = 1)", kwargs...)
-hm_bf1 = heatmap!(ax_bf1, bσ1ₙ; colormap=:balance, colorrange=b_crange)
+ax_bf1 = Axis(fig[3, 1]; title="Filtered b (ℓ = 1)", kwargs...)
+hm_bf1 = heatmap!(ax_bf1, bℓ1ₙ; colormap=:balance, colorrange=b_crange)
 Colorbar(fig[3, 2], hm_bf1)
 
-ax_bf7 = Axis(fig[3, 3]; title="Filtered b (σ = 7)", kwargs...)
-hm_bf7 = heatmap!(ax_bf7, bσ7ₙ; colormap=:balance, colorrange=b_crange)
+ax_bf7 = Axis(fig[3, 3]; title="Filtered b (ℓ = 7)", kwargs...)
+hm_bf7 = heatmap!(ax_bf7, bℓ7ₙ; colormap=:balance, colorrange=b_crange)
 Colorbar(fig[3, 4], hm_bf7)
 #---
 

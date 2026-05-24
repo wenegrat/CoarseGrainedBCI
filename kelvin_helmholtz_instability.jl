@@ -18,7 +18,7 @@ let s = ArgParseSettings()
             help = "Number of vertical grid points (default: 512 on CPU, 4096 on GPU)"
             arg_type = Int
             required = false
-            default = has_cuda_gpu() ? 4096 : 512
+            default = has_cuda_gpu() ? 4096 : 256
 
         "--U"
             help = "Velocity profile amplitude U₀ (default: 1.0)"
@@ -212,9 +212,11 @@ PE = Integral(pe)
 vorticity = Field(∂z(u) - ∂x(w))
 
 #+++ Gaussian-filtered u, v, w, b at multiple filter scales for subfilter-scale analysis
-filter_widths = (1, 7)
+# ℓ is the FWHM of the Gaussian kernel; σ = ℓ / (2√(2 ln 2)) is the std dev passed to GaussianFilter
+filter_ℓs = (1, 7)
+_FWHM_to_σ(ℓ) = ℓ / (2 * sqrt(2 * log(2)))
 _fields = (u=u_center, v=v_center, w=w_center, b=b)
-_filt_pairs = [Symbol("$(n)_σ$(σ)") => GaussianFilter(f; dims=(1, 3), σ=σ) for σ in filter_widths for (n, f) in pairs(_fields)]
+_filt_pairs = [Symbol("$(n)_ℓ$(ℓ)") => GaussianFilter(f; dims=(1, 3), σ=_FWHM_to_σ(ℓ)) for ℓ in filter_ℓs for (n, f) in pairs(_fields)]
 filtered_fields = (; _filt_pairs...)
 #---
 
