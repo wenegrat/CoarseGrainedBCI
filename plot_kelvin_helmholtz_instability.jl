@@ -46,35 +46,35 @@ Sₙ   = @lift view(S_timeseries[$n], :, 1, :)
 bσ1ₙ = @lift view(bσ1_timeseries[$n], :, 1, :)
 bσ7ₙ = @lift view(bσ7_timeseries[$n], :, 1, :)
 
-fig = Figure(size=(2000, 500))
+fig = Figure(size=(1200, 900))
 
 params_str = @sprintf("Re = %d,  Ri = %.2f,  Pr = %d", Re, Ri, Pr)
 title = @lift @sprintf("Kelvin-Helmholtz Instability  (%s)\nt = %.1f", params_str, times[$n])
-fig[1, 1:10] = Label(fig, title, fontsize=20, tellwidth=false, justification=:center)
+fig[1, 1:6] = Label(fig, title, fontsize=20, tellwidth=false, justification=:center)
 
 kwargs = (xlabel="x", ylabel="z", aspect=1)
 
 ax_ω = Axis(fig[2, 1]; title="Vorticity", kwargs...)
 ax_b = Axis(fig[2, 3]; title="Buoyancy", kwargs...)
 ax_S = Axis(fig[2, 5]; title="Strain rate (S)", kwargs...)
+b_crange = (-0.1, 0.1)
 
 hm_ω = heatmap!(ax_ω, ωₙ; colormap=:balance, colorrange=(-1, 1))
 Colorbar(fig[2, 2], hm_ω)
 
-hm_b = heatmap!(ax_b, bₙ; colormap=:balance, colorrange=(-0.08, 0.08))
+hm_b = heatmap!(ax_b, bₙ; colormap=:balance, colorrange=b_crange)
 Colorbar(fig[2, 4], hm_b)
 
 hm_S = heatmap!(ax_S, Sₙ; colormap=:thermal)
 Colorbar(fig[2, 6], hm_S)
 
-b_crange = (-0.08, 0.08)
-ax_bf1 = Axis(fig[2, 7]; title="Filtered b (σ = 1)", kwargs...)
+ax_bf1 = Axis(fig[3, 1]; title="Filtered b (σ = 1)", kwargs...)
 hm_bf1 = heatmap!(ax_bf1, bσ1ₙ; colormap=:balance, colorrange=b_crange)
-Colorbar(fig[2, 8], hm_bf1)
+Colorbar(fig[3, 2], hm_bf1)
 
-ax_bf7 = Axis(fig[2, 9]; title="Filtered b (σ = 7)", kwargs...)
+ax_bf7 = Axis(fig[3, 3]; title="Filtered b (σ = 7)", kwargs...)
 hm_bf7 = heatmap!(ax_bf7, bσ7ₙ; colormap=:balance, colorrange=b_crange)
-Colorbar(fig[2, 10], hm_bf7)
+Colorbar(fig[3, 4], hm_bf7)
 #---
 
 #+++ Record animation
