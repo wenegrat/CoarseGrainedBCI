@@ -5,7 +5,7 @@ using Printf
 using ArgParse
 using CUDA: has_cuda_gpu
 using Oceananigans.Architectures: on_architecture
-using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation, FlowDiagnostics, GaussianFilter
+using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation, FlowDiagnostics, GaussianFilter, StrainRateTensor
 using Oceanostics.ProgressMessengers
 @info "Finished loading packages"
 
@@ -220,7 +220,63 @@ _filt_pairs = [Symbol("$(n)_ℓ$(ℓ)") => GaussianFilter(f; dims=(1, 3), σ=_FW
 filtered_fields = (; _filt_pairs...)
 #---
 
-outputs = (; ω=vorticity, b, pe, PE, u=u_center, v=v_center, w=w_center, filtered_fields..., ε̄, ε, Ri=Ri_field, S=S_field)
+#+++ Online cross-scale KE transfer Πₖ = -τⁱʲ S̄ⁱʲ  (mirrors offline postprocessing/03_energy_transfer.py)
+# Cross-scale (subfilter → resolved) kinetic-energy flux of Aluie et al. (2018, JPO), Eq. (7):
+#
+#     Πₖ = -τⁱʲ S̄ⁱʲ ,   τⁱʲ = filter(uⁱuʲ) - ūⁱ ūʲ ,   S̄ⁱʲ = ½(∂ūⁱ/∂xʲ + ∂ūʲ/∂xⁱ)
+#
+# τⁱʲ is the sub-filter stress tensor (built here from filtered velocity products) and S̄ⁱʲ the
+# strain rate of the filtered velocity (from Oceanostics' StrainRateTensor). The Gaussian filter
+# (FWHM = ℓ, in x and z) is configured to reproduce the offline post-processing filter: periodic in
+# x, edge-extended in the bounded z (offline `mode="nearest"`), and truncated at 4σ (see below). The
+# runs are 2D in x–z (v ≡ 0), so only the i,j ∈ {1,3} components survive — matching the offline
+# calculation, which omits ρ₀ (Πₖ is per unit mass, units m² s⁻³). Πₖ > 0 is forward (downscale)
+# transfer.
+function cross_scale_ke_flux(model, ℓ; boundary=:edge, truncate=4)
+    grid = model.grid
+    u, v, w = model.velocities
+    σ = _FWHM_to_σ(ℓ)
+    # Match scipy.ndimage.gaussian_filter1d's stencil radius (= ⌊truncate·σ/Δ + ½⌋ cells) in each
+    # direction. The offline filter (scipy, default truncate=4) keeps the Gaussian out to 4σ, whereas
+    # Oceanostics' GaussianFilter truncates at only 2σ by default; with the radius matched the two
+    # kernels are identical (same exp(-Δi²/2σ²) weights, same normalization), so the online and
+    # offline Πₖ agree up to the strain-operator discretization, which vanishes with resolution.
+    radius(Δ) = max(1, floor(Int, truncate * σ / Δ + 0.5))
+    N = (2radius(minimum_xspacing(grid)) + 1, 2radius(minimum_zspacing(grid)) + 1)
+    filt(ψ) = GaussianFilter(ψ; dims=(1, 3), σ, boundary, N)
+
+    # Filtered velocities ūⁱ at their native staggered locations → valid input for StrainRateTensor
+    ū = Field(filt(u)); v̄ = Field(filt(v)); w̄ = Field(filt(w))
+    S̄ = StrainRateTensor(grid, ū, v̄, w̄)  # S̄ⁱʲ of the filtered velocity (only S₁₁, S₃₃, S₁₃ are used)
+
+    # Sub-filter stress τⁱʲ = filter(uⁱuʲ) - ūⁱūʲ, built at cell centers (cf. the spatial_filtering
+    # example in Oceanostics). Products of the full velocity are filtered; the ūⁱūʲ term reuses the
+    # filtered velocities above, interpolated to centers.
+    uᶜ = @at (Center, Center, Center) u
+    wᶜ = @at (Center, Center, Center) w
+    filter_uu = Field(filt(Field(uᶜ * uᶜ)))
+    filter_uw = Field(filt(Field(uᶜ * wᶜ)))
+    filter_ww = Field(filt(Field(wᶜ * wᶜ)))
+
+    ūᶜ = @at (Center, Center, Center) ū
+    w̄ᶜ = @at (Center, Center, Center) w̄
+    τ₁₁ = filter_uu - ūᶜ * ūᶜ
+    τ₃₃ = filter_ww - w̄ᶜ * w̄ᶜ
+    τ₁₃ = filter_uw - ūᶜ * w̄ᶜ
+
+    # Double contraction τⁱʲ S̄ⁱʲ at cell centers (off-diagonal counted twice). S̄₁₃ lives at
+    # (Face, Center, Face); interpolate it to centers to co-locate with τ₁₃.
+    S̄₁₃ᶜ = @at (Center, Center, Center) S̄.S₁₃
+    return -(τ₁₁ * S̄.S₁₁ + τ₃₃ * S̄.S₃₃ + 2 * τ₁₃ * S̄₁₃ᶜ)
+end
+
+_Πₖ_ops   = [ℓ => cross_scale_ke_flux(model, ℓ) for ℓ in filter_ℓs]
+_Πₖ_pairs = vcat([Symbol("Π_K_ℓ$(ℓ)")     => Πₖ           for (ℓ, Πₖ) in _Πₖ_ops],
+                 [Symbol("Π_K_ℓ$(ℓ)_int") => Integral(Πₖ) for (ℓ, Πₖ) in _Πₖ_ops])
+ke_transfer_fields = (; _Πₖ_pairs...)
+#---
+
+outputs = (; ω=vorticity, b, pe, PE, u=u_center, v=v_center, w=w_center, filtered_fields..., ke_transfer_fields..., ε̄, ε, Ri=Ri_field, S=S_field)
 
 using NCDatasets
 simulation_name = "khi_Nz$(params.Nz)_Ri$(@sprintf("%.2f", params.Ri))"
