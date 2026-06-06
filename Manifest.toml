@@ -401,9 +401,9 @@ version = "1.6.6"
 
 [[deps.DiskArrays]]
 deps = ["ConstructionBase", "LRUCache", "Mmap", "OffsetArrays"]
-git-tree-sha1 = "ead53bf0bbcd2e487495b2462feaa6043c4bc8c1"
+git-tree-sha1 = "7821ce71d0b9c2948ab80f86237f1f4212dca861"
 uuid = "3c3547ce-8d99-4f5e-a174-61eb10b00ae3"
-version = "0.4.20"
+version = "0.4.21"
 
 [[deps.Distances]]
 deps = ["LinearAlgebra", "Statistics", "StatsAPI"]
@@ -648,9 +648,9 @@ version = "0.2.0"
 
 [[deps.GPUCompiler]]
 deps = ["ExprTools", "InteractiveUtils", "LLVM", "Libdl", "Logging", "PrecompileTools", "Preferences", "Scratch", "Serialization", "TOML", "Tracy", "UUIDs"]
-git-tree-sha1 = "ab3559d3a3e1880269b21c3278984136fd9f3dd8"
+git-tree-sha1 = "b863a2e71f89328e2af69069490aec2448106e59"
 uuid = "61eb1bfa-7361-4325-ad38-22787b887f55"
-version = "1.17.0"
+version = "1.17.1"
 
     [deps.GPUCompiler.weakdeps]
     LLVMDowngrader_jll = "f52de702-fb25-5922-94ba-81dd59b07444"
@@ -1349,7 +1349,7 @@ version = "0.110.1"
 
 [[deps.Oceanostics]]
 deps = ["Crayons", "DocStringExtensions", "Oceananigans", "Printf", "SeawaterPolynomials"]
-git-tree-sha1 = "4a96481bb701d268b6e053b6611f393f87174123"
+git-tree-sha1 = "1fe938b567e25871823377920a8ccac7ad56e421"
 repo-rev = "tc/strain-tensor"
 repo-url = "https://github.com/tomchor/Oceanostics.jl.git"
 uuid = "d0ccf422-c8fb-49b5-a76d-74acdde946ac"

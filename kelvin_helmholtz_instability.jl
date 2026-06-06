@@ -61,9 +61,16 @@ let s = ArgParseSettings()
             arg_type = Float64
             required = false
             default = 0.05
+
+        "--save_tensors"
+            help = "Also output the strain-rate (S̄ⁱʲ) and sub-filter stress (τⁱʲ) tensor components at each filter scale (for online-vs-offline validation). These are full 3D fields, so off by default to keep production output lean."
+            action = :store_true
     end
     global parsed_args = parse_args(s, as_symbols=true)
 end
+# Keep the save_tensors control flag out of `params` (it is a Bool, which NetCDF can't store as a
+# global attribute, and it is not a physical parameter).
+save_tensors = pop!(parsed_args, :save_tensors)
 params = (; parsed_args...)
 #---
 
@@ -249,7 +256,10 @@ function sfs_stress_tensor(filt, u, w, ū, w̄)
     return (; τ₁₁, τ₃₃, τ₁₃)
 end
 
-function cross_scale_ke_flux(model, ℓ; boundary=:edge, truncate=4)
+# Full set of cross-scale KE diagnostics at filter scale ℓ, all from one set of filtered velocities:
+# the flux Πₖ, the strain rate tensor S̄ⁱʲ, and the sub-filter stress tensor τⁱʲ (all co-located at
+# cell centers). Returns named operations ready for output.
+function ke_cross_scale_diagnostics(model, ℓ; boundary=:edge, truncate=4)
     grid = model.grid
     u, v, w = model.velocities
     σ = _FWHM_to_σ(ℓ)
@@ -257,27 +267,47 @@ function cross_scale_ke_flux(model, ℓ; boundary=:edge, truncate=4)
     # direction. The offline filter (scipy, default truncate=4) keeps the Gaussian out to 4σ, whereas
     # Oceanostics' GaussianFilter truncates at only 2σ by default; with the radius matched the two
     # kernels are identical (same exp(-Δi²/2σ²) weights, same normalization), so the online and
-    # offline Πₖ agree up to the strain-operator discretization, which vanishes with resolution.
+    # offline diagnostics agree up to the strain-operator discretization, which vanishes with resolution.
     radius(Δ) = max(1, floor(Int, truncate * σ / Δ + 0.5))
     N = (2radius(minimum_xspacing(grid)) + 1, 2radius(minimum_zspacing(grid)) + 1)
     filt(ψ) = GaussianFilter(ψ; dims=(1, 3), σ, boundary, N)
 
-    # Filter the velocities once at their native staggered locations; both tensors below reuse them.
-    ū = Field(filt(u)); v̄ = Field(filt(v)); w̄ = Field(filt(w))
+    # Filter u and w at their native staggered locations (the x–z tensors don't need v̄); both
+    # tensors below reuse them.
+    ū = Field(filt(u)); w̄ = Field(filt(w))
 
-    # Compute the strain rate tensor and the sub-filter stress tensor separately ...
-    S̄ = StrainRateTensor(grid, ū, v̄, w̄)     # S̄ⁱʲ of the filtered velocity (only S₁₁, S₃₃, S₁₃ used)
-    τ = sfs_stress_tensor(filt, u, w, ū, w̄)  # τⁱʲ from the filtered velocity products
+    # Strain rate tensor and sub-filter stress tensor, each computed separately. dims=(1, 3) keeps
+    # only the x–z components we use (S₁₁, S₃₃, S₁₃), skipping the v-dependent S₂₂, S₁₂, S₂₃ — so v
+    # is unused here and passed unfiltered. S̄₁₃ lives at (Face, Center, Face); interpolate it to
+    # centers to co-locate with τ₁₃.
+    S̄ = StrainRateTensor(grid, ū, v, w̄; dims=(1, 3))
+    τ = sfs_stress_tensor(filt, u, w, ū, w̄)
+    S11 = S̄.S₁₁; S33 = S̄.S₃₃; S13 = @at (Center, Center, Center) S̄.S₁₃
 
-    # ... then contract: Πₖ = -τⁱʲ S̄ⁱʲ at cell centers (off-diagonal counted twice). S̄₁₃ lives at
-    # (Face, Center, Face), so co-locate it at centers to meet τ₁₃.
-    S̄₁₃ᶜ = @at (Center, Center, Center) S̄.S₁₃
-    return -(τ.τ₁₁ * S̄.S₁₁ + τ.τ₃₃ * S̄.S₃₃ + 2 * τ.τ₁₃ * S̄₁₃ᶜ)
+    # ... then contract: Πₖ = -τⁱʲ S̄ⁱʲ at cell centers (off-diagonal counted twice).
+    Πₖ = -(τ.τ₁₁ * S11 + τ.τ₃₃ * S33 + 2 * τ.τ₁₃ * S13)
+    return (; Πₖ, S11, S33, S13, τ11=τ.τ₁₁, τ33=τ.τ₃₃, τ13=τ.τ₁₃)
 end
 
-_Πₖ_ops   = [ℓ => cross_scale_ke_flux(model, ℓ) for ℓ in filter_ℓs]
-_Πₖ_pairs = vcat([Symbol("Π_K_ℓ$(ℓ)")     => Πₖ           for (ℓ, Πₖ) in _Πₖ_ops],
-                 [Symbol("Π_K_ℓ$(ℓ)_int") => Integral(Πₖ) for (ℓ, Πₖ) in _Πₖ_ops])
+# Cross-scale KE flux only (the contraction Πₖ = -τⁱʲ S̄ⁱʲ).
+cross_scale_ke_flux(model, ℓ; kwargs...) = ke_cross_scale_diagnostics(model, ℓ; kwargs...).Πₖ
+
+_diags = [ℓ => ke_cross_scale_diagnostics(model, ℓ) for ℓ in filter_ℓs]
+_Πₖ_pairs = vcat([Symbol("Π_K_ℓ$(ℓ)")     => d.Πₖ            for (ℓ, d) in _diags],
+                 [Symbol("Π_K_ℓ$(ℓ)_int") => Integral(d.Πₖ) for (ℓ, d) in _diags])
+
+# Optionally also output the individual strain-rate (S̄ⁱʲ) and sub-filter stress (τⁱʲ) tensor
+# components per scale, for validating the online tensors against the offline post-processing.
+# These are full 3D fields, so they are gated behind --save_tensors to keep production output lean.
+if save_tensors
+    _Πₖ_pairs = vcat(_Πₖ_pairs,
+                     [Symbol("S11_ℓ$(ℓ)")   => d.S11 for (ℓ, d) in _diags],
+                     [Symbol("S33_ℓ$(ℓ)")   => d.S33 for (ℓ, d) in _diags],
+                     [Symbol("S13_ℓ$(ℓ)")   => d.S13 for (ℓ, d) in _diags],
+                     [Symbol("tau11_ℓ$(ℓ)") => d.τ11 for (ℓ, d) in _diags],
+                     [Symbol("tau33_ℓ$(ℓ)") => d.τ33 for (ℓ, d) in _diags],
+                     [Symbol("tau13_ℓ$(ℓ)") => d.τ13 for (ℓ, d) in _diags])
+end
 ke_transfer_fields = (; _Πₖ_pairs...)
 #---
 
