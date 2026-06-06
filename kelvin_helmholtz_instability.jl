@@ -5,7 +5,7 @@ using Printf
 using ArgParse
 using CUDA: has_cuda_gpu
 using Oceananigans.Architectures: on_architecture
-using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation, FlowDiagnostics, GaussianFilter, StrainRateTensor
+using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation, FlowDiagnostics, GaussianFilter, StrainRateTensor, StressTensor
 using Oceanostics.ProgressMessengers
 @info "Finished loading packages"
 
@@ -233,26 +233,26 @@ filtered_fields = (; _filt_pairs...)
 #     Πₖ = -τⁱʲ S̄ⁱʲ ,   τⁱʲ = filter(uⁱuʲ) - ūⁱ ūʲ ,   S̄ⁱʲ = ½(∂ūⁱ/∂xʲ + ∂ūʲ/∂xⁱ)
 #
 # The sub-filter stress tensor τⁱʲ and the resolved-scale strain rate tensor S̄ⁱʲ are each computed
-# on their own (the latter via Oceanostics' StrainRateTensor) and only then contracted into Πₖ. The
+# on their own (via Oceanostics' StressTensor and StrainRateTensor) and only then contracted into Πₖ. The
 # Gaussian filter (FWHM = ℓ, in x and z) reproduces the offline post-processing filter: periodic in
 # x, edge-extended in the bounded z (offline `mode="nearest"`), and truncated at 4σ (see below). The
 # runs are 2D in x–z (v ≡ 0), so only the i,j ∈ {1,3} components survive — matching the offline
 # calculation, which omits ρ₀ (Πₖ is per unit mass, units m² s⁻³). Πₖ > 0 is forward (downscale)
 # transfer.
 
-# Sub-filter stress tensor τⁱʲ = filter(uⁱuʲ) - ūⁱ ūʲ at cell centers (i,j ∈ {1,3}), mirroring
-# calculate_sfs_stress_tensor in postprocessing/src/aux02_ke_functions.py. `filt` is the Gaussian
-# filter; `u, w` the full velocities; `ū, w̄` their filtered counterparts (passed in so they are
-# filtered only once, shared with the strain-rate tensor). Returns the NamedTuple (; τ₁₁, τ₃₃, τ₁₃).
-function sfs_stress_tensor(filt, u, w, ū, w̄)
-    uᶜ = @at (Center, Center, Center) u
-    wᶜ = @at (Center, Center, Center) w
-    ūᶜ = @at (Center, Center, Center) ū
-    w̄ᶜ = @at (Center, Center, Center) w̄
+# Sub-filter stress tensor τ̄ⁱʲ = filter(uⁱuʲ) - ūⁱ ūʲ (i,j ∈ {1,3}), mirroring calculate_sfs_stress_tensor
+# in postprocessing/src/aux02_ke_functions.py. Oceanostics' StressTensor builds the momentum-flux
+# tensor uⁱuʲ; we filter that and subtract the same tensor formed from the filtered velocity. With
+# dims=(1, 3) only the x–z components are built (v is unused). τ̄₁₃ lives at (Face, Center, Face) — like
+# StrainRateTensor's S̄₁₃ — and is interpolated to centers to co-locate with the others and the offline.
+function sfs_stress_tensor(filt, grid, u, v, w, ū, w̄)
+    flux_full = StressTensor(grid, u, v, w; dims=(1, 3))   # uⁱuʲ (momentum flux of the full velocity)
+    flux_filt = StressTensor(grid, ū, v, w̄; dims=(1, 3))   # ūⁱūʲ (momentum flux of the filtered velocity)
+    subfilter(full, coarse) = Field(filt(Field(full))) - coarse   # filter(uⁱuʲ) - ūⁱūʲ
 
-    τ₁₁ = Field(filt(Field(uᶜ * uᶜ))) - ūᶜ * ūᶜ
-    τ₃₃ = Field(filt(Field(wᶜ * wᶜ))) - w̄ᶜ * w̄ᶜ
-    τ₁₃ = Field(filt(Field(uᶜ * wᶜ))) - ūᶜ * w̄ᶜ
+    τ₁₁ = subfilter(flux_full.τ₁₁, flux_filt.τ₁₁)
+    τ₃₃ = subfilter(flux_full.τ₃₃, flux_filt.τ₃₃)
+    τ₁₃ = @at (Center, Center, Center) subfilter(flux_full.τ₁₃, flux_filt.τ₁₃)
     return (; τ₁₁, τ₃₃, τ₁₃)
 end
 
@@ -281,7 +281,7 @@ function ke_cross_scale_diagnostics(model, ℓ; boundary=:edge, truncate=4)
     # is unused here and passed unfiltered. S̄₁₃ lives at (Face, Center, Face); interpolate it to
     # centers to co-locate with τ₁₃.
     S̄ = StrainRateTensor(grid, ū, v, w̄; dims=(1, 3))
-    τ = sfs_stress_tensor(filt, u, w, ū, w̄)
+    τ = sfs_stress_tensor(filt, grid, u, v, w, ū, w̄)
     S11 = S̄.S₁₁; S33 = S̄.S₃₃; S13 = @at (Center, Center, Center) S̄.S₁₃
 
     # ... then contract: Πₖ = -τⁱʲ S̄ⁱʲ at cell centers (off-diagonal counted twice).

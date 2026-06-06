@@ -1349,8 +1349,8 @@ version = "0.110.1"
 
 [[deps.Oceanostics]]
 deps = ["Crayons", "DocStringExtensions", "Oceananigans", "Printf", "SeawaterPolynomials"]
-git-tree-sha1 = "1fe938b567e25871823377920a8ccac7ad56e421"
-repo-rev = "tc/strain-tensor"
+git-tree-sha1 = "5227812630bd889327ce1955f0e8f0a4a1d2a010"
+repo-rev = "tc/stress-tensor"
 repo-url = "https://github.com/tomchor/Oceanostics.jl.git"
 uuid = "d0ccf422-c8fb-49b5-a76d-74acdde946ac"
 version = "0.16.16"
