@@ -225,13 +225,30 @@ filtered_fields = (; _filt_pairs...)
 #
 #     Πₖ = -τⁱʲ S̄ⁱʲ ,   τⁱʲ = filter(uⁱuʲ) - ūⁱ ūʲ ,   S̄ⁱʲ = ½(∂ūⁱ/∂xʲ + ∂ūʲ/∂xⁱ)
 #
-# τⁱʲ is the sub-filter stress tensor (built here from filtered velocity products) and S̄ⁱʲ the
-# strain rate of the filtered velocity (from Oceanostics' StrainRateTensor). The Gaussian filter
-# (FWHM = ℓ, in x and z) is configured to reproduce the offline post-processing filter: periodic in
+# The sub-filter stress tensor τⁱʲ and the resolved-scale strain rate tensor S̄ⁱʲ are each computed
+# on their own (the latter via Oceanostics' StrainRateTensor) and only then contracted into Πₖ. The
+# Gaussian filter (FWHM = ℓ, in x and z) reproduces the offline post-processing filter: periodic in
 # x, edge-extended in the bounded z (offline `mode="nearest"`), and truncated at 4σ (see below). The
 # runs are 2D in x–z (v ≡ 0), so only the i,j ∈ {1,3} components survive — matching the offline
 # calculation, which omits ρ₀ (Πₖ is per unit mass, units m² s⁻³). Πₖ > 0 is forward (downscale)
 # transfer.
+
+# Sub-filter stress tensor τⁱʲ = filter(uⁱuʲ) - ūⁱ ūʲ at cell centers (i,j ∈ {1,3}), mirroring
+# calculate_sfs_stress_tensor in postprocessing/src/aux02_ke_functions.py. `filt` is the Gaussian
+# filter; `u, w` the full velocities; `ū, w̄` their filtered counterparts (passed in so they are
+# filtered only once, shared with the strain-rate tensor). Returns the NamedTuple (; τ₁₁, τ₃₃, τ₁₃).
+function sfs_stress_tensor(filt, u, w, ū, w̄)
+    uᶜ = @at (Center, Center, Center) u
+    wᶜ = @at (Center, Center, Center) w
+    ūᶜ = @at (Center, Center, Center) ū
+    w̄ᶜ = @at (Center, Center, Center) w̄
+
+    τ₁₁ = Field(filt(Field(uᶜ * uᶜ))) - ūᶜ * ūᶜ
+    τ₃₃ = Field(filt(Field(wᶜ * wᶜ))) - w̄ᶜ * w̄ᶜ
+    τ₁₃ = Field(filt(Field(uᶜ * wᶜ))) - ūᶜ * w̄ᶜ
+    return (; τ₁₁, τ₃₃, τ₁₃)
+end
+
 function cross_scale_ke_flux(model, ℓ; boundary=:edge, truncate=4)
     grid = model.grid
     u, v, w = model.velocities
@@ -245,29 +262,17 @@ function cross_scale_ke_flux(model, ℓ; boundary=:edge, truncate=4)
     N = (2radius(minimum_xspacing(grid)) + 1, 2radius(minimum_zspacing(grid)) + 1)
     filt(ψ) = GaussianFilter(ψ; dims=(1, 3), σ, boundary, N)
 
-    # Filtered velocities ūⁱ at their native staggered locations → valid input for StrainRateTensor
+    # Filter the velocities once at their native staggered locations; both tensors below reuse them.
     ū = Field(filt(u)); v̄ = Field(filt(v)); w̄ = Field(filt(w))
-    S̄ = StrainRateTensor(grid, ū, v̄, w̄)  # S̄ⁱʲ of the filtered velocity (only S₁₁, S₃₃, S₁₃ are used)
 
-    # Sub-filter stress τⁱʲ = filter(uⁱuʲ) - ūⁱūʲ, built at cell centers (cf. the spatial_filtering
-    # example in Oceanostics). Products of the full velocity are filtered; the ūⁱūʲ term reuses the
-    # filtered velocities above, interpolated to centers.
-    uᶜ = @at (Center, Center, Center) u
-    wᶜ = @at (Center, Center, Center) w
-    filter_uu = Field(filt(Field(uᶜ * uᶜ)))
-    filter_uw = Field(filt(Field(uᶜ * wᶜ)))
-    filter_ww = Field(filt(Field(wᶜ * wᶜ)))
+    # Compute the strain rate tensor and the sub-filter stress tensor separately ...
+    S̄ = StrainRateTensor(grid, ū, v̄, w̄)     # S̄ⁱʲ of the filtered velocity (only S₁₁, S₃₃, S₁₃ used)
+    τ = sfs_stress_tensor(filt, u, w, ū, w̄)  # τⁱʲ from the filtered velocity products
 
-    ūᶜ = @at (Center, Center, Center) ū
-    w̄ᶜ = @at (Center, Center, Center) w̄
-    τ₁₁ = filter_uu - ūᶜ * ūᶜ
-    τ₃₃ = filter_ww - w̄ᶜ * w̄ᶜ
-    τ₁₃ = filter_uw - ūᶜ * w̄ᶜ
-
-    # Double contraction τⁱʲ S̄ⁱʲ at cell centers (off-diagonal counted twice). S̄₁₃ lives at
-    # (Face, Center, Face); interpolate it to centers to co-locate with τ₁₃.
+    # ... then contract: Πₖ = -τⁱʲ S̄ⁱʲ at cell centers (off-diagonal counted twice). S̄₁₃ lives at
+    # (Face, Center, Face), so co-locate it at centers to meet τ₁₃.
     S̄₁₃ᶜ = @at (Center, Center, Center) S̄.S₁₃
-    return -(τ₁₁ * S̄.S₁₁ + τ₃₃ * S̄.S₃₃ + 2 * τ₁₃ * S̄₁₃ᶜ)
+    return -(τ.τ₁₁ * S̄.S₁₁ + τ.τ₃₃ * S̄.S₃₃ + 2 * τ.τ₁₃ * S̄₁₃ᶜ)
 end
 
 _Πₖ_ops   = [ℓ => cross_scale_ke_flux(model, ℓ) for ℓ in filter_ℓs]
