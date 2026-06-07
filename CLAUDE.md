@@ -8,7 +8,7 @@ KHAPE (Kelvin-Helmholtz Available Potential Energy) computes Available Potential
 1. **Julia simulation** (Oceananigans.jl on GPU) -> NetCDF output
 2. **Python post-processing** -> filter fields, sort density, compute energy transfer and SFS budgets, plot
 
-GitHub remote: `git@github.com:tomchor/APE_calculations.git`
+GitHub remote: `git@github.com:tomchor/CoarseGrainedKHAPE.git`
 
 ## Running the Code
 
