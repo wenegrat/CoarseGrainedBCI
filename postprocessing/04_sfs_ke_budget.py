@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
-from src.aux00_utils import load_dataset_and_grid, condense_uw_velocities, integrate, make_gaussian_filter, load_energy_transfer
+from src.aux00_utils import load_dataset_and_grid, condense_uw_velocities, integrate, make_gaussian_filter
 from src.aux01_pe_functions import calculate_density_fields_from_buoyancy, calculate_b_r, calculate_b_r_simple, calculate_ape_to_ke_exchange_term
 from src.aux02_ke_functions import (
     calculate_sfs_stress_tensor,
@@ -77,7 +77,11 @@ print("Done!")
 print("\n" + "="*60)
 print("Calculating budget terms for each filter scale...")
 
-energy_transfer = load_energy_transfer(filename, ref_suffix=ref_suffix)
+# Π_K is computed online by the simulation (no offline recompute). Map a filter scale to its
+# sim-output variable name, matching the Julia Symbol("Π_K_ℓ$(ℓ)"). Π_K is reference-independent,
+# so the same online field is used for both the time-varying and fixed-reference budgets.
+def online_pi_k_name(ℓ):
+    return f"Π_K_ℓ{int(ℓ)}" if float(ℓ) == int(ℓ) else f"Π_K_ℓ{ℓ}"
 
 dV = ds_full.dV
 budget_list = []
@@ -121,8 +125,14 @@ for ℓ in filter_scales:
     int_ape_to_ke_exchange = integrate(ape_to_ke_exchange.reindex(time=dKE_dt.time), dV)
     int_sfs_ke_dissipation = integrate(sfs_ke_dissipation.reindex(time=dKE_dt.time), dV)
 
-    Π_K_ℓ     = energy_transfer["Π_K"].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6)
-    int_Π_K_ℓ = energy_transfer["∫Π_K dV"].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6)
+    # Π_K from the online sim output, integrated on the budget (padded) grid so it is consistent
+    # with the other terms (the padding region is ≈0 for Π_K).
+    pi_k_name = online_pi_k_name(ℓ)
+    if pi_k_name not in ds:
+        raise KeyError(f"Online Π_K field '{pi_k_name}' not in sim output; the budget filter scales "
+                       f"must match the simulation's online filter_ℓs (got ℓ={ℓ}).")
+    Π_K_ℓ     = ds[pi_k_name]
+    int_Π_K_ℓ = integrate(Π_K_ℓ, dV)
     residual  = -int_dKE_dt + int_Π_K_ℓ.reindex(time=dKE_dt.time) + int_ape_to_ke_exchange - int_sfs_ke_dissipation
 
     budget_ℓ = xr.Dataset({

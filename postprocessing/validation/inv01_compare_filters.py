@@ -2,9 +2,11 @@
 #+++ Imports
 import logging
 import os
+import sys
 from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # postprocessing/ on path for `src.*`
 from src.aux00_utils import load_dataset_and_grid, make_gaussian_filter
 from src.aux03_plotting import run_label
 #---
@@ -21,7 +23,7 @@ parser.add_argument("--time", type=float, default=None, help="Target time for sn
 args = parser.parse_args()
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k, v in vars(args).items()) + "\n" + "="*70)
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent  # validation/ → postprocessing/ → repo root
 FIGURES = REPO_ROOT / "figures"
 FIGURES.mkdir(exist_ok=True)
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename

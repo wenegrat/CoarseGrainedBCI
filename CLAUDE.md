@@ -42,8 +42,8 @@ bash submit_sweep.sh NZ=2048 FIXED_REF=both
 ### Local post-processing (no PBS)
 ```bash
 cd postprocessing
-bash 00_get_budgets.sh output/khi_Nz512_Ri0.10.nc --filter-scales 0.8 2
-bash 00_get_budgets.sh output/khi_Nz512_Ri0.10.nc --filter-scales 0.8 2 --fixed-reference
+bash 00_get_budgets.sh output/khi_Nz512_Ri0.10.nc --filter-scales 1 7
+bash 00_get_budgets.sh output/khi_Nz512_Ri0.10.nc --filter-scales 1 7 --fixed-reference
 ```
 Set `N_WORKERS` env var to control parallelism (default 1): `N_WORKERS=4 bash 00_get_budgets.sh ...`
 
@@ -73,12 +73,14 @@ Sequential numbered scripts (01-06), each reading the previous step's output. `0
 |--------|---------|
 | `01_filter_fields.py` | Gaussian-filter velocity and buoyancy at multiple length scales |
 | `02_sort_density.py` | Sort density to compute reference state (Winters et al. 1995) |
-| `03_energy_transfer.py` | Cross-scale KE and APE transfer terms (Π_K, Π_A) |
+| `03_energy_transfer.py` | Cross-scale APE transfer Π_A and APE↔KE exchange (Π_K is computed online — see Data flow) |
 | `04_sfs_ke_budget.py` | Sub-filter-scale KE budget terms |
 | `05_sfs_ape_budget.py` | Sub-filter-scale APE budget terms |
 | `06_plot_budgets.py` | Plot budget time series |
 
 `sweep*` scripts are the sweep variant (parameter sweep over filter scales): `sweep1_filter_fields.py` filters, `sweep2_energy_transfer.py` computes transfer, `sweep3_plot_transfer_spectrum.py` plots spectra.
+
+`postprocessing/validation/` holds the online-vs-offline comparison scripts (`inv01_compare_filters.py`, `inv02_compare_ke_transfer.py`, `inv03_compare_tensor.py`): they recompute the filtered fields, Π_K, and the SFS stress/strain tensors offline and compare them against the simulation's online diagnostics. They expect a run with `--save_tensors`.
 
 Standalone visualization scripts (not part of the numbered pipeline):
 - `plot1_panels.py` -- 4-panel snapshot of local SFS budget fields
@@ -89,7 +91,7 @@ Standalone visualization scripts (not part of the numbered pipeline):
 Shared utilities:
 - `aux00_utils.py` -- data loading (`load_dataset_and_grid`), filtering (`filter_fields`, `GaussianFilter`, `DaskParallelFilter`), domain padding (`_pad_domain_in_z`), spatial derivatives (`calculate_gradient`), tensor condensing (`condense_velocities`)
 - `aux01_pe_functions.py` -- density sorting (`sorted_timeseries`), potential energy calculations (`local_potential_energies_timeseries`), APE budget terms (SFS flux tensor, cross-scale APE flux, SFS APE dissipation, reference-tendency correction R)
-- `aux02_ke_functions.py` -- SFS stress tensor, strain rate tensor, cross-scale KE flux, SFS KE dissipation, full energy transfer pipeline (`calculate_energy_transfer`)
+- `aux02_ke_functions.py` -- SFS stress tensor, strain rate tensor, cross-scale KE flux, SFS KE dissipation, full energy transfer pipeline (`calculate_energy_transfer`, with an `include_pi_k` flag to skip Π_K)
 - `aux03_plotting.py` -- plotting helpers (`budget_colors`, `run_label`, `plot_sfs_budget`)
 
 All post-processing scripts accept `--filename`, `--filter-scales`, `--n-workers`, `--fixed-reference` via argparse. Output goes to `postprocessing/output/`.
@@ -97,6 +99,8 @@ All post-processing scripts accept `--filename`, `--filter-scales`, `--n-workers
 ### Data flow between pipeline steps
 
 The sorted density (`*_sorted_density.nc`) produced by step 02 is reused by steps 03, 05, and the sweep pipeline (`sweep2_energy_transfer.py`), avoiding redundant sorts. When `--fixed-reference` is used, output files are suffixed `_fixed_ref`. The sweep's `sweep2_energy_transfer.py` with `--fixed-reference` expects the sorted density from the budget pipeline's step 02 to already exist.
+
+The cross-scale KE transfer **Π_K is computed online** by the Julia simulation (`kelvin_helmholtz_instability.jl`, output as `Π_K_ℓ<ℓ>`). To avoid recomputing it offline, `03_energy_transfer.py` runs with `include_pi_k=False` (Π_A + exchange only) and `04_sfs_ke_budget.py` reads Π_K directly from the simulation output. The budget filter scales must therefore match the simulation's online `filter_ℓs` (default `(1, 7)`); the offline-recompute path is kept under `validation/` for cross-checking.
 
 ### Julia layer
 - `kelvin_helmholtz_instability.jl` -- main simulation (Oceananigans.jl, WENO(5), adaptive timestep)
