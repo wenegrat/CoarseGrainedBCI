@@ -8,7 +8,7 @@ KHAPE (Kelvin-Helmholtz Available Potential Energy) computes Available Potential
 1. **Julia simulation** (Oceananigans.jl on GPU) -> NetCDF output
 2. **Python post-processing** -> filter fields, sort density, compute energy transfer and SFS budgets, plot
 
-GitHub remote: `git@github.com:tomchor/APE_calculations.git`
+GitHub remote: `git@github.com:tomchor/CoarseGrainedKHAPE.git`
 
 ## Running the Code
 
@@ -25,7 +25,7 @@ bash submit_simulation.sh NZ=2048
 ```
 Account: `UMCP0028`, queue: `casper`, 1x A100, 8 cores, 64 GB RAM.
 
-The Julia simulation accepts CLI args: `--Nz`, `--Ri`, `--stop_time`, `--Re0`, `--Pr`, `--U`. For local CPU development:
+The Julia simulation accepts CLI args: `--Nz`, `--Ri`, `--stop_time`, `--Re0`, `--Pr`, `--U`, `--h`, `--perturbation_amplitude`, and `--save_tensors` (flag; also writes the per-scale strain/stress tensor components for online-vs-offline validation). For local CPU development:
 ```bash
 julia --project -t 8 kelvin_helmholtz_instability.jl
 julia --project -t 8 kelvin_helmholtz_instability.jl --Nz 512 --Ri 0.1 --stop_time 70 --Re0 1e-3
@@ -42,8 +42,8 @@ bash submit_sweep.sh NZ=2048 FIXED_REF=both
 ### Local post-processing (no PBS)
 ```bash
 cd postprocessing
-bash 00_get_budgets.sh output/khi_Nz512_Ri0.10.nc --filter-scales 0.8 2
-bash 00_get_budgets.sh output/khi_Nz512_Ri0.10.nc --filter-scales 0.8 2 --fixed-reference
+bash 00_get_budgets.sh output/khi_Nz512_Ri0.10.nc --filter-scales 1 7
+bash 00_get_budgets.sh output/khi_Nz512_Ri0.10.nc --filter-scales 1 7 --fixed-reference
 ```
 Set `N_WORKERS` env var to control parallelism (default 1): `N_WORKERS=4 bash 00_get_budgets.sh ...`
 
@@ -51,8 +51,10 @@ Set `N_WORKERS` env var to control parallelism (default 1): `N_WORKERS=4 bash 00
 ```bash
 pytest tests/ -v -s                                  # default (time-varying reference)
 pytest tests/ -v -s --ref-suffix _fixed_ref          # fixed reference variant
+pytest tests/test_gaussian_filter.py -v -s           # single file (filter unit tests, no pipeline output needed)
+pytest "tests/test_budgets.py::test_ke_budget_residual" -v -s   # single test
 ```
-Tests check SFS KE and APE budget closure: rms(residual)/min(rms(terms)) < 10%. They expect post-processing output in `postprocessing/output/` for `khi_Nz512_Ri0.10`.
+`test_budgets.py` checks SFS KE and APE budget closure (rms(residual)/min(rms(terms)) < 10%) and **requires the post-processing output** in `postprocessing/output/` for `khi_Nz512_Ri0.10` (run `00_get_budgets.sh` first; it is parametrized per filter scale via `conftest.py`). `test_filter.py` / `test_gaussian_filter.py` are self-contained unit tests of the offline `GaussianFilter` and need no pipeline output.
 
 ### CI
 GitHub Actions (`.github/workflows/test.yml`) runs on push to `main` and on PR comments starting with `test` (via `test_trigger.yml`). The CI pipeline: Julia simulation (Nz=512) -> post-processing (both reference variants in parallel) -> pytest -> animation generation. Uses `pip install -r tests/requirements.txt` (not conda).
@@ -73,12 +75,14 @@ Sequential numbered scripts (01-06), each reading the previous step's output. `0
 |--------|---------|
 | `01_filter_fields.py` | Gaussian-filter velocity and buoyancy at multiple length scales |
 | `02_sort_density.py` | Sort density to compute reference state (Winters et al. 1995) |
-| `03_energy_transfer.py` | Cross-scale KE and APE transfer terms (Π_K, Π_A) |
+| `03_energy_transfer.py` | Cross-scale APE transfer Π_A and APE↔KE exchange (Π_K is computed online — see Data flow) |
 | `04_sfs_ke_budget.py` | Sub-filter-scale KE budget terms |
 | `05_sfs_ape_budget.py` | Sub-filter-scale APE budget terms |
 | `06_plot_budgets.py` | Plot budget time series |
 
 `sweep*` scripts are the sweep variant (parameter sweep over filter scales): `sweep1_filter_fields.py` filters, `sweep2_energy_transfer.py` computes transfer, `sweep3_plot_transfer_spectrum.py` plots spectra.
+
+`postprocessing/validation/` holds the online-vs-offline comparison scripts (`inv01_compare_filters.py`, `inv02_compare_ke_transfer.py`, `inv03_compare_tensor.py`): they recompute the filtered fields, Π_K, and the SFS stress/strain tensors offline and compare them against the simulation's online diagnostics. They expect a run with `--save_tensors`.
 
 Standalone visualization scripts (not part of the numbered pipeline):
 - `plot1_panels.py` -- 4-panel snapshot of local SFS budget fields
@@ -89,7 +93,7 @@ Standalone visualization scripts (not part of the numbered pipeline):
 Shared utilities:
 - `aux00_utils.py` -- data loading (`load_dataset_and_grid`), filtering (`filter_fields`, `GaussianFilter`, `DaskParallelFilter`), domain padding (`_pad_domain_in_z`), spatial derivatives (`calculate_gradient`), tensor condensing (`condense_velocities`)
 - `aux01_pe_functions.py` -- density sorting (`sorted_timeseries`), potential energy calculations (`local_potential_energies_timeseries`), APE budget terms (SFS flux tensor, cross-scale APE flux, SFS APE dissipation, reference-tendency correction R)
-- `aux02_ke_functions.py` -- SFS stress tensor, strain rate tensor, cross-scale KE flux, SFS KE dissipation, full energy transfer pipeline (`calculate_energy_transfer`)
+- `aux02_ke_functions.py` -- SFS stress tensor, strain rate tensor, cross-scale KE flux, SFS KE dissipation, full energy transfer pipeline (`calculate_energy_transfer`, with an `include_pi_k` flag to skip Π_K)
 - `aux03_plotting.py` -- plotting helpers (`budget_colors`, `run_label`, `plot_sfs_budget`)
 
 All post-processing scripts accept `--filename`, `--filter-scales`, `--n-workers`, `--fixed-reference` via argparse. Output goes to `postprocessing/output/`.
@@ -98,12 +102,21 @@ All post-processing scripts accept `--filename`, `--filter-scales`, `--n-workers
 
 The sorted density (`*_sorted_density.nc`) produced by step 02 is reused by steps 03, 05, and the sweep pipeline (`sweep2_energy_transfer.py`), avoiding redundant sorts. When `--fixed-reference` is used, output files are suffixed `_fixed_ref`. The sweep's `sweep2_energy_transfer.py` with `--fixed-reference` expects the sorted density from the budget pipeline's step 02 to already exist.
 
+The cross-scale KE transfer **Π_K is computed online** by the Julia simulation (`kelvin_helmholtz_instability.jl`, output as `Π_K_ℓ<ℓ>`). To avoid recomputing it offline, `03_energy_transfer.py` runs with `include_pi_k=False` (Π_A + exchange only) and `04_sfs_ke_budget.py` reads Π_K directly from the simulation output. The budget filter scales must therefore match the simulation's online `filter_ℓs` (default `(1, 7)`); the offline-recompute path is kept under `validation/` for cross-checking.
+
 ### Julia layer
-- `kelvin_helmholtz_instability.jl` -- main simulation (Oceananigans.jl, WENO(5), adaptive timestep)
+- `kelvin_helmholtz_instability.jl` -- main simulation (Oceananigans.jl `NonhydrostaticModel`, `Centered(order=4)` advection, adaptive timestep via `TimeStepWizard`)
 - `utils.jl` -- `closest_factor_number()` (FFT-friendly grid sizes), `show_gpu_status()`
-- Setup: shear flow u(z)=tanh(z), stratification b(z)=Ri*tanh(z/0.25), default Ri=0.1
-- Domain: Lx=Lz=10, Ly=5 (periodic x,y; bounded z)
-- Output: `output/kelvin_helmholtz_instability_NxNyNz.nc`
+- Setup: shear flow u(z)=U·tanh(z/h), stratification b(z)=B₀·tanh(z/h) with B₀=U²·Ri/h; perturbation seeded on w. Defaults U=1, Ri=0.1, h=1
+- Domain: Lx=λ_max (the most-unstable KH wavelength ≈14.1h), Ly=λ_max/3, Lz=25h; topology (Periodic, Periodic, Bounded). `y_aspect_ratio=Inf` ⇒ **Ny=1**, so runs are effectively 2D in x–z (v ≡ 0)
+- Output: `output/khi_Nz<Nz>_Ri<Ri>.nc` (3D fields, Float64, consecutive-iteration pairs for time derivatives) and `output/khi_Nz<Nz>_Ri<Ri>_2d.nc` (x–z slice, Float32)
+
+#### Online cross-scale diagnostics
+The simulation computes, at each scale in `filter_ℓs = (1, 7)`, the sub-filter quantities the offline pipeline would otherwise recompute in Python — so they are produced once, on the GPU, and read back later (see Data flow):
+- Filtered fields (Oceanostics `GaussianFilter`), the resolved strain-rate tensor S̄ⁱʲ (`StrainRateTensor`, `dims=(1,3)`), the sub-filter stress tensor τⁱʲ = filter(uⁱuʲ) − ūⁱūʲ (from `StressTensor`), and the cross-scale KE flux Πₖ = −τⁱʲ S̄ⁱʲ. Built by `ke_cross_scale_diagnostics` / `cross_scale_ke_flux` / `sfs_stress_tensor`.
+- The Gaussian filter is configured to **match the offline filter exactly**: periodic x, edge-extended bounded z, stencil truncated at 4σ (matching scipy `gaussian_filter1d`'s default `truncate=4`; Oceanostics defaults to 2σ). Only i,j ∈ {1,3} are kept (2D x–z).
+- `Π_K_ℓ<ℓ>` (and its volume integral) is always written; the individual S̄/τ components (`S11/S33/S13_ℓ<ℓ>`, `tau11/tau33/tau13_ℓ<ℓ>`) are gated behind `--save_tensors` and consumed only by `postprocessing/validation/`.
+- Requires the Oceanostics `tc/stress-tensor` branch (PR #245), pinned via `repo-rev` in `Manifest.toml`, which provides `GaussianFilter`, `StrainRateTensor`, and `StressTensor`.
 
 ### Key dependencies
 - **Python**: `numpy`, `xarray`, `scipy`, `matplotlib`, `dask`, `gcm_filters`, `netcdf4`

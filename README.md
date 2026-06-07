@@ -123,8 +123,8 @@ julia --project -t 8 kelvin_helmholtz_instability.jl --Nz 512 --Ri 0.1 --stop_ti
 
 # Numbered post-processing pipeline (01–06) on an existing NetCDF file
 cd postprocessing
-bash 00_get_budgets.sh output/khi_Nz512_Ri0.10.nc --filter-scales 0.8 2
-bash 00_get_budgets.sh output/khi_Nz512_Ri0.10.nc --filter-scales 0.8 2 --fixed-reference
+bash 00_get_budgets.sh output/khi_Nz512_Ri0.10.nc --filter-scales 1 7
+bash 00_get_budgets.sh output/khi_Nz512_Ri0.10.nc --filter-scales 1 7 --fixed-reference
 
 # Sweep pipeline (sweep1–sweep3)
 bash inv00_get_sweep.sh output/khi_Nz512_Ri0.10.nc
