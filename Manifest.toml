@@ -1349,9 +1349,11 @@ version = "0.110.1"
 
 [[deps.Oceanostics]]
 deps = ["Crayons", "DocStringExtensions", "Oceananigans", "Printf", "SeawaterPolynomials"]
-git-tree-sha1 = "922dfa81ddafa80cfccebe65e985900fe0b845ec"
+git-tree-sha1 = "281702c51716ad1c6d9fa9c9aee8a3b754f22911"
+repo-rev = "coarse-grained-ke-equation"
+repo-url = "https://github.com/tomchor/Oceanostics.jl.git"
 uuid = "d0ccf422-c8fb-49b5-a76d-74acdde946ac"
-version = "0.16.17"
+version = "0.17.0"
 
 [[deps.OffsetArrays]]
 git-tree-sha1 = "117432e406b5c023f665fa73dc26e79ec3630151"

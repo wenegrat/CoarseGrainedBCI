@@ -5,7 +5,7 @@ using Printf
 using ArgParse
 using CUDA: has_cuda_gpu
 using Oceananigans.Architectures: on_architecture
-using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation, FlowDiagnostics, GaussianFilter, StrainRateTensor, StressTensor
+using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation, FlowDiagnostics, GaussianFilter, StrainRateTensor, SubfilterStressTensor, CrossScaleKineticEnergyFlux
 using Oceanostics.ProgressMessengers
 @info "Finished loading packages"
 
@@ -227,88 +227,39 @@ _filt_pairs = [Symbol("$(n)_ℓ$(ℓ)") => GaussianFilter(f; dims=(1, 3), σ=_FW
 filtered_fields = (; _filt_pairs...)
 #---
 
-#+++ Online cross-scale KE transfer Πₖ = -τⁱʲ S̄ⁱʲ  (mirrors offline postprocessing/03_energy_transfer.py)
-# Cross-scale (subfilter → resolved) kinetic-energy flux of Aluie et al. (2018, JPO), Eq. (7):
-#
-#     Πₖ = -τⁱʲ S̄ⁱʲ ,   τⁱʲ = filter(uⁱuʲ) - ūⁱ ūʲ ,   S̄ⁱʲ = ½(∂ūⁱ/∂xʲ + ∂ūʲ/∂xⁱ)
-#
-# The sub-filter stress tensor τⁱʲ and the resolved-scale strain rate tensor S̄ⁱʲ are each computed
-# on their own (via Oceanostics' StressTensor and StrainRateTensor) and only then contracted into Πₖ. The
-# Gaussian filter (FWHM = ℓ, in x and z) reproduces the offline post-processing filter: periodic in
-# x, edge-extended in the bounded z (offline `mode="nearest"`), and truncated at 4σ (see below). The
-# runs are 2D in x–z (v ≡ 0), so only the i,j ∈ {1,3} components survive — matching the offline
-# calculation, which omits ρ₀ (Πₖ is per unit mass, units m² s⁻³). Πₖ > 0 is forward (downscale)
-# transfer.
+#+++ Online cross-scale KE transfer Πₖ = -τⁱʲ S̄ⁱʲ  (Oceanostics CrossScaleKineticEnergyFlux)
+# Cross-scale (subfilter → resolved) kinetic-energy flux of Aluie et al. (2018, JPO), computed by
+# Oceanostics' CrossScaleKineticEnergyFlux at each filter scale ℓ. The Gaussian filter is configured
+# to reproduce the offline post-processing filter (postprocessing/src/aux00_utils.py): periodic x,
+# edge-extended bounded z, and a stencil truncated at 4σ (scipy gaussian_filter1d's default;
+# Oceanostics would otherwise truncate at 2σ). The runs are 2D in x–z (v ≡ 0) so dims=(1, 3); Πₖ is
+# per unit mass (m² s⁻³, no ρ₀) and Πₖ > 0 is forward (downscale) transfer.
+to_center(ψ) = @at (Center, Center, Center) ψ
 
-# Sub-filter stress tensor τ̄ⁱʲ = filter(uⁱuʲ) - ūⁱ ūʲ (i,j ∈ {1,3}), mirroring calculate_sfs_stress_tensor
-# in postprocessing/src/aux02_ke_functions.py. Oceanostics' StressTensor builds the momentum-flux
-# tensor uⁱuʲ; we filter that and subtract the same tensor formed from the filtered velocity. With
-# dims=(1, 3) only the x–z components are built (v is unused). τ̄₁₃ lives at (Face, Center, Face) — like
-# StrainRateTensor's S̄₁₃ — and is interpolated to centers to co-locate with the others and the offline.
-function sfs_stress_tensor(filt, grid, u, v, w, ū, w̄)
-    flux_full = StressTensor(grid, u, v, w; dims=(1, 3))   # uⁱuʲ (momentum flux of the full velocity)
-    flux_filt = StressTensor(grid, ū, v, w̄; dims=(1, 3))   # ūⁱūʲ (momentum flux of the filtered velocity)
-    subfilter(full, coarse) = Field(filt(Field(full))) - coarse   # filter(uⁱuʲ) - ūⁱūʲ
+# Per-direction Gaussian stencil widths matching scipy's truncate=4 (radius = ⌊4σ/Δ + ½⌋ cells).
+_filter_N(σ) = (2 * max(1, floor(Int, 4σ / minimum_xspacing(grid) + 0.5)) + 1,
+                2 * max(1, floor(Int, 4σ / minimum_zspacing(grid) + 0.5)) + 1)
 
-    τ₁₁ = subfilter(flux_full.τ₁₁, flux_filt.τ₁₁)
-    τ₃₃ = subfilter(flux_full.τ₃₃, flux_filt.τ₃₃)
-    τ₁₃ = @at (Center, Center, Center) subfilter(flux_full.τ₁₃, flux_filt.τ₁₃)
-    return (; τ₁₁, τ₃₃, τ₁₃)
+_ke_pairs = Pair{Symbol, Any}[]
+for ℓ in filter_ℓs
+    σ = _FWHM_to_σ(ℓ);  N = _filter_N(σ)
+    Πₖ = CrossScaleKineticEnergyFlux(model; σ, dims=(1, 3), boundary=:edge, N)
+    push!(_ke_pairs, Symbol("Π_K_ℓ$(ℓ)") => Πₖ, Symbol("Π_K_ℓ$(ℓ)_int") => Integral(Πₖ))
+
+    # Individual strain (S̄ⁱʲ) and sub-filter stress (τⁱʲ) components at cell centers, for the
+    # online-vs-offline validation in postprocessing/validation/. Full 3D fields → gated behind
+    # --save_tensors to keep production output lean.
+    if save_tensors
+        filt = ψ -> GaussianFilter(ψ; dims=(1, 3), σ, boundary=:edge, N)
+        ū = Field(filt(u)); w̄ = Field(filt(w))
+        S̄ = StrainRateTensor(grid, ū, v, w̄; dims=(1, 3))          # strain of the filtered velocity
+        τ = SubfilterStressTensor(model; σ, dims=(1, 3), boundary=:edge, N)  # τⁱʲ = filter(uⁱuʲ) - ūⁱūʲ
+        push!(_ke_pairs,
+              Symbol("S11_ℓ$(ℓ)")   => to_center(S̄.S₁₁), Symbol("S33_ℓ$(ℓ)")   => to_center(S̄.S₃₃), Symbol("S13_ℓ$(ℓ)")   => to_center(S̄.S₁₃),
+              Symbol("tau11_ℓ$(ℓ)") => to_center(τ.τ₁₁), Symbol("tau33_ℓ$(ℓ)") => to_center(τ.τ₃₃), Symbol("tau13_ℓ$(ℓ)") => to_center(τ.τ₁₃))
+    end
 end
-
-# Full set of cross-scale KE diagnostics at filter scale ℓ, all from one set of filtered velocities:
-# the flux Πₖ, the strain rate tensor S̄ⁱʲ, and the sub-filter stress tensor τⁱʲ (all co-located at
-# cell centers). Returns named operations ready for output.
-function ke_cross_scale_diagnostics(model, ℓ; boundary=:edge, truncate=4)
-    grid = model.grid
-    u, v, w = model.velocities
-    σ = _FWHM_to_σ(ℓ)
-    # Match scipy.ndimage.gaussian_filter1d's stencil radius (= ⌊truncate·σ/Δ + ½⌋ cells) in each
-    # direction. The offline filter (scipy, default truncate=4) keeps the Gaussian out to 4σ, whereas
-    # Oceanostics' GaussianFilter truncates at only 2σ by default; with the radius matched the two
-    # kernels are identical (same exp(-Δi²/2σ²) weights, same normalization), so the online and
-    # offline diagnostics agree up to the strain-operator discretization, which vanishes with resolution.
-    radius(Δ) = max(1, floor(Int, truncate * σ / Δ + 0.5))
-    N = (2radius(minimum_xspacing(grid)) + 1, 2radius(minimum_zspacing(grid)) + 1)
-    filt(ψ) = GaussianFilter(ψ; dims=(1, 3), σ, boundary, N)
-
-    # Filter u and w at their native staggered locations (the x–z tensors don't need v̄); both
-    # tensors below reuse them.
-    ū = Field(filt(u)); w̄ = Field(filt(w))
-
-    # Strain rate tensor and sub-filter stress tensor, each computed separately. dims=(1, 3) keeps
-    # only the x–z components we use (S₁₁, S₃₃, S₁₃), skipping the v-dependent S₂₂, S₁₂, S₂₃ — so v
-    # is unused here and passed unfiltered. S̄₁₃ lives at (Face, Center, Face); interpolate it to
-    # centers to co-locate with τ₁₃.
-    S̄ = StrainRateTensor(grid, ū, v, w̄; dims=(1, 3))
-    τ = sfs_stress_tensor(filt, grid, u, v, w, ū, w̄)
-    S11 = S̄.S₁₁; S33 = S̄.S₃₃; S13 = @at (Center, Center, Center) S̄.S₁₃
-
-    # ... then contract: Πₖ = -τⁱʲ S̄ⁱʲ at cell centers (off-diagonal counted twice).
-    Πₖ = -(τ.τ₁₁ * S11 + τ.τ₃₃ * S33 + 2 * τ.τ₁₃ * S13)
-    return (; Πₖ, S11, S33, S13, τ11=τ.τ₁₁, τ33=τ.τ₃₃, τ13=τ.τ₁₃)
-end
-
-# Cross-scale KE flux only (the contraction Πₖ = -τⁱʲ S̄ⁱʲ).
-cross_scale_ke_flux(model, ℓ; kwargs...) = ke_cross_scale_diagnostics(model, ℓ; kwargs...).Πₖ
-
-_diags = [ℓ => ke_cross_scale_diagnostics(model, ℓ) for ℓ in filter_ℓs]
-_Πₖ_pairs = vcat([Symbol("Π_K_ℓ$(ℓ)")     => d.Πₖ            for (ℓ, d) in _diags],
-                 [Symbol("Π_K_ℓ$(ℓ)_int") => Integral(d.Πₖ) for (ℓ, d) in _diags])
-
-# Optionally also output the individual strain-rate (S̄ⁱʲ) and sub-filter stress (τⁱʲ) tensor
-# components per scale, for validating the online tensors against the offline post-processing.
-# These are full 3D fields, so they are gated behind --save_tensors to keep production output lean.
-if save_tensors
-    _Πₖ_pairs = vcat(_Πₖ_pairs,
-                     [Symbol("S11_ℓ$(ℓ)")   => d.S11 for (ℓ, d) in _diags],
-                     [Symbol("S33_ℓ$(ℓ)")   => d.S33 for (ℓ, d) in _diags],
-                     [Symbol("S13_ℓ$(ℓ)")   => d.S13 for (ℓ, d) in _diags],
-                     [Symbol("tau11_ℓ$(ℓ)") => d.τ11 for (ℓ, d) in _diags],
-                     [Symbol("tau33_ℓ$(ℓ)") => d.τ33 for (ℓ, d) in _diags],
-                     [Symbol("tau13_ℓ$(ℓ)") => d.τ13 for (ℓ, d) in _diags])
-end
-ke_transfer_fields = (; _Πₖ_pairs...)
+ke_transfer_fields = (; _ke_pairs...)
 #---
 
 outputs = (; ω=vorticity, b, pe, PE, u=u_center, v=v_center, w=w_center, filtered_fields..., ke_transfer_fields..., ε̄, ε, Ri=Ri_field, S=S_field)
