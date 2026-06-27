@@ -5,7 +5,7 @@ using Printf
 using ArgParse
 using CUDA: has_cuda_gpu
 using Oceananigans.Architectures: on_architecture
-using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation, FlowDiagnostics, GaussianFilter, StrainRateTensor, SubfilterStressTensor, CrossScaleKineticEnergyFlux
+using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation, FlowDiagnostics, GaussianFilter, StrainRateTensor, SubfilterStressTensor, KineticEnergyCrossScaleFlux
 using Oceanostics.ProgressMessengers
 @info "Finished loading packages"
 
@@ -227,9 +227,9 @@ _filt_pairs = [Symbol("$(n)_ℓ$(ℓ)") => GaussianFilter(f; dims=(1, 3), σ=_FW
 filtered_fields = (; _filt_pairs...)
 #---
 
-#+++ Online cross-scale KE transfer Πₖ = -τⁱʲ S̄ⁱʲ  (Oceanostics CrossScaleKineticEnergyFlux)
+#+++ Online cross-scale KE transfer Πₖ = -τⁱʲ S̄ⁱʲ  (Oceanostics KineticEnergyCrossScaleFlux)
 # Cross-scale (subfilter → resolved) kinetic-energy flux of Aluie et al. (2018, JPO), computed by
-# Oceanostics' CrossScaleKineticEnergyFlux at each filter scale ℓ. The Gaussian filter is configured
+# Oceanostics' KineticEnergyCrossScaleFlux at each filter scale ℓ. The Gaussian filter is configured
 # to reproduce the offline post-processing filter (postprocessing/src/aux00_utils.py): periodic x,
 # edge-extended bounded z, and a stencil truncated at 4σ (scipy gaussian_filter1d's default;
 # Oceanostics would otherwise truncate at 2σ). The runs are 2D in x–z (v ≡ 0) so dims=(1, 3); Πₖ is
@@ -243,7 +243,7 @@ _filter_N(σ) = (2 * max(1, floor(Int, 4σ / minimum_xspacing(grid) + 0.5)) + 1,
 _ke_pairs = Pair{Symbol, Any}[]
 for ℓ in filter_ℓs
     σ = _FWHM_to_σ(ℓ);  N = _filter_N(σ)
-    Πₖ = CrossScaleKineticEnergyFlux(model; σ, dims=(1, 3), boundary=:edge, N)
+    Πₖ = KineticEnergyCrossScaleFlux(model; σ, dims=(1, 3), boundary=:edge, N)
     push!(_ke_pairs, Symbol("Π_K_ℓ$(ℓ)") => Πₖ, Symbol("Π_K_ℓ$(ℓ)_int") => Integral(Πₖ))
 
     # Individual strain (S̄ⁱʲ) and sub-filter stress (τⁱʲ) components at cell centers, for the
