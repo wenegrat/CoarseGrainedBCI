@@ -12,9 +12,6 @@ Oceananigans = "9e8cae18-63c1-5223-a75c-80ca9d6e9a09"
 Oceanostics = "d0ccf422-c8fb-49b5-a76d-74acdde946ac"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
-[compat]
-CUDA = "5.8.4, 6.0 - 6.1"
-
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
