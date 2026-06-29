@@ -7,8 +7,6 @@ ArgParse = "c7e460c6-2fb9-53a9-8c5b-16f535851c63"
 CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
 CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
 GLMakie = "e9467ef8-e4e7-5192-8a1a-b1aee30e663a"
-GPUArrays = "0c68f7d7-f131-5f86-a1c3-88cf8149b2d7"
-LLVM = "929cbde3-209d-540e-8aea-75f648917ca0"
 NCDatasets = "85f8d34a-cbdd-5861-8df4-14fed0d494ab"
 Oceananigans = "9e8cae18-63c1-5223-a75c-80ca9d6e9a09"
 Oceanostics = "d0ccf422-c8fb-49b5-a76d-74acdde946ac"
@@ -16,11 +14,6 @@ Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [compat]
 CUDA = "5.8.4, 6.0 - 6.1"
-# Root cause of the GPU InvalidIRError is a Julia 1.12.6 codegen regression (1.12.4 works; see simulation.pbs).
-# These two pins reproduce the last-known-working (a3981d0 / Jun-6) GPU stack as a conservative measure and
-# are likely removable now that the sim runs on Julia 1.12.4.
-GPUArrays = "=11.5.5"
-LLVM = "~9.8"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
