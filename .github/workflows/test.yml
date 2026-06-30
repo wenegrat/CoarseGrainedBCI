@@ -189,7 +189,7 @@ jobs:
           name: animation-time-varying
           path: animations/*.mp4
           if-no-files-found: warn
-          retention-days: 5
+          retention-days: 14
 
       - name: Upload postprocessing NetCDF files
         if: always()
@@ -290,7 +290,7 @@ jobs:
           name: animation-fixed-ref
           path: animations/*.mp4
           if-no-files-found: warn
-          retention-days: 5
+          retention-days: 14
 
       - name: Upload postprocessing NetCDF files
         if: always()
