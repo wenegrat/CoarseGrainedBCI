@@ -328,15 +328,18 @@ def calculate_energy_transfer(ds, filter_scales,
         Π_K = calculate_cross_scale_ke_flux(sfs_stress_tensor, strain_rate_tensor_l)
 
         # --- APE->KE conversion terms ---
-        # SFS exchange:        filter(w·b_r) - filter(w)·filter(b_r)
+        # SFS exchange:        filter(w·b_r) - filter(w)·b_r_l
         # Coarse conversion: filter(w) · filter(b_r)
         w_bar   = ds_filt_ℓ["ūᵢ"].sel(i=3)
         b_r_bar = gaussian_filter.apply(b_r, dims=filtered_dimensions)
+        # b_r_l = -(g/ρ₀)(ρ̄ - ρ_ref): filtered density minus the unfiltered reference profile
+        # (cf. b̄ᵣ = filter(b_r) = -(g/ρ₀)(ρ̄ - filter(ρ_ref)), which filters the reference too)
+        b_r_l = calculate_b_r(gaussian_filter.apply(ds_full.ρ, dims=filtered_dimensions), rho_sorted)
         ape_to_ke_exchange = calculate_ape_to_ke_exchange_term(w_full, b_r,
                                                                 gaussian_filter,
                                                                 filter_dims=filtered_dimensions,
                                                                 filtered_w=w_bar,
-                                                                filtered_b=b_r_bar)
+                                                                filtered_b=b_r_l)
         wbar_b_r_bar = (w_bar * b_r_bar).rename("w̄·b̄ᵣ")
 
         # --- APE cross-scale transfer ---
