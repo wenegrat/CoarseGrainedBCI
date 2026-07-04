@@ -6,7 +6,7 @@ using Random
 using ArgParse
 using CUDA: has_cuda_gpu
 using Oceananigans.Architectures: on_architecture
-using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation, FlowDiagnostics
+using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation, FlowDiagnostics, GaussianFilter, StrainRateTensor, subfilter_stress_tensor, KineticEnergyCrossScaleFlux, CoarseGrainedKineticEnergyDissipationRate
 using Oceanostics.ProgressMessengers
 
 @info "Finished loading packages"
@@ -21,7 +21,7 @@ let s = ArgParseSettings()
             help = "Number of vertical grid points (default: 512 on CPU, 4096 on GPU)"
             arg_type = Int
             required = false
-            default = has_cuda_gpu() ? 4096 : 512
+            default = has_cuda_gpu() ? 4096 : 256
 
         "--U"
             help = "Velocity profile amplitude U₀ (default: 1.0)"
@@ -64,9 +64,16 @@ let s = ArgParseSettings()
             arg_type = Float64
             required = false
             default = 0.05
+
+        "--save_tensors"
+            help = "Also output the strain-rate (S̄ⁱʲ) and sub-filter stress (τⁱʲ) tensor components at each filter scale (for online-vs-offline validation). These are full 3D fields, so off by default to keep production output lean."
+            action = :store_true
     end
     global parsed_args = parse_args(s, as_symbols=true)
 end
+# Keep the save_tensors control flag out of `params` (it is a Bool, which NetCDF can't store as a
+# global attribute, and it is not a physical parameter).
+save_tensors = pop!(parsed_args, :save_tensors)
 params = (; parsed_args...)
 #---
 
@@ -214,7 +221,57 @@ PE = Integral(pe)
 
 vorticity = Field(∂z(u) - ∂x(w))
 
-outputs = (; ω=vorticity, b, pe, PE, u=u_center, v=v_center, w=w_center, ε̄, ε, Ri=Ri_field, S=S_field)
+#+++ Gaussian-filtered u, v, w, b at multiple filter scales for subfilter-scale analysis
+# ℓ is the FWHM of the Gaussian kernel; σ = ℓ / (2√(2 ln 2)) is the std dev passed to GaussianFilter
+filter_ℓs = (1, 7)
+_FWHM_to_σ(ℓ) = ℓ / (2 * sqrt(2 * log(2)))
+_fields = (u=u_center, v=v_center, w=w_center, b=b)
+_filt_pairs = [Symbol("$(n)_ℓ$(ℓ)") => GaussianFilter(f; dims=(1, 3), σ=_FWHM_to_σ(ℓ)) for ℓ in filter_ℓs for (n, f) in pairs(_fields)]
+filtered_fields = (; _filt_pairs...)
+#---
+
+#+++ Online cross-scale KE transfer Πₖ and SFS KE dissipation ε_Kˢ  (Oceanostics)
+# Computed at each filter scale ℓ (coarse-graining framework of Aluie et al. 2018, JPO):
+#   Πₖ   = -τⁱʲ S̄ⁱʲ        cross-scale (resolved → subfilter) KE flux      [KineticEnergyCrossScaleFlux]
+#   ε_Kˢ = filter(ε) - ε̄   sub-filter-scale viscous dissipation
+# where ε is the total viscous dissipation (KineticEnergyEquation.DissipationRate, defined above) and
+# ε̄ is the dissipation of the filtered flow (CoarseGrainedKineticEnergyDissipationRate). This equals
+# 2ν Σ[filter(SⁱʲSⁱʲ) - filter(Sⁱʲ)²] ≥ 0, exactly what calculate_sfs_ke_dissipation computes offline
+# in postprocessing/src/aux02_ke_functions.py. The Gaussian filter reproduces the offline post-
+# processing filter (periodic x, edge-extended z, 4σ truncation — scipy gaussian_filter1d's default;
+# Oceanostics truncates at 2σ). 2D x–z runs (v ≡ 0) so dims=(1, 3); both are per unit mass (m² s⁻³).
+to_center(ψ) = @at (Center, Center, Center) ψ
+
+# Per-direction Gaussian stencil widths matching scipy's truncate=4 (radius = ⌊4σ/Δ + ½⌋ cells).
+_filter_N(σ) = (2 * max(1, floor(Int, 4σ / minimum_xspacing(grid) + 0.5)) + 1,
+                2 * max(1, floor(Int, 4σ / minimum_zspacing(grid) + 0.5)) + 1)
+
+_ke_pairs = Pair{Symbol, Any}[]
+for ℓ in filter_ℓs
+    σ = _FWHM_to_σ(ℓ)
+    gf = GaussianFilter(; dims=(1, 3), σ, boundary=:edge, N=_filter_N(σ))   # reusable, matched-to-offline filter
+
+    Πₖ   = KineticEnergyCrossScaleFlux(model, gf; dims=(1, 3))
+    ε_Ks = Field(gf(ε)) - CoarseGrainedKineticEnergyDissipationRate(model, gf)   # filter(ε) - ε̄
+    push!(_ke_pairs, Symbol("Π_K_ℓ$(ℓ)")  => Πₖ,   Symbol("Π_K_ℓ$(ℓ)_int")  => Integral(Πₖ),
+                     Symbol("ε_Ks_ℓ$(ℓ)") => ε_Ks, Symbol("ε_Ks_ℓ$(ℓ)_int") => Integral(ε_Ks))
+
+    # Individual strain (S̄ⁱʲ) and sub-filter stress (τⁱʲ) components at cell centers, for the
+    # online-vs-offline validation in postprocessing/validation/. Full 3D fields → gated behind
+    # --save_tensors to keep production output lean.
+    if save_tensors
+        ū = Field(gf(u)); w̄ = Field(gf(w))
+        S̄ = StrainRateTensor(grid, ū, v, w̄; dims=(1, 3))      # strain of the filtered velocity
+        τ = subfilter_stress_tensor(model, gf; dims=(1, 3))   # τⁱʲ = filter(uⁱuʲ) - ūⁱūʲ
+        push!(_ke_pairs,
+              Symbol("S11_ℓ$(ℓ)")   => to_center(S̄.S₁₁), Symbol("S33_ℓ$(ℓ)")   => to_center(S̄.S₃₃), Symbol("S13_ℓ$(ℓ)")   => to_center(S̄.S₁₃),
+              Symbol("tau11_ℓ$(ℓ)") => to_center(τ.τ₁₁), Symbol("tau33_ℓ$(ℓ)") => to_center(τ.τ₃₃), Symbol("tau13_ℓ$(ℓ)") => to_center(τ.τ₁₃))
+    end
+end
+ke_transfer_fields = (; _ke_pairs...)
+#---
+
+outputs = (; ω=vorticity, b, pe, PE, u=u_center, v=v_center, w=w_center, filtered_fields..., ke_transfer_fields..., ε̄, ε, Ri=Ri_field, S=S_field)
 
 using NCDatasets
 simulation_name = "khi_Nz$(params.Nz)_Ri$(@sprintf("%.2f", params.Ri))"
@@ -248,7 +305,7 @@ NetCDFWriter(model, outputs,
 @info "Output will be saved to: $(output_filename).nc"
 #---
 
-# Run simulation
+#+++ Run simulation
 show_gpu_status()
 @info @sprintf("""
 ================================================================================
@@ -276,6 +333,7 @@ show_gpu_status()
     params.k_max, params.λ_max)
 @info "Running Kelvin-Helmholtz instability simulation..."
 run!(simulation)
+#---
 
 #+++ Plot results
 @info "Creating animation..."
