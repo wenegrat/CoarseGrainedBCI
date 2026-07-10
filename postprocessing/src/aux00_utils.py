@@ -159,34 +159,37 @@ def calculate_gradient(scalar, output_name="grad_scalar", dimensions=("x_caa", "
     return aux_ds[output_name]
 #---
 
-#+++ Gaussian filter (x: periodic, z: bounded)
+#+++ Gaussian filter (horizontal: x and y, both periodic)
 # FWHM = 2√(2 ln 2) · σ  →  σ = FWHM / (2√(2 ln 2))
 _FWHM_TO_SIGMA = 1.0 / (2.0 * np.sqrt(2.0 * np.log(2.0)))
 
 class GaussianFilter:
-    """Gaussian filter in x (periodic) and z (bounded) directions.
+    """Gaussian filter over the horizontal directions x and y (both periodic).
 
-    Two sequential 1D scipy Gaussian convolutions:
-      - x: mode='wrap'    — periodic BC
-      - z: mode='nearest' — extends with boundary value beyond domain walls
+    Two sequential 1D scipy Gaussian convolutions, each with mode='wrap' (periodic
+    BC), matching the doubly-periodic-horizontal channel topology. The vertical
+    (z) direction is never filtered -- horizontal scales span the mesoscale/
+    submesoscale range this budget targets, while z has its own distinct
+    structure (stratification, boundary layers) that shouldn't be smoothed over.
 
-    ℓ is the FWHM of the kernel; σ = ℓ · _FWHM_TO_SIGMA is derived internally.
+    ℓ is the FWHM of the kernel; σ = ℓ · _FWHM_TO_SIGMA is derived internally,
+    independently per direction (dx and dy need not be equal).
     """
-    def __init__(self, ℓ, dx_min, dz_min):
+    def __init__(self, ℓ, dx_min, dy_min):
         self._sigma_x = ℓ * _FWHM_TO_SIGMA / dx_min
-        self._sigma_z = ℓ * _FWHM_TO_SIGMA / dz_min
+        self._sigma_y = ℓ * _FWHM_TO_SIGMA / dy_min
 
     def apply(self, da, dims):
-        """Apply filter in dims[0] (x, periodic) then dims[1] (z, bounded).
+        """Apply filter in dims[0] (x, periodic) then dims[1] (y, periodic).
 
         Parameters
         ----------
         da : xr.DataArray
         dims : list of str
-            [x_dim, z_dim], e.g. ['x_caa', 'z_aac']
+            [x_dim, y_dim], e.g. ['x_caa', 'y_aca']
         """
         from scipy.ndimage import gaussian_filter1d
-        x_dim, z_dim = dims
+        x_dim, y_dim = dims
         da_x = xr.apply_ufunc(
             gaussian_filter1d, da,
             input_core_dims=[[x_dim]],
@@ -198,9 +201,9 @@ class GaussianFilter:
         )
         return xr.apply_ufunc(
             gaussian_filter1d, da_x,
-            input_core_dims=[[z_dim]],
-            output_core_dims=[[z_dim]],
-            kwargs={"sigma": self._sigma_z, "axis": -1, "mode": "nearest"},
+            input_core_dims=[[y_dim]],
+            output_core_dims=[[y_dim]],
+            kwargs={"sigma": self._sigma_y, "axis": -1, "mode": "wrap"},
             dask="parallelized",
             output_dtypes=[da_x.dtype],
             dask_gufunc_kwargs={"allow_rechunk": True},
@@ -215,38 +218,40 @@ def make_gaussian_filter(ℓ, ds):
     ℓ : float
         Filter length scale (FWHM) in physical units.
     ds : xr.Dataset
-        Simulation dataset (must contain Δx_caa and Δz_aac).
+        Simulation dataset (must contain Δx_caa and Δy_aca).
     """
     dx_min = float(ds.Δx_caa.min())
-    dz_min = float(ds.Δz_aac.min())
-    return GaussianFilter(ℓ, dx_min, dz_min)
+    dy_min = float(ds.Δy_aca.min())
+    return GaussianFilter(ℓ, dx_min, dy_min)
 
 
 def filter_fields(ds, filter_scales):
-    """Filter velocity and buoyancy fields at each length scale in x and z.
+    """Filter velocity and buoyancy fields at each length scale, horizontally (x, y).
 
     Parameters
     ----------
     ds : xr.Dataset
-        Dataset with velocity components (u, w) and buoyancy b.
+        Dataset with velocity components (u, v, w) and buoyancy b.
     filter_scales : array-like
         Filter length scales (FWHM) in physical units.
 
     Returns
     -------
     ds_filt : xr.Dataset
-        Dataset with filtered fields ūᵢ and b̄ at each filter_scale,
-        plus dV (scale-independent).
+        Dataset with filtered fields ūᵢ (all 3 components -- w̄ is needed by the
+        APE<->KE exchange term even though the KE cross-scale flux itself is
+        restricted to horizontal components downstream) and b̄ at each
+        filter_scale, plus dV (scale-independent).
     """
-    ds = condense_uw_velocities(ds, indices=(1, 3))
+    ds = condense_velocities(ds, indices=(1, 2, 3))
 
     ds_filt_list = []
     for ℓ in filter_scales:
         print(f"  filter_scale = {ℓ:.4f}...")
         gf = make_gaussian_filter(ℓ, ds)
         ds_filt_list.append(xr.Dataset({
-            "ūᵢ": gf.apply(ds["uᵢ"], dims=["x_caa", "z_aac"]),
-            "b̄":  gf.apply(ds["b"],  dims=["x_caa", "z_aac"]),
+            "ūᵢ": gf.apply(ds["uᵢ"], dims=["x_caa", "y_aca"]),
+            "b̄":  gf.apply(ds["b"],  dims=["x_caa", "y_aca"]),
         }))
 
     scale_coord = xr.DataArray(filter_scales, dims="filter_scale",
@@ -254,7 +259,7 @@ def filter_fields(ds, filter_scales):
     ds_filt = xr.concat(ds_filt_list, dim=scale_coord)
     ds_filt["dV"] = ds["dV"]
     ds_filt.attrs.update(ds.attrs)
-    ds_filt.attrs["filter_dims"] = "x_caa,z_aac"
+    ds_filt.attrs["filter_dims"] = "x_caa,y_aca"
     return ds_filt
 #---
 

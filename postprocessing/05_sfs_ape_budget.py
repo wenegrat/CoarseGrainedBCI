@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Calculate SFS APE budget from Kelvin-Helmholtz simulation output
+Calculate SFS APE budget from baroclinic adjustment simulation output
 """
 
 #+++ Imports
@@ -11,7 +11,7 @@ from pathlib import Path
 import time
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
-from src.aux00_utils import load_dataset_and_grid, condense_uw_velocities, integrate, make_gaussian_filter, load_energy_transfer
+from src.aux00_utils import load_dataset_and_grid, condense_velocities, integrate, make_gaussian_filter, load_energy_transfer
 from src.aux01_pe_functions import (
     calculate_density_fields_from_buoyancy,
     local_potential_energies_timeseries,  # used for filtered density in loop
@@ -26,8 +26,8 @@ print = logging.info
 
 #+++ Configuration
 import argparse
-parser = argparse.ArgumentParser(description="Calculate SFS APE budget from Kelvin-Helmholtz simulation output")
-parser.add_argument("--filename", default="output/khi_Nz256_Ri0.10.nc", help="Path to simulation NetCDF file")
+parser = argparse.ArgumentParser(description="Calculate SFS APE budget from baroclinic adjustment simulation output")
+parser.add_argument("--filename", default="output/bci_Nx48_Ny48_Nz8.nc", help="Path to simulation NetCDF file")
 parser.add_argument("--n-workers", type=int, default=18, help="Number of CPU workers for APE sorting (ThreadPoolExecutor)")
 parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load the fixed-in-time reference profile (produced by 01 with --fixed-reference)")
 args = parser.parse_args()
@@ -57,13 +57,18 @@ filtered_filename = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities
 t0 = time.time()
 ds_filt = xr.open_dataset(filtered_filename, decode_times=False).chunk({"time": 1})
 filter_scales = ds_filt.filter_scale.values
-filtered_dimensions = ["x_caa", "z_aac"]
+filtered_dimensions = ["x_caa", "y_aca"]
 
-ds = condense_uw_velocities(ds, indices=[1, 3])
+ds = condense_velocities(ds, indices=(1, 2, 3))
 ds_full = ds[["b", "dV", "LxLy", "uᵢ"]].copy()
+
+# Diffusivity κ: the simulation uses a constant ScalarDiffusivity, written as scalar global
+# attributes nu/Pr (not a spatial field) -- see baroclinic_adjustment.jl.
+κ = ds.attrs["nu"] / ds.attrs["Pr"]
+
 print(f"  Pre-filtered fields loaded from: {filtered_filename}  ({time.time()-t0:.1f}s)")
 print(f"  Filter length scales: {filter_scales}")
-print(f"  Filter dimensions: x and z")
+print(f"  Filter dimensions: x and y (horizontal)")
 
 ref_suffix = "_fixed_ref" if fixed_reference else ""
 sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sorted_density{ref_suffix}.nc"))
@@ -153,7 +158,7 @@ for ℓ in filter_scales:
 
     t0 = time.time()
     sfs_ape_dissipation = calculate_sfs_ape_dissipation(
-        ds_full.ρ, full_local_pes.upsilon, filt_local_pes.upsilon, ds.κ, gaussian_filter,
+        ds_full.ρ, full_local_pes.upsilon, filt_local_pes.upsilon, κ, gaussian_filter,
         filter_dims=filtered_dimensions,
         filtered_density=ds_filt_ℓ.ρ̄,)
     print(f"  sfs_ape_dissipation  ({time.time()-t0:.1f}s)")

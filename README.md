@@ -1,183 +1,111 @@
-# KHAPE — Kelvin-Helmholtz Available Potential Energy
+# BCI — Baroclinic Coarse-Grained Instability
 
-Computes Available Potential Energy (APE) from Kelvin-Helmholtz instability simulations using the Winters et al. (1995) sorting method.
+Computes coarse-grained kinetic energy (KE) and Available Potential Energy (APE) budgets for an idealized
+baroclinic-instability channel, using the Winters et al. (1995) sorting method for APE and the Aluie et al.
+(2018, JPO) coarse-graining framework for cross-scale KE/APE transfer.
+
+This is a fork of [CoarseGrainedKHAPE](https://github.com/tomchor/CoarseGrainedKHAPE) (which targets a 2D
+x–z Kelvin-Helmholtz instability), adapted to a 3D **double-front, doubly-periodic-horizontal** baroclinic
+adjustment setup, following the [Oceananigans baroclinic_adjustment
+example](https://clima.github.io/OceananigansDocumentation/stable/literated/baroclinic_adjustment).
 
 ## Pipeline overview
 
-1. **Julia simulation** (`simulation.pbs`) — runs the KH instability on a GPU and writes NetCDF output
-2. **Post-processing** — filters fields, sorts density, computes energy transfer and SFS budgets, split into two jobs:
-   - `postprocessing/budgeting_filter.pbs` — filters fields at all scales (shared; runs once regardless of `FIXED_REF`)
-   - `postprocessing/budgeting.pbs` — sorts density, computes all budget terms and plots (per `FIXED_REF` variant)
-3. **Sweep** — parameter sweep over filter scales, split into two jobs:
-   - `postprocessing/sweep_filter.pbs` — filters fields at all scales (shared; runs once regardless of `FIXED_REF`)
-   - `postprocessing/sweep_transfer.pbs` — computes and plots energy transfer spectra (per `FIXED_REF` variant)
-
-## Post-processing scripts (`postprocessing/`)
-
-Scripts in `postprocessing/` follow a naming convention by purpose:
-
-| Prefix | Purpose |
-|--------|---------|
-| `01_…` – `06_…` | **Numbered post-processing pipeline.** Sequentially filter fields, sort density, compute cross-scale energy transfer, and compute SFS KE/APE budgets from the raw simulation output. Each step reads the previous step's output. |
-| `sweep1_…` – `sweep3_…` | **Parameter sweep pipeline** over filter scales: filter fields, compute cross-scale transfer at every scale, and plot transfer spectra. |
-| `plot2_…`, `plot3_…`, `plot4_…` | **Paper figure scripts.** Produce the figures used in the manuscript (cross-scale transfer spectrum, SFS KE/APE budget time series, local-field snapshot panels). Output goes to `figures/`. |
-| `anim1_…`, `S1_…`, `S2_…`, `S3_…` | **Supplementary material.** Animations (`anim*`, requires `ffmpeg`) and supplementary figures (`S1`–`S3`: Π hovmöllers, snapshot panels, sweep-spectrum figures). |
-| `aux*` (under `src/`) | Shared utilities reused across the pipeline (data loading, Gaussian filtering, spatial derivatives, PE/KE budget terms, plotting helpers). |
-| `00_get_budgets.sh`, `inv00_get_sweep.sh` | Local helpers that run the numbered pipeline or sweep pipeline end-to-end without PBS (see [Running locally](#running-locally-without-pbs)). |
-| `*.pbs`, `submit_*.sh` | PBS job scripts and their wrappers (see [Submitting jobs](#submitting-jobs)). |
-
-All Python scripts accept `--filename`, and most accept `--fixed-reference`, `--filter-scales`, and `--n-workers`. Run any script with `--help` for its full argument list.
+1. **Julia simulation** (`baroclinic_adjustment.jl`) — runs the baroclinic adjustment and writes NetCDF
+   output. Filtered velocity/buoyancy fields are computed online; the cross-scale KE transfer (Πₖ) and SFS
+   KE dissipation (ε_Kˢ) are **not** computed online (see [Known issues](#known-issues)) and are instead
+   computed offline in the Python pipeline.
+2. **Post-processing** (`postprocessing/`) — filters fields, sorts density, computes energy transfer and
+   SFS budgets:
+   - `01_filter_fields.py` — Gaussian-filter velocity (u,v,w) and buoyancy horizontally (x, y) at each
+     requested length scale
+   - `02_sort_density.py` — Winters (1995) density sort for the reference state
+   - `03_energy_transfer.py` — cross-scale APE transfer Π_A, the APE↔KE exchange, and the cross-scale KE
+     transfer Πₖ (restricted to horizontal velocity components)
+   - `04_sfs_ke_budget.py` — sub-filter-scale KE budget (reads Πₖ from step 03; computes ε_Kˢ offline)
+   - `05_sfs_ape_budget.py` — sub-filter-scale APE budget
+   - `06_plot_budgets.py` — plot budget time series
+   - `anim2_surface_buoyancy.py` — animate the surface buoyancy field to a GIF
 
 ## Setup
 
-Create the conda environment for Python post-processing:
-
+### Julia
+Requires Julia 1.11.x. With [juliaup](https://github.com/JuliaLang/juliaup) installed:
 ```bash
-conda env create -f environment.yml   # creates env "py313"
-conda activate py313
+juliaup add 1.11.2
+juliaup override set 1.11.2   # pins this directory to 1.11.2
+julia --project -e 'using Pkg; Pkg.instantiate()'
 ```
 
-The Julia simulation uses the project's `Project.toml`/`Manifest.toml` — instantiate with `julia --project -e 'using Pkg; Pkg.instantiate()'` on first use.
-
-## Submitting jobs
-
-### File naming convention
-
-| Extension | Role |
-|-----------|------|
-| `*.pbs`   | PBS job script — passed directly to `qsub`; do not run with `bash` |
-| `submit_*.sh` | Wrapper script — constructs job names/log paths and calls `qsub`; this is what you invoke |
-
-Always use the `submit_*.sh` wrappers rather than submitting `*.pbs` files directly — the wrappers ensure job names and log files reflect the run parameters.
-
-Arguments are passed as `KEY=VALUE` pairs in any order. All arguments are optional and fall back to their defaults if omitted.
-
-### Run everything (simulation + post-processing + sweep, with optional validation and plots)
-
+### Python
+`environment.yml` is a Linux conda lockfile (built on an HPC) — on macOS or for quick local development, use
+a plain venv instead:
 ```bash
-# Default resolution (Nz=2048), time-varying reference profile
-bash submit_all_pbs.sh
-
-# Custom resolution
-bash submit_all_pbs.sh NZ=1024
-
-# Custom resolution with fixed-in-time reference profile
-bash submit_all_pbs.sh NZ=1024 FIXED_REF=1
-
-# Add the online-vs-offline validation and/or the final plots (independently toggleable)
-bash submit_all_pbs.sh VALIDATE=1            # + validation (figures + animations); runs the sim with --save_tensors
-bash submit_all_pbs.sh PLOTS=1               # + plot2/plot3/plot4 after sweep_transfer
-bash submit_all_pbs.sh VALIDATE=1 PLOTS=1    # the whole pipeline
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r tests/requirements.txt
 ```
 
-Jobs are chained: `budgeting_filter` starts after simulation, `budgeting` starts after `budgeting_filter`, `sweep_filter` starts after `budgeting`, and `sweep_transfer` starts after `sweep_filter`. When `FIXED_REF=1`, the budgeting and sweep transfer jobs load the pre-sorted reference density from the preceding step.
-
-Two optional stages are gated by flags (both default `0`, so the base behavior is simulation + post-processing + sweep):
-- `VALIDATE=1` runs the simulation with `--save_tensors` and submits a parallel **validation** job (`postprocessing/validation/validation.pbs`) after the simulation, writing online-vs-offline comparison figures (`figures/`) and animations (`animations/`).
-- `PLOTS=1` submits a **plots** job (`postprocessing/plots.pbs`) after `sweep_transfer` that runs `plot2_transfer_spectrum.py`, `plot3_budgets.py`, and `plot4_panels.py`.
-
-### Run simulation only
+## Running the simulation
 
 ```bash
-# Default (Nz=1024)
-bash submit_simulation.sh
+# Default resolution (48x48x8), 20-day run
+julia --project -t 8 baroclinic_adjustment.jl
 
-# Custom resolution
-bash submit_simulation.sh NZ=2048
+# Custom resolution / short run
+julia --project -t 8 baroclinic_adjustment.jl --Nx 16 --Ny 16 --Nz 4 --stop_time 1
 
-# Also write the per-scale strain/stress tensor components (for online-vs-offline validation)
-bash submit_simulation.sh NZ=2048 SAVE_TENSORS=1
+# Custom filter scales (horizontal FWHM, in km) for the online filtered-field diagnostics
+julia --project -t 8 baroclinic_adjustment.jl --filter_scales 50 100
 ```
 
-`SAVE_TENSORS=1` passes `--save_tensors` to the Julia simulation, which additionally outputs the
-resolved strain-rate (S̄ⁱʲ) and sub-filter stress (τⁱʲ) tensor components at each filter scale. These
-are full 3D fields (off by default to keep production output lean) and are consumed only by the
-validation scripts in `postprocessing/validation/`.
+Run with `--help` for the full list of CLI arguments (front width, N², M², latitude, viscosity, etc.).
 
-### Run a simulation + online-vs-offline validation
+Output is written to `output/<stem>.nc` (full 3D fields) and `output/<stem>_surface.nc` (surface slice),
+where `<stem>` encodes the grid size, e.g. `bci_Nx48_Ny48_Nz8`.
 
-```bash
-# Submit the simulation (with --save_tensors) then a chained validation job (default Nz=2048)
-bash submit_validation_run.sh
-bash submit_validation_run.sh NZ=1024
-```
+**Note:** the `submit_*.sh`/`*.pbs` HPC job scripts still reference the old Kelvin-Helmholtz simulation and
+have not yet been updated for `baroclinic_adjustment.jl`.
 
-`submit_validation_run.sh` submits the simulation with `SAVE_TENSORS=1` and a `validation` job that
-runs after it (`afterok`). The validation job recomputes the filtered fields, cross-scale KE transfer
-Π_K, the strain/stress tensors, and the SFS KE dissipation ε_Kˢ offline and compares them against the
-simulation's online diagnostics (`postprocessing/validation/inv01`–`inv05`), writing comparison figures
-to `figures/` and online-vs-offline animations to `animations/`.
-
-### Run post-processing only
-
-The budgeting pipeline is split into two PBS jobs to avoid race conditions when running both `FIXED_REF` variants simultaneously: the field-filtering step (`01`) runs once and is shared, while the density sort and budget steps (`02`–`06`) run separately per variant.
+## Running the post-processing pipeline
 
 ```bash
 cd postprocessing
-bash submit_budgeting.sh                          # default Nz=2048, FIXED_REF=0
-bash submit_budgeting.sh NZ=1024
-bash submit_budgeting.sh NZ=2048 FIXED_REF=1     # fixed-in-time reference profile
-bash submit_budgeting.sh NZ=2048 FIXED_REF=both  # submit both variants; filter runs only once
+bash 00_get_budgets.sh output/bci_Nx48_Ny48_Nz8.nc --filter-scales 50000 100000
 ```
 
-`FIXED_REF=both` submits the filter job once and two budget jobs (one for each variant) that both depend on the single filter job.
+Set `N_WORKERS` to control parallelism: `N_WORKERS=4 bash 00_get_budgets.sh ...`.
 
-The `FIXED_REF` argument controls how the reference (sorted) density profile is computed:
-- `0` (default) — reference profile is recomputed at every time step
-- `1` — reference profile is fixed to the `t=0` density field
-
-Output files are suffixed with `_fixed_ref` when `FIXED_REF=1`.
-
-### Run sweep only
-
-The sweep is split into two PBS jobs to avoid race conditions when running both `FIXED_REF` variants simultaneously: the field-filtering step (`sweep1`) runs once and is shared, while the energy transfer and plotting steps (`sweep2`+`sweep3`) run separately per variant.
-
+To animate the surface buoyancy field after a run:
 ```bash
-cd postprocessing
-bash submit_sweep.sh                          # default Nz=2048, FIXED_REF=0
-bash submit_sweep.sh NZ=4096
-bash submit_sweep.sh NZ=2048 FIXED_REF=1     # fixed-in-time reference profile
-bash submit_sweep.sh NZ=2048 FIXED_REF=both  # submit both variants; filter runs only once
+python anim2_surface_buoyancy.py --filename output/bci_Nx48_Ny48_Nz8.nc
 ```
-
-`FIXED_REF=both` submits the filter job once and two transfer jobs (one for each variant) that both depend on the single filter job.
-
-When `FIXED_REF=1`, the transfer job loads the pre-sorted reference density from `_sorted_density_fixed_ref.nc` (produced by the budgeting pipeline). Run budgeting with `FIXED_REF=1` before submitting the sweep with `FIXED_REF=1`.
-
-## Running locally (without PBS)
-
-For development on a workstation (no PBS scheduler), run the simulation and post-processing pipeline directly.
-
-```bash
-# Julia simulation (CPU, small grid)
-julia --project -t 8 kelvin_helmholtz_instability.jl --Nz 512 --Ri 0.1 --stop_time 70
-
-# Numbered post-processing pipeline (01–06) on an existing NetCDF file
-cd postprocessing
-bash 00_get_budgets.sh output/khi_Nz512_Ri0.10.nc --filter-scales 1 7
-bash 00_get_budgets.sh output/khi_Nz512_Ri0.10.nc --filter-scales 1 7 --fixed-reference
-
-# Sweep pipeline (sweep1–sweep3)
-bash inv00_get_sweep.sh output/khi_Nz512_Ri0.10.nc
-```
-
-Set `N_WORKERS` to control Dask parallelism (default 1): `N_WORKERS=4 bash 00_get_budgets.sh ...`.
 
 ## Tests
 
-The test suite checks SFS KE and APE budget closure (rms residual / min rms of terms < 10%) and expects post-processing output for `khi_Nz512_Ri0.10` in `postprocessing/output/`.
-
 ```bash
-pytest tests/ -v -s                                  # time-varying reference (default)
-pytest tests/ -v -s --ref-suffix _fixed_ref          # fixed reference variant
+pytest tests/ -v -s
 ```
 
-CI (`.github/workflows/test.yml`) runs the full chain — Julia simulation (Nz=512) → post-processing (both reference variants in parallel) → pytest → animation — on push to `main` and on PR comments starting with `test`.
+`test_budgets.py` checks SFS KE/APE budget closure (rms(residual)/min(rms(terms)) < 10%) and requires
+post-processing output for the resolution named in `tests/conftest.py`'s `STEM` (run `00_get_budgets.sh`
+first). `test_filter.py`/`test_gaussian_filter.py` are self-contained filter unit tests needing no pipeline
+output.
+
+**Current status:** this test does not yet pass at the resolutions/durations tested so far (16×16×4 for 1
+day, 48×48×8 for 20 days) — see [Known issues](#known-issues). This looks like a resolution/duration
+limitation, not a code defect; validating it properly needs a finer, longer HPC run.
+
+## Known issues
+
+- **Oceanostics `GaussianFilter` bug**: a combined `dims=(1,2)` filter (horizontal, both directions) crashes
+  with heap corruption on a grid with a real, periodic y-direction — filed as
+  [tomchor/Oceanostics.jl#262](https://github.com/tomchor/Oceanostics.jl/issues/262). Worked around locally
+  for the plain filtered-field outputs, but not for the composite cross-scale-flux functions (compile-time
+  cost was prohibitive), which is why Πₖ/ε_Kˢ are computed offline in Python instead of online as in the
+  original KH setup.
+- **Budget closure not yet validated at production resolution/duration** — see the CLAUDE.md Notes section
+  for details on what's been tried and why the current failure looks like a resolution issue.
 
 ## Logs
 
-All job logs are written to the `logs/` subdirectory next to the submit script:
-- `logs/<job_name>.log` — PBS stdout/stderr (written by PBS after job ends)
-- `logs/<job_name>.out` — Python script output (written live via `tee`)
-
-Job names follow the pattern `<stage>_Nz<NZ>_Ri0.10[_fixed_ref]`, e.g. `budgeting_Nz2048_Ri0.10_fixed_ref`, `sweep_filter_Nz2048_Ri0.10`, `sweep_transfer_Nz2048_Ri0.10_fixed_ref`.
+Output files (`.nc`, `.mp4`, `.pdf`, `.png`, `.gif`, `.jld2`) are excluded from git.

@@ -4,18 +4,20 @@ import os
 from pathlib import Path
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
-from src.aux00_utils import load_dataset_and_grid, condense_uw_velocities, integrate, make_gaussian_filter
+from src.aux00_utils import load_dataset_and_grid, condense_velocities, integrate, make_gaussian_filter, load_energy_transfer
 from src.aux01_pe_functions import calculate_density_fields_from_buoyancy, calculate_b_r, calculate_b_r_simple, calculate_ape_to_ke_exchange_term
 from src.aux02_ke_functions import (
     calculate_sfs_stress_tensor,
+    calculate_strain_tensor,
+    calculate_sfs_ke_dissipation,
     calculate_sfs_ke_tendency,
 )
 #---
 
 #+++ Configuration
 import argparse
-parser = argparse.ArgumentParser(description="Calculate SFS KE budget from Kelvin-Helmholtz simulation output")
-parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file")
+parser = argparse.ArgumentParser(description="Calculate SFS KE budget from baroclinic adjustment simulation output")
+parser.add_argument("--filename", default="output/bci_Nx48_Ny48_Nz8.nc", help="Path to simulation NetCDF file")
 parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load the fixed-in-time reference profile (produced by 01 with --fixed-reference)")
 args = parser.parse_args()
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
@@ -39,12 +41,16 @@ print("Loading pre-filtered fields...")
 
 filtered_filename = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities.nc"))
 ds_filt = xr.open_dataset(filtered_filename, decode_times=False).chunk({"time": 1})
-filtered_dimensions = ["x_caa", "z_aac"]
+filtered_dimensions = ["x_caa", "y_aca"]
 filter_scales = ds_filt.filter_scale.values
-tensor_dimensions = ("x_caa", "z_aac")
+tensor_dimensions = ("x_caa", "y_aca")   # matches horizontal-only indices (1,2)
 
-ds = condense_uw_velocities(ds, indices=[1, 3])
+ds = condense_velocities(ds, indices=(1, 2, 3))
 ds_full = ds[["b", "dV", "uᵢ"]].copy()
+
+# Kinematic viscosity ν: the simulation uses a constant ScalarDiffusivity, written as a scalar
+# global attribute (not a spatial field) -- see baroclinic_adjustment.jl.
+ν = ds.attrs["nu"]
 
 ref_suffix = "_fixed_ref" if fixed_reference else ""
 sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sorted_density{ref_suffix}.nc"))
@@ -53,7 +59,7 @@ ds_sorted = xr.open_dataset(sorted_density_filename, decode_times=False).chunk({
 print(f"Pre-filtered fields loaded from: {filtered_filename}")
 print(f"Sorted density loaded from: {sorted_density_filename}")
 print(f"Filter length scales: {filter_scales}")
-print(f"Filter dimensions: x and z")
+print(f"Filter dimensions: x and y (horizontal)")
 #---
 
 #+++ Calculate density and relative buoyancy [scale-independent]
@@ -68,11 +74,18 @@ print("Done!")
 print("\n" + "="*60)
 print("Calculating budget terms for each filter scale...")
 
-# Π_K and ε_Kˢ are computed online by the simulation (no offline recompute). Map a filter scale to
-# its sim-output variable name, matching the Julia Symbol("<var>_ℓ$(ℓ)"). Both are reference-
-# independent, so the same online fields serve the time-varying and fixed-reference budgets.
-def online_name(var, ℓ):
-    return f"{var}_ℓ{int(ℓ)}" if float(ℓ) == int(ℓ) else f"{var}_ℓ{ℓ}"
+# Π_K is loaded from 03_energy_transfer.py's output (computed there, offline, since it's no longer
+# available from the simulation -- see Oceanostics issue #262). ε_Kˢ is computed fresh here, since
+# 03 doesn't need it. Both are reference-independent (they don't depend on the density sort), so the
+# same values serve the time-varying and fixed-reference budgets.
+energy_transfer = load_energy_transfer(filename, ref_suffix=ref_suffix)
+
+# Unfiltered strain tensor, restricted to horizontal components (i,j ∈ {1,2}) -- scale-independent,
+# so computed once outside the loop. Restricting to horizontal-only mirrors the Π_K restriction (w is
+# diagnostic, not prognostic, so has no independent dissipative dynamics in this hydrostatic model);
+# without this restriction the KE budget wouldn't close, since the LHS (SFS KE) would include w's
+# contribution while Π_K (RHS) would not.
+S_full_horiz = calculate_strain_tensor(ds_full["uᵢ"].sel(i=[1, 2]), dimensions=tensor_dimensions)
 
 dV = ds_full.dV
 budget_list = []
@@ -83,12 +96,14 @@ for ℓ in filter_scales:
     gaussian_filter = make_gaussian_filter(ℓ, ds)
 
     ds_filt_ℓ = ds_filt.sel(filter_scale=ℓ)
+    u_i_horiz     = ds_full["uᵢ"].sel(i=[1, 2])
+    u_i_bar_horiz = ds_filt_ℓ["ūᵢ"].sel(i=[1, 2])
 
-    # τⁱʲ = filter(uⁱ uʲ) - ūⁱ ūʲ   shape: (i, j, time, z, y, x)
+    # τⁱʲ = filter(uⁱ uʲ) - ūⁱ ūʲ   shape: (i, j, time, z, y, x) -- horizontal-only (i,j ∈ {1,2})
     print("  SFS stress tensor...")
-    sfs_stress_tensor = calculate_sfs_stress_tensor(ds_full["uᵢ"], gaussian_filter,
+    sfs_stress_tensor = calculate_sfs_stress_tensor(u_i_horiz, gaussian_filter,
                                                     filter_dims=filtered_dimensions,
-                                                    filtered_u_i=ds_filt_ℓ["ūᵢ"])
+                                                    filtered_u_i=u_i_bar_horiz)
     i_vals = sfs_stress_tensor.coords["i"].values
     sfs_stress_tensor_trace = sum(sfs_stress_tensor.sel(i=k, j=k) for k in i_vals)
     sfs_ke_density = sfs_stress_tensor_trace / 2
@@ -110,14 +125,10 @@ for ℓ in filter_scales:
     int_dKE_dt             = integrate(dKE_dt, dV)
     int_ape_to_ke_exchange = integrate(ape_to_ke_exchange.reindex(time=dKE_dt.time), dV)
 
-    # Π_K and ε_Kˢ from the online sim output, integrated on the budget (padded) grid so they are
-    # consistent with the other terms (the padding region is ≈0 for both).
-    for var in ("Π_K", "ε_Ks"):
-        if online_name(var, ℓ) not in ds:
-            raise KeyError(f"Online field '{online_name(var, ℓ)}' not in sim output; the budget "
-                           f"filter scales must match the simulation's online filter_ℓs (got ℓ={ℓ}).")
-    Π_K_ℓ              = ds[online_name("Π_K", ℓ)]
-    sfs_ke_dissipation = ds[online_name("ε_Ks", ℓ)]
+    print("  Π_K (from 03_energy_transfer.py output) and ε_Kˢ (offline)...")
+    Π_K_ℓ = energy_transfer["Π_K"].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6)
+    sfs_ke_dissipation = calculate_sfs_ke_dissipation(S_full_horiz, ν, gaussian_filter,
+                                                      filter_dims=filtered_dimensions)
     int_Π_K_ℓ              = integrate(Π_K_ℓ, dV)
     int_sfs_ke_dissipation = integrate(sfs_ke_dissipation, dV)
     residual  = (-int_dKE_dt + int_Π_K_ℓ.reindex(time=dKE_dt.time) + int_ape_to_ke_exchange

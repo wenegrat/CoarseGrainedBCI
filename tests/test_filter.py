@@ -43,13 +43,13 @@ def test_filter_fwhm_x(ell):
 
     impulse = np.zeros((N, 1))
     impulse[N // 2, 0] = 1.0
-    da = xr.DataArray(impulse, dims=["x_caa", "z_aac"],
-                      coords={"x_caa": x, "z_aac": [0.0]})
+    da = xr.DataArray(impulse, dims=["x_caa", "y_aca"],
+                      coords={"x_caa": x, "y_aca": [0.0]})
 
-    gf = GaussianFilter(ell, dx_min=dx, dz_min=dx)
-    filtered = gf.apply(da, dims=["x_caa", "z_aac"])
+    gf = GaussianFilter(ell, dx_min=dx, dy_min=dx)
+    filtered = gf.apply(da, dims=["x_caa", "y_aca"])
 
-    profile = filtered.isel(z_aac=0).values
+    profile = filtered.isel(y_aca=0).values
     fwhm = _measure_fwhm(profile, x)
 
     assert fwhm is not None, "Could not find half-max crossings in x profile"
@@ -57,22 +57,22 @@ def test_filter_fwhm_x(ell):
 
 
 @pytest.mark.parametrize("ell", [0.4, 1.0, 2.0])
-def test_filter_fwhm_z(ell):
-    """Impulse filtered in z (bounded BC, away from walls) has FWHM = ell."""
+def test_filter_fwhm_y(ell):
+    """Impulse filtered in y (periodic BC) has FWHM = ell."""
     N, L = 2048, 40.0
-    dz = L / N
-    z = np.arange(N) * dz
+    dy = L / N
+    y = np.arange(N) * dy
 
     impulse = np.zeros((1, N))
     impulse[0, N // 2] = 1.0
-    da = xr.DataArray(impulse, dims=["x_caa", "z_aac"],
-                      coords={"x_caa": [0.0], "z_aac": z})
+    da = xr.DataArray(impulse, dims=["x_caa", "y_aca"],
+                      coords={"x_caa": [0.0], "y_aca": y})
 
-    gf = GaussianFilter(ell, dx_min=dz, dz_min=dz)
-    filtered = gf.apply(da, dims=["x_caa", "z_aac"])
+    gf = GaussianFilter(ell, dx_min=dy, dy_min=dy)
+    filtered = gf.apply(da, dims=["x_caa", "y_aca"])
 
     profile = filtered.isel(x_caa=0).values
-    fwhm = _measure_fwhm(profile, z)
+    fwhm = _measure_fwhm(profile, y)
 
-    assert fwhm is not None, "Could not find half-max crossings in z profile"
-    assert abs(fwhm - ell) / ell < 0.01, f"z-FWHM = {fwhm:.4f}, expected {ell:.4f}"
+    assert fwhm is not None, "Could not find half-max crossings in y profile"
+    assert abs(fwhm - ell) / ell < 0.01, f"y-FWHM = {fwhm:.4f}, expected {ell:.4f}"

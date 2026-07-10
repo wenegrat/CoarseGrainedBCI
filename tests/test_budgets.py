@@ -11,7 +11,7 @@ import xarray as xr
 from pathlib import Path
 
 PP_OUTPUT = Path(__file__).parent.parent / "postprocessing" / "output"
-STEM      = "khi_Nz512_Ri0.10"
+STEM      = "bci_Nx48_Ny48_Nz8"
 # Residual must be < THRESHOLD x 100% of the smallest budget term (this number is large since we test with a
 # short, coarse simulation
 THRESHOLD = 0.1

@@ -2,7 +2,7 @@ import xarray as xr
 from pathlib import Path
 
 PP_OUTPUT = Path(__file__).parent.parent / "postprocessing" / "output"
-STEM = "khi_Nz512_Ri0.10"
+STEM = "bci_Nx48_Ny48_Nz8"
 
 
 def pytest_addoption(parser):

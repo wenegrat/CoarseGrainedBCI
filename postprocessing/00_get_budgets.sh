@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-FILENAME="${1:-output/khi_Nz512_Ri0.10.nc}"
+FILENAME="${1:-output/bci_Nx48_Ny48_Nz8.nc}"
 shift 1 2>/dev/null || true
 
 # Separate --fixed-reference from the remaining args (e.g. --filter-scales).

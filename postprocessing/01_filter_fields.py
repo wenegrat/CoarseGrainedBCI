@@ -9,8 +9,8 @@ from src.aux00_utils import load_dataset_and_grid, filter_fields
 #+++ Configuration
 import argparse
 parser = argparse.ArgumentParser(description="Filter velocity and buoyancy fields for SFS budgets")
-parser.add_argument("--filename", default="output/khi_Nz256_Ri0.10.nc", help="Path to simulation NetCDF file")
-parser.add_argument("--filter-scales", type=float, nargs="+", default=[1, 7], help="Filter length scales (must match the simulation's online filter_ℓs, since the SFS KE budget reads Π_K from the online output)")
+parser.add_argument("--filename", default="output/bci_Nx48_Ny48_Nz8.nc", help="Path to simulation NetCDF file")
+parser.add_argument("--filter-scales", type=float, nargs="+", default=[50e3, 100e3], help="Horizontal filter length scales (FWHM, in meters)")
 args = parser.parse_args()
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
@@ -30,7 +30,7 @@ print(f"Dataset loaded: {len(ds.time)} time steps")
 
 #+++ Filter velocity and buoyancy fields at each length scale
 print("\n" + "="*60)
-print("Filtering velocity and buoyancy fields in x and z...")
+print("Filtering velocity and buoyancy fields in x and y (horizontal)...")
 ds_filt = filter_fields(ds, filter_scales)
 print("Done!")
 #---
