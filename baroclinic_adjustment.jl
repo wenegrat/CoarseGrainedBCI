@@ -100,18 +100,79 @@ let s = ArgParseSettings()
             required = false
             default = -45.0
 
-        "--nu"
-            help = "Scalar viscosity ν for the explicit closure (default: 1.0 m² s⁻¹; kept simple/isotropic \
-                    so the online SFS dissipation diagnostic stays well-defined, as in the KH setup)"
+        "--closure"
+            help = "Turbulence closure: 'constant' (ScalarDiffusivity/anisotropic-Laplacian with fixed \
+                    --nu_h/--nu_v, matches the KH setup's explicit-dissipation design, but doesn't converge \
+                    as resolution improves), 'scale_aware' (default; anisotropic Laplacian with ν set from a \
+                    grid-Péclet-number criterion, ν = (U/Pe_target)·Δ per direction -- shrinks automatically \
+                    as the grid is refined, and is automatically much smaller vertically than horizontally \
+                    since Δz ≪ Δx,Δy; see --Pe_cell), or 'smagorinsky' (SmagorinskyLilly LES closure -- NOT \
+                    recommended at this resolution: its Richardson-number stability correction (Cb) zeroes \
+                    out the eddy viscosity almost everywhere at mesoscale-permitting resolution, since \
+                    resolved horizontal straining is tiny compared to the background stratification; \
+                    disabling Cb instead makes it wildly too large, since its filter width assumes an \
+                    isotropic grid cell -- kept only for reference/future work, see --C_smag/--Cb_smag)"
+            arg_type = String
+            required = false
+            default = "scale_aware"
+            range_tester = (s -> s in ("constant", "scale_aware", "smagorinsky"))
+
+        "--nu_h"
+            help = "Horizontal viscosity ν_h for the 'constant' closure (default: 1.0 m² s⁻¹). Ignored \
+                    unless --closure=constant; see --Pe_cell for the 'scale_aware' closure instead."
+            arg_type = Float64
+            required = false
+            default = 1.0
+
+        "--nu_v"
+            help = "Vertical viscosity ν_v for the 'constant' closure (default: 1.0 m² s⁻¹; see --nu_h). \
+                    Ignored unless --closure=constant."
+            arg_type = Float64
+            required = false
+            default = 1.0
+
+        "--Pe_cell"
+            help = "Target cell Péclet number Pe = UΔ/ν for the 'scale_aware' closure (default: 2.0, the \
+                    classical threshold above which Centered-scheme advection-diffusion produces spurious \
+                    2Δx grid-scale oscillations). Sets ν_h = (U/Pe_cell)·Δx (or Δy) and ν_v = (U/Pe_cell)·Δz, \
+                    where U = M²·Lz/f is the thermal-wind velocity scale intrinsic to this problem's own \
+                    parameters (not an arbitrary choice). Lower Pe_cell -> more dissipation. Ignored unless \
+                    --closure=scale_aware."
+            arg_type = Float64
+            required = false
+            default = 2.0
+
+        "--C_smag"
+            help = "Smagorinsky constant C for the 'smagorinsky' closure (default: 0.16, Lilly 1966). \
+                    νₑ = (C·Δᶠ)²·√(2Σ²)·√(1 - Cb·N²/Σ²). Ignored unless --closure=smagorinsky."
+            arg_type = Float64
+            required = false
+            default = 0.16
+
+        "--Cb_smag"
+            help = "Stratification-correction multiplier Cb for the 'smagorinsky' closure (default: 1.0; \
+                    set to 0 to disable -- see --closure's help for why neither setting works well at this \
+                    resolution). Ignored unless --closure=smagorinsky."
             arg_type = Float64
             required = false
             default = 1.0
 
         "--Pr"
-            help = "Prandtl number; sets κ = ν / Pr (default: 1.0)"
+            help = "Prandtl number: sets κ_h = ν_h/Pr, κ_v = ν_v/Pr for the 'constant'/'scale_aware' \
+                    closures, or the turbulent Prandtl number κₑ = νₑ/Pr for 'smagorinsky' (default: 1.0)"
             arg_type = Float64
             required = false
             default = 1.0
+
+        "--advection_scheme"
+            help = "Advection scheme: 'centered' (default; Centered(order=4), matches KH's setup) or 'weno' \
+                    (WENO(order=5), matches the Oceananigans baroclinic_adjustment example; has its own \
+                    implicit, scale-selective numerical dissipation on top of whichever explicit closure is \
+                    also active -- recommended pairing is --advection_scheme=weno --closure=smagorinsky)"
+            arg_type = String
+            required = false
+            default = "centered"
+            range_tester = (s -> s in ("centered", "weno"))
 
         "--stop_time"
             help = "Simulation stop time in days (default: 20)"
@@ -172,6 +233,7 @@ _filter_radius(σ, Δ) = max(1, floor(Int, 4σ / Δ + 0.5))
 
 Δx = params.Lx / Nx
 Δy = params.Ly / Ny
+Δz = params.Lz / Nz
 σmax = _FWHM_to_σ(maximum(filter_scales_km) * kilometers)
 Hx = max(3, _filter_radius(σmax, Δx))
 Hy = max(3, _filter_radius(σmax, Δy))
@@ -186,17 +248,79 @@ grid = RectilinearGrid(size=(Nx, Ny, Nz),
 #---
 
 #+++ Create model
+# Three closure options (--closure):
+#
+# 'constant' -- anisotropic Laplacian ScalarDiffusivity with fixed --nu_h/--nu_v. The grid is highly
+# anisotropic (Δx,Δy ~ 20km vs Δz ~ 125m), so a single isotropic ν/κ gives a vertical diffusive damping
+# time orders of magnitude shorter than horizontal at the same value -- e.g. ν=κ=1 m²/s gives a ~264 day
+# horizontal damping time at the deformation radius (harmless over a 20-day run) but a ~4.3 hour vertical
+# damping time (much faster than the ~1.2 day Eady growth time), smearing out the vertical
+# shear/stratification structure baroclinic instability depends on before it can develop. Its downside:
+# a fixed ν doesn't converge as the grid is refined, so it isn't scale-selective enough to control
+# Centered's lack of implicit dissipation without either over-damping real structure (too large) or
+# under-damping grid-scale noise (too small) -- see 'scale_aware' below.
+#
+# 'scale_aware' (default) -- anisotropic Laplacian ScalarDiffusivity, but with ν set automatically from a
+# grid-Péclet-number criterion instead of a fixed value: ν = (U/Pe_cell)·Δ per direction, where U is a
+# velocity scale intrinsic to this problem (the thermal-wind scale U = M²·Lz/f) and Pe_cell (--Pe_cell,
+# default 2) is the classical grid-Péclet-number threshold above which Centered-scheme
+# advection-diffusion produces spurious 2Δx grid-scale oscillations. This makes ν shrink automatically
+# as the grid is refined (Δx,Δy,Δz → 0), and automatically anisotropic (νv ≪ νh follows directly from
+# Δz ≪ Δx,Δy, with no hand-tuning) -- while remaining an explicit, deterministic Laplacian closure (not a
+# residual, not high-order/biharmonic), so the SFS dissipation diagnostic stays as well-defined as the
+# 'constant' closure's.
+#
+# 'smagorinsky' -- SmagorinskyLilly LES closure: a *diagnostic* eddy viscosity νₑ computed from the
+# locally resolved strain rate. NOT recommended at this resolution: testing showed its Richardson-number
+# stability correction (Cb term) clamps νₑ to exactly zero almost everywhere, since the resolved
+# horizontal straining at mesoscale-permitting resolution is orders of magnitude smaller than the
+# background stratification N² -- and disabling Cb (--Cb_smag 0) instead makes νₑ wildly too large
+# (~1000s of m²/s), since SmagorinskyLilly's filter width assumes an isotropic grid cell, which this grid
+# is not. Kept only for reference/future work at finer resolution.
+νh_scale_aware = νv_scale_aware = nothing  # populated below only for --closure=scale_aware
+closure = if params.closure == "smagorinsky"
+    SmagorinskyLilly(C=params.C_smag, Cb=params.Cb_smag, Pr=params.Pr)
+elseif params.closure == "scale_aware"
+    Ω_earth = 7.2921159e-5  # rad/s
+    f = 2 * Ω_earth * sind(params.latitude)
+    U_scale = params.M2 * params.Lz / abs(f)
+    global νh_scale_aware = (U_scale / params.Pe_cell) * sqrt(Δx * Δy)
+    global νv_scale_aware = (U_scale / params.Pe_cell) * Δz
+    κh, κv = νh_scale_aware / params.Pr, νv_scale_aware / params.Pr
+    (HorizontalScalarDiffusivity(ν=νh_scale_aware, κ=κh),
+     VerticalScalarDiffusivity(VerticallyImplicitTimeDiscretization(); ν=νv_scale_aware, κ=κv))
+else
+    νh, νv = params.nu_h, params.nu_v
+    κh, κv = params.nu_h / params.Pr, params.nu_v / params.Pr
+    (νh == 0 && κh == 0 && νv == 0 && κv == 0) ? nothing :
+        (HorizontalScalarDiffusivity(ν=νh, κ=κh),
+         VerticalScalarDiffusivity(VerticallyImplicitTimeDiscretization(); ν=νv, κ=κv))
+end
+
+advection_scheme = params.advection_scheme == "weno" ? WENO(order=5) : Centered(order=4)
+
+# Overwrite nu_h/nu_v with the actual computed values so they're recorded correctly in the NetCDF
+# global attributes below -- the Python postprocessing pipeline falls back to these attributes for any
+# closure whose ν/κ isn't written out as a spatial field (i.e. everything except 'smagorinsky').
+if params.closure == "scale_aware"
+    global params = (; params..., nu_h=νh_scale_aware, nu_v=νv_scale_aware)
+end
+
 model = HydrostaticFreeSurfaceModel(grid;
                                     free_surface = ImplicitFreeSurface(),
                                     coriolis = BetaPlane(latitude=params.latitude),
                                     buoyancy = BuoyancyTracer(),
                                     tracers = :b,
-                                    momentum_advection = Centered(order=4),
-                                    tracer_advection = Centered(order=4),
-                                    closure = ScalarDiffusivity(ν=params.nu, κ=params.nu/params.Pr))
+                                    momentum_advection = advection_scheme,
+                                    tracer_advection = advection_scheme,
+                                    closure = closure)
 u, v, w = model.velocities
 b = model.tracers.b
-@info "Model created"
+if params.closure == "scale_aware"
+    @info "Model created (advection=$(params.advection_scheme), closure=scale_aware, νh=$νh_scale_aware, νv=$νv_scale_aware)"
+else
+    @info "Model created (advection=$(params.advection_scheme), closure=$(params.closure))"
+end
 #---
 
 #+++ Define initial conditions: double front + background stratification + noise
@@ -225,7 +349,11 @@ set!(model, b=bᵢ)
 
 #+++ Setup simulation
 simulation = Simulation(model, Δt=20minutes, stop_time=params.stop_time * days)
-conjure_time_step_wizard!(simulation, IterationInterval(20), cfl=0.2, max_Δt=20minutes)
+# diffusive_cfl matters once the 'scale_aware' closure is in play: ν grows at coarser resolution (it's
+# tied to Δ, not fixed), so the explicit horizontal-diffusion stability limit can become the binding
+# constraint (tighter than plain advective CFL) -- without this, a run can blow up (NaN) well before the
+# advective cfl=0.2 limit would ever ask for a smaller Δt.
+conjure_time_step_wizard!(simulation, IterationInterval(20), cfl=0.2, diffusive_cfl=0.2, max_Δt=20minutes)
 @info "Simulation object created"
 #---
 
@@ -282,6 +410,16 @@ filtered_fields = (; _filt_pairs...)
 
 outputs = (; ζ, b, pe, PE, u=u_center, v=v_center, w=w_center, filtered_fields...)
 
+# Smagorinsky's eddy viscosity/diffusivity are spatially/temporally varying fields (unlike the
+# 'constant' closure's fixed ν/κ, which are recorded as scalar global attributes below), so they must be
+# written out as actual output fields for the offline SFS dissipation diagnostics to use -- matching the
+# KH setup's equivalent conditional block for non-constant closures.
+if params.closure == "smagorinsky"
+    νₑ = viscosity(model)
+    κₑ = diffusivity(model, Val(:b))
+    outputs = (; outputs..., νₑ, κₑ)
+end
+
 using NCDatasets
 simulation_name = "bci_Nx$(params.Nx)_Ny$(params.Ny)_Nz$(params.Nz)"
 output_filename = "output/$(simulation_name).nc"
@@ -317,7 +455,8 @@ simulation.output_writers[:surface] =
   Stop time:     %.1f days
   N²=%.2e s⁻², M²=%.2e s⁻², front width=%.1f km
   Latitude:      %.1f
-  ν=%.2e, κ=%.2e
+  Advection:     %s
+  Closure:       %s%s
 ================================================================================
 """,
     params.Nx, params.Ny, params.Nz,
@@ -325,7 +464,9 @@ simulation.output_writers[:surface] =
     params.stop_time,
     params.N2, params.M2, params.front_width,
     params.latitude,
-    params.nu, params.nu/params.Pr)
+    params.advection_scheme,
+    params.closure,
+    params.closure == "scale_aware" ? @sprintf(" (νh=%.4g, νv=%.4g m² s⁻¹)", params.nu_h, params.nu_v) : "")
 @info "Running baroclinic adjustment simulation..."
 run!(simulation)
 #---

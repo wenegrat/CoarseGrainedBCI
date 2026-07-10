@@ -59,12 +59,19 @@ ds_filt = xr.open_dataset(filtered_filename, decode_times=False).chunk({"time": 
 filter_scales = ds_filt.filter_scale.values
 filtered_dimensions = ["x_caa", "y_aca"]
 
+# Diffusivities κh, κv: with the 'smagorinsky' closure the simulation writes a single diagnostic eddy
+# diffusivity κₑ (spatially/temporally varying, isotropic), so the same field is used for both. With
+# 'constant'/'scale_aware' closures, κh/κv are fixed scalars from the nu_h/nu_v & Pr global attributes.
+# calculate_sfs_ape_dissipation() weights the horizontal and vertical parts of ∇ρ·∇Υ separately by κh,
+# κv -- essential once the closure is anisotropic (κh ≫ κv for 'scale_aware'), since ∂ρ/∂z (dominated
+# by the background stratification) would otherwise get multiplied by the wrong (much larger) κh.
+if "κₑ" in ds:
+    κh = κv = ds["κₑ"]
+else:
+    κh, κv = ds.attrs["nu_h"] / ds.attrs["Pr"], ds.attrs["nu_v"] / ds.attrs["Pr"]
+
 ds = condense_velocities(ds, indices=(1, 2, 3))
 ds_full = ds[["b", "dV", "LxLy", "uᵢ"]].copy()
-
-# Diffusivity κ: the simulation uses a constant ScalarDiffusivity, written as scalar global
-# attributes nu/Pr (not a spatial field) -- see baroclinic_adjustment.jl.
-κ = ds.attrs["nu"] / ds.attrs["Pr"]
 
 print(f"  Pre-filtered fields loaded from: {filtered_filename}  ({time.time()-t0:.1f}s)")
 print(f"  Filter length scales: {filter_scales}")
@@ -158,7 +165,7 @@ for ℓ in filter_scales:
 
     t0 = time.time()
     sfs_ape_dissipation = calculate_sfs_ape_dissipation(
-        ds_full.ρ, full_local_pes.upsilon, filt_local_pes.upsilon, κ, gaussian_filter,
+        ds_full.ρ, full_local_pes.upsilon, filt_local_pes.upsilon, κh, κv, gaussian_filter,
         filter_dims=filtered_dimensions,
         filtered_density=ds_filt_ℓ.ρ̄,)
     print(f"  sfs_ape_dissipation  ({time.time()-t0:.1f}s)")

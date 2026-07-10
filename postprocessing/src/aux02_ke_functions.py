@@ -72,7 +72,8 @@ def calculate_sfs_stress_tensor(u_i, filter, filter_dims=["x_caa", "y_aca"],
 #---
 
 #+++ Velocity gradient tensor
-def calculate_velocity_gradient_tensor(u_i_bar, dimensions=("x_caa", "y_aca", "z_aac"), index_dim="i"):
+def calculate_velocity_gradient_tensor(u_i_bar, dimensions=("x_caa", "y_aca", "z_aac"), index_dim="i",
+                                       direction_indices=None):
     """
     Compute the large-scale velocity gradient tensor ∂ūⁱ/∂xʲ
 
@@ -82,11 +83,19 @@ def calculate_velocity_gradient_tensor(u_i_bar, dimensions=("x_caa", "y_aca", "z
     Parameters
     ----------
     u_i_bar : xr.DataArray
-        Filtered velocity vector with index dimension (e.g. i=1,2,3 for ū, v̄, w̄).
+        Filtered velocity vector with index dimension (e.g. i=1,2,3 for ū, v̄, w̄,
+        or a subset such as i=1,2 for horizontal-only ū, v̄).
     dimensions : tuple of str
-        Ordered spatial coordinate names matching index values 1, 2, 3.
+        Ordered spatial coordinate names, one per direction index.
     index_dim : str
         Name of the velocity index dimension (default "i").
+    direction_indices : list, optional
+        Index values for the new spatial-direction dimension "j", one per
+        entry of `dimensions`. Defaults to `list(u_i_bar[index_dim].values)`,
+        which is only correct when the velocity vector is the full 3-vector
+        (i=1,2,3 matching x,y,z one-to-one) -- pass this explicitly (e.g.
+        [1,2,3]) whenever u_i_bar carries fewer components than `dimensions`
+        has entries (e.g. horizontal-only i=1,2 differentiated in x,y,z).
 
     Returns
     -------
@@ -94,17 +103,19 @@ def calculate_velocity_gradient_tensor(u_i_bar, dimensions=("x_caa", "y_aca", "z
         Tensor ∂ūⁱ/∂xʲ with dimensions (i, j, ...).
         Select a component via e.g. grad_u.sel(i=1, j=2) for ∂ū/∂y.
     """
-    j_indices = list(u_i_bar[index_dim].values)
+    if direction_indices is None:
+        direction_indices = list(u_i_bar[index_dim].values)
+    i_indices = list(u_i_bar[index_dim].values)
     grad_components = []
-    for k in j_indices:
+    for k in i_indices:
         u_k = u_i_bar.sel({index_dim: k}, drop=True)
         # calculate_gradient returns a vector along dimname="j"
-        grad_k = calculate_gradient(u_k, dimensions=dimensions, dimname="j", indices=j_indices)
+        grad_k = calculate_gradient(u_k, dimensions=dimensions, dimname="j", indices=direction_indices)
         grad_components.append(grad_k)
 
     return xr.concat(
         grad_components,
-        dim=xr.DataArray(j_indices, dims=index_dim, name=index_dim),
+        dim=xr.DataArray(i_indices, dims=index_dim, name=index_dim),
     )
 #---
 
@@ -188,6 +199,78 @@ def calculate_sfs_ke_dissipation(S, ν, filter, filter_dims=["x_caa", "y_aca"],
     S̄   = filter.apply(S, dims=filter_dims) # filter(Sⁱʲ)
     tau_S_S = filter.apply(S * S, dims=filter_dims) - S̄ * S̄ # τ(Sⁱʲ, Sⁱʲ) = filter(S²) - filter(S)²
     return 2 * ν * tau_S_S.sum(list(index_dims))
+#---
+
+#+++ SFS KE dissipation (anisotropic horizontal/vertical closure)
+def calculate_sfs_ke_dissipation_anisotropic(u_i_horiz, νh, νv, filter,
+                                             filter_dims=["x_caa", "y_aca"],
+                                             dimensions=("x_caa", "y_aca", "z_aac"),
+                                             index_dim="i", direction_dim="j"):
+    """
+    Compute the SFS KE dissipation ε<ℓ for an anisotropic Laplacian closure
+    (HorizontalScalarDiffusivity(νh) + VerticalScalarDiffusivity(νv)) applied
+    only to the horizontal momentum equations (u, v) -- matching how
+    Oceananigans actually discretizes this closure: νh·Δ_h u_i + νv·∂zz u_i for
+    i ∈ {1,2} (u, v), with no diffusion term acting on w (diagnostic, not
+    prognostic, in a HydrostaticFreeSurfaceModel).
+
+    This is deliberately NOT expressed as 2ν S:S with the standard symmetric
+    strain-rate tensor: that identity (∫u·ν∇²u = -2ν∫S:S) only holds for a
+    single isotropic ν applied identically to every velocity component,
+    because it relies on ∇²u_i = 2∇_j S_ij for the FULL divergence of a
+    Newtonian stress tensor. Oceananigans' ScalarDiffusivity closures are
+    plain per-component Laplacians (not a divergence-of-stress operator), and
+    with direction-dependent ν the two formulations diverge -- symmetrizing
+    ∂u/∂z with ∂w/∂x into a single S13 term (as calculate_strain_tensor does)
+    would incorrectly mix a diffused quantity (∂u/∂z, weighted by νv) with an
+    undiffused one (∂w/∂x, which has no associated ν at all here). Integrating
+    the model's actual momentum equations by parts instead gives, per unit
+    volume:
+
+        ε_visc = νh[(∂u/∂x)² + (∂u/∂y)² + (∂v/∂x)² + (∂v/∂y)²]
+                 + νv[(∂u/∂z)² + (∂v/∂z)²]
+
+    i.e. a νh- or νv-weighted sum of squared *plain* velocity-gradient
+    components (not symmetrized, and excluding w entirely), matching exactly
+    what each term's own diffusion coefficient is in the model. The subfilter
+    (SFS) version follows the same "filter-variance" trick used everywhere
+    else in this pipeline: ε_Kˢ = Σ ν_j τ(∂u_i/∂x_j, ∂u_i/∂x_j) where
+    τ(a,a) = filter(a²) - filter(a)².
+
+    Parameters
+    ----------
+    u_i_horiz : xr.DataArray
+        Full (unfiltered) horizontal velocity, index dimension i ∈ {1,2} (u, v).
+    νh, νv : xr.DataArray or float
+        Horizontal and vertical viscosities [m² s⁻¹].
+    filter : gcm_filters.Filter
+        Filter object used for the spatial filtering operation.
+    filter_dims : list of str
+        Spatial dimensions along which to apply the filter.
+    dimensions : tuple of str
+        Ordered spatial coordinate names matching direction index values 1, 2, 3.
+    index_dim : str
+        Name of the velocity index dimension (default "i").
+    direction_dim : str
+        Name of the spatial-direction index dimension produced by the
+        gradient calculation (default "j").
+
+    Returns
+    -------
+    xr.DataArray
+        SFS KE dissipation ε<ℓ [m² s⁻³], same spatial dimensions as u_i_horiz
+        (the i and j index dimensions are contracted away).
+    """
+    grad_u = calculate_velocity_gradient_tensor(u_i_horiz, dimensions=dimensions, index_dim=index_dim,
+                                                direction_indices=[1, 2, 3])  # ∂uⁱ/∂xʲ, i∈{1,2}, j∈{1,2,3}
+
+    grad_u_bar = filter.apply(grad_u, dims=filter_dims)
+    tau = filter.apply(grad_u * grad_u, dims=filter_dims) - grad_u_bar * grad_u_bar  # τ(∂uⁱ/∂xʲ, ∂uⁱ/∂xʲ)
+
+    horiz_j = [j for j in tau[direction_dim].values if j != 3]
+    ε_h = νh * tau.sel({direction_dim: horiz_j}).sum([index_dim, direction_dim])
+    ε_v = νv * tau.sel({direction_dim: 3}).sum(index_dim)
+    return ε_h + ε_v
 #---
 
 #+++ SFS KE tendency

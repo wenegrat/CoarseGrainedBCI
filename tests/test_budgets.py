@@ -5,13 +5,14 @@ For each filter scale, checks that the residual is small relative to
 the smallest budget term: rms(residual) / min_v(rms(term_v)) < THRESHOLD.
 """
 
+import os
 import pytest
 import numpy as np
 import xarray as xr
 from pathlib import Path
 
 PP_OUTPUT = Path(__file__).parent.parent / "postprocessing" / "output"
-STEM      = "bci_Nx48_Ny48_Nz8"
+STEM      = os.environ.get("BCI_STEM", "bci_Nx48_Ny48_Nz8")
 # Residual must be < THRESHOLD x 100% of the smallest budget term (this number is large since we test with a
 # short, coarse simulation
 THRESHOLD = 0.1

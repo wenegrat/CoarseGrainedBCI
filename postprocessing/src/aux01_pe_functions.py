@@ -743,21 +743,39 @@ def calculate_ape_to_ke_exchange_term(w, b, filter, filter_dims=["x_caa", "y_aca
 #---
 
 #+++ SFS APE dissipation
-def calculate_sfs_ape_dissipation(rho, upsilon, upsilon_l, kappa, filter,
+def _anisotropic_dot(a, b, κh, κv, index_dim="i", vertical_index=3):
+    """κh-weighted horizontal dot product + κv-weighted vertical product of two gradient vectors."""
+    horiz = [k for k in a[index_dim].values if k != vertical_index]
+    dot_h = κh * (a.sel({index_dim: horiz}) * b.sel({index_dim: horiz})).sum(dim=index_dim)
+    dot_v = κv * (a.sel({index_dim: vertical_index}) * b.sel({index_dim: vertical_index}))
+    return dot_h + dot_v
+
+
+def calculate_sfs_ape_dissipation(rho, upsilon, upsilon_l, κh, κv, filter,
                                   filter_dims=["x_caa", "y_aca"],
                                   filtered_density=None, index_dim="i"):
     """
-    Calculate the SFS APE dissipation ε_Aˢ = filtered(κ ∇ρ · ∇Υ) - κ ∇ρ̄ · ∇Υˡ
+    Calculate the SFS APE dissipation ε_Aˢ = filtered(κ ∇ρ · ∇Υ) - κ ∇ρ̄ · ∇Υˡ,
+    with an anisotropic κ (κh horizontal, κv vertical) matching the model's
+    actual anisotropic tracer-diffusion closure (HorizontalScalarDiffusivity(κh)
+    + VerticalScalarDiffusivity(κv)).
 
     The SFS APE dissipation quantifies the removal of large-scale APE by
-    subfilter-scale diffusive processes:
+    subfilter-scale diffusive processes. It follows directly from integrating
+    the buoyancy equation ∂ρ/∂t = ... + κh∇²_h ρ + κv∂zzρ by parts against Υ,
+    which is why the horizontal and vertical contributions to ∇ρ·∇Υ must carry
+    their own respective diffusivity rather than a single scalar κ -- using κh
+    for the vertical term as well (as an earlier, isotropic-only version of
+    this function did) drastically overestimates ε_Aˢ whenever κh ≫ κv, since
+    ∂ρ/∂z (dominated by the background stratification) is typically much
+    larger than the horizontal density gradients:
 
-        ε_Aˢ = filtered(κ ∇ρ · ∇Υ) - κ ∇ρ̄ · ∇Υˡ
+        ε_Aˢ = filtered(κh ∇_h ρ · ∇_h Υ + κv ∂ρ/∂z · ∂Υ/∂z)
+               - (κh ∇_h ρ̄ · ∇_h Υˡ + κv ∂ρ̄/∂z · ∂Υˡ/∂z)
 
     where:
         Υ  = g (z - z_*(ρ)) / ρ₀   — displacement potential using full density
         Υˡ = g (z - z_*(ρ̄)) / ρ₀   — displacement potential using filtered density
-        κ  — diffusivity field
 
     Parameters
     ----------
@@ -769,8 +787,10 @@ def calculate_sfs_ape_dissipation(rho, upsilon, upsilon_l, kappa, filter,
     upsilon_l : xr.DataArray
         Large-scale displacement potential Υˡ(ρ̄, z) = g(z - z_*(ρ̄))/ρ₀,
         computed from the filtered density sort (filt_local_potential_energies.upsilon)
-    kappa : xr.DataArray
-        Diffusivity field κ (e.g. ds.κ_e from SmagorinskyLilly)
+    κh, κv : xr.DataArray or float
+        Horizontal and vertical diffusivity [m² s⁻¹] (e.g. ds.κₑ, ds.κₑ for
+        SmagorinskyLilly's single isotropic field, or the nu_h/Pr, nu_v/Pr
+        global attributes for the constant/scale_aware closures)
     filter : gcm_filters.Filter
         Filter object used to apply the spatial filtering operation
     filter_dims : list of str
@@ -786,18 +806,18 @@ def calculate_sfs_ape_dissipation(rho, upsilon, upsilon_l, kappa, filter,
     xr.DataArray
         SFS APE dissipation ε_Aˢ [J m⁻³ s⁻¹] with the same spatial dimensions as rho
     """
-    # Term 1: filtered(κ ∇ρ · ∇Υ)
+    # Term 1: filtered(κ ∇ρ · ∇Υ), anisotropic κ
     grad_rho = calculate_gradient(rho)
     grad_upsilon = calculate_gradient(upsilon)
-    kappa_grad_dot = kappa * (grad_rho * grad_upsilon).sum(dim=index_dim)
+    kappa_grad_dot = _anisotropic_dot(grad_rho, grad_upsilon, κh, κv, index_dim=index_dim)
     term1 = filter.apply(kappa_grad_dot, dims=filter_dims)
 
-    # Term 2: κ ∇ρ̄ · ∇Υˡ
+    # Term 2: κ ∇ρ̄ · ∇Υˡ, anisotropic κ
     if filtered_density is None:
         filtered_density = filter.apply(rho, dims=filter_dims)
     grad_rho_bar = calculate_gradient(filtered_density)
     grad_upsilon_l = calculate_gradient(upsilon_l)
-    term2 = kappa * (grad_rho_bar * grad_upsilon_l).sum(dim=index_dim)
+    term2 = _anisotropic_dot(grad_rho_bar, grad_upsilon_l, κh, κv, index_dim=index_dim)
 
     return term1 - term2
 #---
