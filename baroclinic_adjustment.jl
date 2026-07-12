@@ -348,12 +348,18 @@ set!(model, b=bᵢ)
 #---
 
 #+++ Setup simulation
-simulation = Simulation(model, Δt=20minutes, stop_time=params.stop_time * days)
+# Start conservatively (Δt=1minute) rather than jumping straight to max_Δt: the random per-cell noise in
+# the initial buoyancy perturbation (ϵb·randn()) gets proportionally sharper as the grid is refined (same
+# noise amplitude spread over a smaller Δx means a steeper initial gradient), and at fine resolution this
+# can blow up Centered advection within the first handful of iterations -- faster than a wizard that only
+# re-checks every IterationInterval(20) steps can react. IterationInterval(5) lets it adapt quickly once
+# the flow is actually resolved smoothly (usually within the first ~10-20 iterations).
+simulation = Simulation(model, Δt=1minute, stop_time=params.stop_time * days)
 # diffusive_cfl matters once the 'scale_aware' closure is in play: ν grows at coarser resolution (it's
 # tied to Δ, not fixed), so the explicit horizontal-diffusion stability limit can become the binding
 # constraint (tighter than plain advective CFL) -- without this, a run can blow up (NaN) well before the
 # advective cfl=0.2 limit would ever ask for a smaller Δt.
-conjure_time_step_wizard!(simulation, IterationInterval(20), cfl=0.2, diffusive_cfl=0.2, max_Δt=20minutes)
+conjure_time_step_wizard!(simulation, IterationInterval(5), cfl=0.2, diffusive_cfl=0.2, max_Δt=20minutes)
 @info "Simulation object created"
 #---
 
