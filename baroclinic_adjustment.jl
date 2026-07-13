@@ -104,9 +104,9 @@ let s = ArgParseSettings()
             help = "Turbulence closure: 'constant' (ScalarDiffusivity/anisotropic-Laplacian with fixed \
                     --nu_h/--nu_v, matches the KH setup's explicit-dissipation design, but doesn't converge \
                     as resolution improves), 'scale_aware' (default; anisotropic Laplacian with ν set from a \
-                    grid-Péclet-number criterion, ν = (U/Pe_target)·Δ per direction -- shrinks automatically \
+                    grid-Péclet-number criterion, ν = (U/Pe_cell)·Δ per direction -- shrinks automatically \
                     as the grid is refined, and is automatically much smaller vertically than horizontally \
-                    since Δz ≪ Δx,Δy; see --Pe_cell), or 'smagorinsky' (SmagorinskyLilly LES closure -- NOT \
+                    since Δz ≪ Δx,Δy; see --Pe_cell_h/--Pe_cell_v), or 'smagorinsky' (SmagorinskyLilly LES closure -- NOT \
                     recommended at this resolution: its Richardson-number stability correction (Cb) zeroes \
                     out the eddy viscosity almost everywhere at mesoscale-permitting resolution, since \
                     resolved horizontal straining is tiny compared to the background stratification; \
@@ -119,7 +119,7 @@ let s = ArgParseSettings()
 
         "--nu_h"
             help = "Horizontal viscosity ν_h for the 'constant' closure (default: 1.0 m² s⁻¹). Ignored \
-                    unless --closure=constant; see --Pe_cell for the 'scale_aware' closure instead."
+                    unless --closure=constant; see --Pe_cell_h/--Pe_cell_v for the 'scale_aware' closure instead."
             arg_type = Float64
             required = false
             default = 1.0
@@ -131,16 +131,43 @@ let s = ArgParseSettings()
             required = false
             default = 1.0
 
-        "--Pe_cell"
-            help = "Target cell Péclet number Pe = UΔ/ν for the 'scale_aware' closure (default: 2.0, the \
-                    classical threshold above which Centered-scheme advection-diffusion produces spurious \
-                    2Δx grid-scale oscillations). Sets ν_h = (U/Pe_cell)·Δx (or Δy) and ν_v = (U/Pe_cell)·Δz, \
-                    where U = M²·Lz/f is the thermal-wind velocity scale intrinsic to this problem's own \
-                    parameters (not an arbitrary choice). Lower Pe_cell -> more dissipation. Ignored unless \
+        "--Pe_cell_h"
+            help = "Target horizontal cell Péclet number Pe = UΔx/ν_h for the 'scale_aware' closure \
+                    (default: 100.0 -- empirically tuned against horizontal surface-buoyancy smoothness \
+                    across a resolution sweep; well above the classical linear-stability threshold of ~2, \
+                    which was found to over-damp the actual baroclinic instability). Sets \
+                    ν_h = (U/Pe_cell_h)·√(Δx·Δy), where U = M²·Lz/f is the thermal-wind velocity scale \
+                    intrinsic to this problem's own parameters. Lower Pe_cell_h -> more horizontal \
+                    dissipation. Independent of --Pe_cell_v (see its help for why they're not tied \
+                    together). Ignored unless --closure=scale_aware."
+            arg_type = Float64
+            required = false
+            default = 100.0
+
+        "--Pe_cell_v"
+            help = "Target vertical cell Péclet number Pe = UΔz/ν_v for the 'scale_aware' closure \
+                    (default: 50.0 -- empirically re-tuned by a Pe_cell_v sweep at 96x96x16, see below; NOT \
+                    the same as --Pe_cell_h's 100.0). Sets ν_v = (U/Pe_cell_v)·Δz. Kept separate from \
+                    --Pe_cell_h because there's no reason the same empirically-tuned Péclet target should \
+                    transfer between directions: the two grid spacings differ by ~2 orders of magnitude and \
+                    the physics forcing each direction's grid-scale noise (horizontal straining vs. vertical \
+                    shear) is different. Centered advection has no implicit dissipation, so nonlinear terms \
+                    continuously alias energy toward the grid scale in both directions as soon as any \
+                    resolved eddying motion exists -- sharing a single Pe_cell=100 under-damped this in the \
+                    vertical once Δz was refined (visibly noisier fields, persistently-elevated SFS budget \
+                    terms that didn't shrink with resolution the way a one-off IC transient would). A sweep \
+                    over Pe_cell_v ∈ {100,50,20,10,5,2} at 96x96x16 found: below ~20 the flow becomes visibly \
+                    over-damped (max|u| dropping from ~2 m/s at Pe_cell_v=100 to ~0.1 m/s at Pe_cell_v=2 --  \
+                    baroclinic instability itself gets suppressed, not just grid noise), which spuriously \
+                    *improves* the KE-budget residual ratio simply because all terms shrink together, not \
+                    because the numerics genuinely improved -- watch for this artifact rather than chasing \
+                    the residual ratio down in isolation. Pe_cell_v=50 was the best point that still matched \
+                    the baseline's growth strength while measurably improving KE closure (residual ratio \
+                    ~30-42% -> ~22-28%). Lower Pe_cell_v -> more vertical dissipation. Ignored unless \
                     --closure=scale_aware."
             arg_type = Float64
             required = false
-            default = 2.0
+            default = 50.0
 
         "--C_smag"
             help = "Smagorinsky constant C for the 'smagorinsky' closure (default: 0.16, Lilly 1966). \
@@ -261,14 +288,20 @@ grid = RectilinearGrid(size=(Nx, Ny, Nz),
 # under-damping grid-scale noise (too small) -- see 'scale_aware' below.
 #
 # 'scale_aware' (default) -- anisotropic Laplacian ScalarDiffusivity, but with ν set automatically from a
-# grid-Péclet-number criterion instead of a fixed value: ν = (U/Pe_cell)·Δ per direction, where U is a
-# velocity scale intrinsic to this problem (the thermal-wind scale U = M²·Lz/f) and Pe_cell (--Pe_cell,
-# default 2) is the classical grid-Péclet-number threshold above which Centered-scheme
-# advection-diffusion produces spurious 2Δx grid-scale oscillations. This makes ν shrink automatically
-# as the grid is refined (Δx,Δy,Δz → 0), and automatically anisotropic (νv ≪ νh follows directly from
-# Δz ≪ Δx,Δy, with no hand-tuning) -- while remaining an explicit, deterministic Laplacian closure (not a
-# residual, not high-order/biharmonic), so the SFS dissipation diagnostic stays as well-defined as the
-# 'constant' closure's.
+# grid-Péclet-number criterion instead of a fixed value: ν_h = (U/Pe_cell_h)·√(Δx·Δy), ν_v =
+# (U/Pe_cell_v)·Δz, where U is a velocity scale intrinsic to this problem (the thermal-wind scale
+# U = M²·Lz/f). This makes ν shrink automatically as the grid is refined, and is automatically
+# anisotropic (νv ≪ νh follows directly from Δz ≪ Δx,Δy) -- while remaining an explicit, deterministic
+# Laplacian closure (not a residual, not high-order/biharmonic), so the SFS dissipation diagnostic stays
+# as well-defined as the 'constant' closure's. Pe_cell_h and Pe_cell_v are independent CLI parameters
+# (--Pe_cell_h defaults to 100, --Pe_cell_v to 50 -- see --Pe_cell_v's help for the sweep that picked 50):
+# a resolution sweep with a single shared Pe_cell=100 (tuned only by eye against horizontal
+# surface-buoyancy smoothness) showed visibly noisier fields and
+# persistently-elevated (not resolution-decaying) SFS budget terms as Δz was refined at fixed Pe_cell --
+# i.e. the horizontally-tuned Pe_cell under-damps continuously-regenerated vertical grid-scale noise
+# (Centered advection has no implicit dissipation, so nonlinear terms keep aliasing energy toward the
+# grid scale in both directions once any resolved eddying motion exists). Splitting the two lets each
+# direction's dissipation be tuned to its own noise-generation/damping balance.
 #
 # 'smagorinsky' -- SmagorinskyLilly LES closure: a *diagnostic* eddy viscosity νₑ computed from the
 # locally resolved strain rate. NOT recommended at this resolution: testing showed its Richardson-number
@@ -284,8 +317,8 @@ elseif params.closure == "scale_aware"
     Ω_earth = 7.2921159e-5  # rad/s
     f = 2 * Ω_earth * sind(params.latitude)
     U_scale = params.M2 * params.Lz / abs(f)
-    global νh_scale_aware = (U_scale / params.Pe_cell) * sqrt(Δx * Δy)
-    global νv_scale_aware = (U_scale / params.Pe_cell) * Δz
+    global νh_scale_aware = (U_scale / params.Pe_cell_h) * sqrt(Δx * Δy)
+    global νv_scale_aware = (U_scale / params.Pe_cell_v) * Δz
     κh, κv = νh_scale_aware / params.Pr, νv_scale_aware / params.Pr
     (HorizontalScalarDiffusivity(ν=νh_scale_aware, κ=κh),
      VerticalScalarDiffusivity(VerticallyImplicitTimeDiscretization(); ν=νv_scale_aware, κ=κv))
