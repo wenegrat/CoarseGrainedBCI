@@ -12,6 +12,17 @@ def pytest_addoption(parser):
         default="",
         help="Suffix appended to postprocessing output filenames (e.g. '_fixed_ref')",
     )
+    parser.addoption(
+        "--min-time-days",
+        default=1.0,
+        type=float,
+        help="Exclude budget time samples before this many days from the residual calculation (default: "
+             "1.0). The first ~1-2 saved time samples are dominated by a large initial transient (the "
+             "density-sorting reference profile adjusting away from the perturbed initial condition, plus "
+             "any initial-condition noise still decaying) that isn't part of the actual budget balance -- "
+             "including it inflates rms(term) for whichever term the transient happens to dominate (often "
+             "∫Rˢ dV or ∫-∂ₜ SFS APE dV), which either masks or distorts the real relative residual.",
+    )
 
 
 def pytest_configure(config):

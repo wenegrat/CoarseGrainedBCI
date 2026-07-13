@@ -3,6 +3,9 @@ Budget closure tests for SFS KE and APE budgets.
 
 For each filter scale, checks that the residual is small relative to
 the smallest budget term: rms(residual) / min_v(rms(term_v)) < THRESHOLD.
+
+Time samples before --min-time-days (default 1.0 day) are excluded from every rms() in this calculation --
+see conftest.py's --min-time-days help for why.
 """
 
 import os
@@ -23,9 +26,23 @@ def ref_suffix(request):
     return request.config.getoption("--ref-suffix")
 
 
+@pytest.fixture(scope="session")
+def min_time_days(request):
+    return request.config.getoption("--min-time-days")
+
+
 def rms(arr):
     """Root mean square of an array, ignoring NaNs."""
     return np.sqrt(np.nanmean(arr**2))
+
+
+def drop_initial_transient(ds, min_time_days):
+    """Exclude time samples before min_time_days from the residual/rms calculation.
+
+    See --min-time-days' help (conftest.py) for why: the first ~1-2 saved samples are dominated by a large
+    initial transient unrelated to the ongoing budget balance, not a real closure failure.
+    """
+    return ds.sel(time=slice(min_time_days * 86400, None))
 
 
 def relative_residual(ds, residual_var, budget_vars):
@@ -76,9 +93,9 @@ def ke_budget(ref_suffix):
     return load("sfs_ke_budget_integrated", ref_suffix)
 
 
-def test_ke_budget_residual(ke_budget, l_idx):
+def test_ke_budget_residual(ke_budget, l_idx, min_time_days):
     l = ke_budget.filter_scale.values[l_idx]
-    ds_l = ke_budget.sel(filter_scale=l)
+    ds_l = drop_initial_transient(ke_budget.sel(filter_scale=l), min_time_days)
     rel = relative_residual(ds_l, "residual_K", KE_BUDGET_VARS)
     print(f"\nKE budget  (l={l:.4f})")
     print_budget_summary(ds_l, "residual_K", KE_BUDGET_VARS, rel)
@@ -104,9 +121,9 @@ def ape_budget(ref_suffix):
     return load("sfs_ape_budget_integrated", ref_suffix)
 
 
-def test_ape_budget_residual(ape_budget, l_idx):
+def test_ape_budget_residual(ape_budget, l_idx, min_time_days):
     l = ape_budget.filter_scale.values[l_idx]
-    ds_l = ape_budget.sel(filter_scale=l)
+    ds_l = drop_initial_transient(ape_budget.sel(filter_scale=l), min_time_days)
     rel = relative_residual(ds_l, "residual_A", APE_BUDGET_VARS)
     print(f"\nAPE budget  (l={l:.4f})")
     print_budget_summary(ds_l, "residual_A", APE_BUDGET_VARS, rel)
