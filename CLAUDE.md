@@ -12,7 +12,7 @@ Kelvin-Helmholtz instability), adapted to a 3D **double-front, doubly-periodic-h
 adjustment setup (following the [Oceananigans baroclinic_adjustment
 example](https://clima.github.io/OceananigansDocumentation/stable/literated/baroclinic_adjustment)). The
 pipeline is:
-1. **Julia simulation** (Oceananigans.jl `HydrostaticFreeSurfaceModel`) -> NetCDF output
+1. **Julia simulation** (Oceananigans.jl `NonhydrostaticModel`) -> NetCDF output
 2. **Python post-processing** -> filter fields, sort density, compute energy transfer and SFS budgets, plot
 
 GitHub remote: `git@github.com:wenegrat/CoarseGrainedBCI.git` (fork of `tomchor/CoarseGrainedKHAPE`,
@@ -47,9 +47,9 @@ Set `N_WORKERS` env var to control parallelism (default 1): `N_WORKERS=4 bash 00
 pytest tests/ -v -s
 ```
 `test_budgets.py` checks SFS KE/APE budget closure (rms(residual)/min(rms(terms)) < 10%) against
-`postprocessing/output/bci_Nx48_Ny48_Nz8_*` (run `00_get_budgets.sh` first). See Notes below for the current
-state of this test -- it does not yet pass, and that looks like a resolution/duration limitation rather than
-a code bug.
+`postprocessing/output/bci_Nx48_Ny48_Nz8_*` (run `00_get_budgets.sh` first). Historically failed; see the
+Notes entry on the domain-padding bug fix below before assuming it still does -- that bug inflated every
+budget term computed on this dataset too, and hasn't yet been re-checked against this specific test.
 
 ### Python environment
 The repo's `environment.yml` is a Linux-only conda lockfile (built on an HPC). For local development
@@ -67,8 +67,10 @@ invocation picks it up automatically.
 ## Architecture
 
 ### Physical setup (`baroclinic_adjustment.jl`)
-- Model: `HydrostaticFreeSurfaceModel` + `ImplicitFreeSurface`, `BetaPlane` Coriolis, `BuoyancyTracer`,
-  `Centered(order=4)` advection, `ScalarDiffusivity(ν, κ)` closure.
+- Model: `NonhydrostaticModel` (no free surface at all -- see Notes for why this replaced the earlier
+  `HydrostaticFreeSurfaceModel`+`ImplicitFreeSurface` setup), `BetaPlane` Coriolis, `BuoyancyTracer`,
+  `Centered(order=4)` advection, `ScalarDiffusivity(ν, κ)` closure. w is a genuine prognostic variable
+  here, with its own momentum equation and dissipative dynamics.
 - Grid: `(Periodic, Periodic, Bounded)` -- a **double front** rather than a single front against channel
   walls: two opposite-signed buoyancy ramps (`double_ramp`) so the field closes periodically in y. This
   avoids side-wall boundary layers (an extra KE sink the budget would otherwise need to account for) and
@@ -85,22 +87,25 @@ invocation picks it up automatically.
   (4σ truncation). The default halo Oceananigans picks is sized for the advection scheme, not for a wide
   Gaussian filter stencil -- an undersized halo causes silent memory corruption (a segfault at an unrelated
   *later* point, not a clean bounds-check error), not an immediate crash at the filter call site.
-- **Unlike the KH setup, Πₖ (cross-scale KE flux) and ε_Kˢ (SFS KE dissipation) are NOT computed online.**
-  An Oceanostics bug (see Notes) crashes the online multi-direction `GaussianFilter` for a periodic
-  y-direction, so both are computed offline in Python instead (`03_energy_transfer.py`,
-  `04_sfs_ke_budget.py`).
-- The KE-side coarse-graining (Πₖ, ε_Kˢ, and the SFS KE density itself) is restricted to **horizontal
-  velocity components only** (i,j ∈ {1,2}): w is diagnostic (not prognostic) in a
-  `HydrostaticFreeSurfaceModel` and has no independent dissipative dynamics, so including it would leave the
-  KE budget unable to close even in principle. w is still used, unrestricted, for the APE↔KE exchange term
-  (a genuine physical buoyancy-flux conversion that needs the real vertical velocity).
-- `SequentialGaussianFilter` (defined locally in `baroclinic_adjustment.jl`): does two sequential 1D Gaussian
-  filter passes (x then y) instead of asking Oceanostics for one combined `dims=(1,2)` filter -- works
-  around the Oceanostics bug for the plain filtered-field *outputs*. Not used for the composite
-  `KineticEnergyCrossScaleFlux`/`CoarseGrainedKineticEnergyDissipationRate` functions -- threading it through
-  those caused a severe compile-time blowup (LLVM choking on an already deeply-nested
-  `KernelFunctionOperation` tree doubled in nesting depth), which is why Πₖ/ε_Kˢ are computed offline instead
-  of patched online.
+- **Πₖ (cross-scale KE flux) and ε_Kˢ (SFS KE dissipation) are computed online**, via Oceanostics'
+  `KineticEnergyCrossScaleFlux`/`SubFilterKineticEnergyDissipationRate`, one field per filter scale
+  (`Π_K_ℓ50km`, `ε_Kˢ_ℓ50km`, etc.). This used to be offline-only (an Oceanostics bug crashed the online
+  multi-direction `GaussianFilter` for a periodic y-direction -- see Notes) but the fix landed in
+  Oceanostics v0.17.3, and `SubFilterKineticEnergyDissipationRate` (the missing SFS-dissipation
+  diagnostic) was added in the still-unmerged `tc/sfs-ke` branch (pinned in `Project.toml`/`Manifest.toml`
+  via `Pkg.add(url=..., rev="tc/sfs-ke")` -- check whether tomchor/Oceanostics.jl#266 has merged and
+  released before assuming this pin is still needed). Both were validated against the previous offline
+  Python implementation before switching over (0.99 spatial correlation, rms agreement within ~1-10%).
+- Πₖ is the **full 3D contraction** (`KineticEnergyCrossScaleFlux(model, filter; dims=(1,2,3))`): w is a
+  genuine prognostic variable in this `NonhydrostaticModel`, with its own momentum equation and dissipative
+  dynamics, so there's no reason to exclude it (unlike the earlier `HydrostaticFreeSurfaceModel` setup,
+  where w was diagnostic and excluding it was necessary for the KE budget to close even in principle).
+  ε_Kˢ's public API has no `dims` restriction at all -- it always includes w's full contribution via the
+  model's actual per-direction viscous fluxes, which is simply correct now rather than the small "phantom"
+  w-diffusion term it represented under the old hydrostatic setup (verified negligible there, ~1e-8
+  relative magnitude, via a validation smoke test). The offline SFS KE budget pipeline
+  (`04_sfs_ke_budget.py`, `calculate_energy_transfer()`) was updated to match -- the SFS KE density and
+  offline Π_K (validation-only; Π_K is read from the online output in practice) are now full 3D too.
 - `utils.jl` -- `closest_factor_number()` (FFT-friendly grid sizes), `show_gpu_status()` (unchanged from KH).
 
 ### Post-processing pipeline (`postprocessing/`)
@@ -110,14 +115,14 @@ Same 01-06 structure as KHAPE, adapted for horizontal (x,y) filtering instead of
 |--------|--------|
 | `01_filter_fields.py` | filters in (x,y) instead of (x,z); filter scales are free parameters again (no longer need to match an online `filter_ℓs`) |
 | `02_sort_density.py` | unchanged -- the Winters sort is dimension-agnostic |
-| `03_energy_transfer.py` | now computes Πₖ offline (`include_pi_k=True`, was `False` when Julia provided it) |
-| `04_sfs_ke_budget.py` | biggest change -- reads Πₖ from `03`'s output (`load_energy_transfer`) instead of the now-nonexistent online field; computes ε_Kˢ offline via `calculate_sfs_ke_dissipation`; restricts the KE tensors to horizontal-only components so the budget's LHS (SFS KE) and RHS (Πₖ, ε_Kˢ) stay dimensionally consistent |
+| `03_energy_transfer.py` | Πₖ is no longer computed here (`include_pi_k=False`) -- it's read straight from the simulation NetCDF now; still computes Π_A and the APE↔KE exchange offline |
+| `04_sfs_ke_budget.py` | reads Πₖ and ε_Kˢ directly from the simulation output (`ds[f"Π_K_ℓ{ℓ_km}km"]`, `ds[f"ε_Kˢ_ℓ{ℓ_km}km"]`) instead of computing/loading them; still computes the SFS KE density (LHS) offline via the stress-tensor trace, full 3D (i,j ∈ {1,2,3}) to stay dimensionally consistent with the online Πₖ/ε_Kˢ now that w is prognostic |
 | `05_sfs_ape_budget.py` | filters in (x,y); diffusivity κ now read from `nu`/`Pr` global attributes (a constant `ScalarDiffusivity`), not a `ds.κ` spatial field (which only exists for non-constant closures and was never actually populated here) |
 
 `aux00_utils.py`'s `GaussianFilter` class filters (x,y), both periodic (`mode='wrap'` on both), replacing
 KH's (x periodic, z bounded `mode='nearest'`). `condense_velocities` (u,v,w) is used throughout instead of
-KH's `condense_uw_velocities` (u,w only, valid for the 2D x-z KH case) -- though see the horizontal-only
-restriction above for how w is still excluded specifically from the KE cross-scale tensors.
+KH's `condense_uw_velocities` (u,w only, valid for the 2D x-z KH case); w is now included fully in the
+KE cross-scale tensors too (see the Πₖ note above), not excluded.
 
 `sweep*` scripts, `validation/`, and the standalone `plot*`/`anim1_panels.py` scripts still describe the KH
 pipeline's online-vs-offline validation setup and have not been adapted -- there is no online Πₖ/ε_Kˢ to
@@ -126,15 +131,18 @@ surface buoyancy field to a GIF (no ffmpeg dependency, uses matplotlib's `Pillow
 
 ### Key dependencies
 - **Python**: `numpy`, `xarray`, `scipy`, `matplotlib`, `dask`, `gcm_filters`, `netcdf4`
-- **Julia**: `Oceananigans` v0.110.8, `Oceanostics` v0.17.2, `NCDatasets`, `CairoMakie` (Julia 1.11.2)
+- **Julia**: `Oceananigans` v0.110.8, `Oceanostics` v0.18.0 (pinned to the `tc/sfs-ke` branch, not yet a
+  tagged release -- see the Notes entry on the online Πₖ/ε_Kˢ switch), `NCDatasets`, `CairoMakie` (Julia
+  1.11.2)
 
 ## Physics Reference
 
 - **TPE** = integral of g*rho*z dV (total potential energy)
 - **RPE** = minimum PE achievable by adiabatic rearrangement (from sorted reference state)
 - **APE** = TPE - RPE (available for conversion to KE)
-- **Πₖ**, **Π_A** -- cross-scale energy transfer (sub-filter to resolved). Πₖ is horizontal-only here (see
-  Architecture); Π_A is unrestricted (density/APE has no analogous "diagnostic component" issue).
+- **Πₖ**, **Π_A** -- cross-scale energy transfer (sub-filter to resolved). Both are full 3D/unrestricted:
+  Π_A always was (density/APE has no analogous "diagnostic component" issue), and Πₖ is too now that w is
+  prognostic (see Architecture) -- it was horizontal-only under the earlier hydrostatic setup.
 - Physical constants: `g=9.81`, `rho_0=1025`
 
 ## Code Style
@@ -149,22 +157,64 @@ surface buoyancy field to a GIF (no ffmpeg dependency, uses matplotlib's `Pillow
 
 ## Notes
 
-- **Oceanostics bug**: `GaussianFilter(; dims=(1,2), σ)` crashes (heap corruption -> SIGILL) on a grid with
-  real `Ny>1` and periodic y -- filed as
+- **Oceanostics bug (fixed)**: `GaussianFilter(; dims=(1,2), σ)` used to crash (heap corruption -> SIGILL)
+  on a grid with real `Ny>1` and periodic y -- filed as
   [tomchor/Oceanostics.jl#262](https://github.com/tomchor/Oceanostics.jl/issues/262), with a minimal
-  reproducer. `dims=(1,)` alone (periodic x only, matching KH's `Ny=1` case) does not crash -- this repo's
-  Julia script works around it via `SequentialGaussianFilter` for filtered-field outputs, and avoids the
-  composite KE-transfer functions entirely by moving Πₖ/ε_Kˢ offline (see Architecture).
-- **Budget closure is not yet validated at production resolution.** A 1-day toy run (16x16x4) and a 20-day
-  run at default resolution (48x48x8) both fail the KHAPE-style closure test (`rms(residual)/min(rms(terms))
-  < 10%), though the 20-day run is substantially closer: the raw reported percentage is inflated by an
-  anomalously tiny ε_Kˢ (little sub-filter-scale content has developed yet at this resolution/duration);
-  comparing the residual against the *dominant* budget term instead gives ~25-87% depending on filter scale,
-  improving with run length. This looks like a resolution/duration limitation (mesoscale eddies are barely
-  resolved at 48x48, and even 20 days is only a handful of e-folding times of the Eady growth rate for this
-  setup, ~1.2 days) rather than a code bug -- revisit with a finer-resolution, longer HPC run before trusting
-  the closure numbers, or treating a failure as a real regression.
+  reproducer; fixed in v0.17.3 ([PR #263](https://github.com/tomchor/Oceanostics.jl/pull/263), root cause
+  was a multi-direction filter's staged kernel launch being sized from the operand instead of the
+  destination field, which broke specifically for *windowed* destinations like this repo's
+  `indices=(:, :, grid.Nz)` surface output writer). The `SequentialGaussianFilter` workaround this repo used
+  to carry (two sequential 1D passes instead of one `dims=(1,2)` call) has been removed now that the native
+  filter works directly; Πₖ/ε_Kˢ are computed online (see Architecture) instead of deferred offline.
+- **NonhydrostaticModel replaced HydrostaticFreeSurfaceModel+ImplicitFreeSurface.** Motivated by comparing
+  against tomchor's own Eady baroclinic-instability example (Oceanostics PR #260,
+  `docs/examples/eady_baroclinic_instability.jl`), which uses `NonhydrostaticModel` and closes its
+  coarse-grained filtered-KE budget to ~11-15% residual/dominant -- much better than this repo's ~40-60%
+  at the time. Switching just the model type (keeping our own closure/advection/resolution otherwise fixed)
+  did *not* reproduce that improvement on its own (~40-45% either way), ruling out the free surface as the
+  sole cause. A live, ongoing investigation into tomchor's example (run standalone, outside this repo) found
+  that swapping his buoyancy-production-term convention (`w̄b̄`, using the raw filtered perturbation
+  buoyancy) for this repo's own convention (`w̄b̄ᵣ`, using a Winters-sorted reference-state buoyancy)
+  substantially degrades *his* closure too when done carelessly (dramatically, if the sort mistakenly
+  includes the front's own horizontally-varying background buoyancy, which double-counts energy already
+  captured by his separate mean-shear production term `Pu` -- only the horizontally-uniform, z-only part of
+  a background field can be added to a buoyancy production term "for free", by an exact incompressibility
+  argument: horizontal-mean w is exactly zero at every z in a periodic, impermeable-boundary domain). The
+  corrected version of that test (background restricted to the z-only stratification) was in progress when
+  the model switch was made permanent here; check conversation history for its outcome before assuming the
+  buoyancy-convention question is resolved one way or the other. The NonhydrostaticModel switch itself is
+  being kept regardless, since it removes the free surface's own complications (no η, no barotropic
+  pressure-correction term, no dimension-inference limitation when trying to output η) and makes w a
+  properly prognostic variable, matching tomchor's own validated approach -- but it should be treated as an
+  ongoing architecture change, not a settled fix for the closure gap.
+- **Budget closure gap was (mostly) explained by a domain-padding bug -- fixed.** `aux00_utils.py`'s
+  `load_dataset_and_grid()` used to call a `_pad_domain_in_z()` helper that doubled the z-domain via
+  edge-value replication before recomputing `dV`, left over from the old KH pipeline where filtering also
+  operated in z. It served no purpose once filtering became horizontal-only, but silently remained, so every
+  volume integral computed via `integrate()` throughout this entire fork's history (everything downstream of
+  `load_dataset_and_grid`: all of 01-05, `plot4_panels.py`, `S2_panels.py`, `inv06_total_mixing_check.py`,
+  `S4_thumbnail.py`, the `sweep*` scripts) summed over roughly twice the physical domain, with the padded
+  cells inflating each budget term by a *different*, term-specific factor (measured on one dataset/timestep:
+  Πₖ 1.96x, εˡ 1.25x, ε_Kˢ 1.48x, raw w 9.21x) rather than a uniform scale that would cancel in a residual.
+  Found during a code review requested specifically to look for bugs affecting the large-scale KE budget;
+  confirmed via direct numerical test, then removed entirely (function and call site) per explicit
+  instruction, since padding-in-z has no remaining purpose. Grep-confirmed no other code depends on it.
+  Re-running the full 01->04 pipeline on `bci_Nx96_Ny96_Nz16_nonhydro` after the fix dropped the filtered
+  (large-scale) KE budget residual/dominant from 39.6%/46.2% to **6.2%/4.6%** (ℓ=50/100km) -- right in the
+  range of tomchor's own Eady-example floor (~11-15%, see above), essentially closing the multi-week
+  "budgets don't converge with resolution" investigation. All closure percentages quoted anywhere earlier in
+  this file or in conversation history predate this fix and should be treated as unreliable until
+  regenerated; the buoyancy-convention investigation above became moot once this fix landed (see the
+  "definitive, exact result" in conversation history: `w̄b̄` and `w̄b̄ᵣ` are provably identical for our own
+  simulation regardless of the padding bug, since it never affected that particular identity). Still open:
+  whether this fix changes closure at other resolutions (e.g. 192x192x32), and whether the SFS KE budget
+  (as opposed to the filtered/large-scale one) improves comparably.
+- **Minor, unresolved: Gaussian filter truncation-radius mismatch.** Oceanostics' online `GaussianFilter`
+  defaults to a 2σ truncation radius (`ceil(Int, 2σ/Δ)` grid cells); this repo's offline
+  `scipy.ndimage.gaussian_filter1d` defaults to 4σ (`truncate=4.0`). Verified numerically on a real w field:
+  ~1.3% relative rms difference, 0.9999 correlation -- real but small, not yet fixed.
 - `online_ke_transfer_validation.md` is a KH-era dev note about computing Πₖ online and validating it against
-  the offline pipeline -- it predates this fork's move back to fully-offline Πₖ/ε_Kˢ and no longer describes
-  current behavior.
+  the offline pipeline -- it predates both this fork's move to fully-offline Πₖ/ε_Kˢ and the subsequent move
+  back to online (see above), so it still doesn't describe current behavior, though the general idea
+  (validate online against offline before trusting it) is exactly what was done again for this switch.
 - Output files (`.nc`, `.mp4`, `.pdf`, `.png`, `.gif`, `.jld2`) are excluded from git.

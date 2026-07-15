@@ -326,7 +326,7 @@ def sorted_timeseries(ds, field_to_sort="rho", dV_name="dV", LxLy_name="LxLy",
 #+++ Per-timestep worker (pure numpy, parallelisable)
 def _process_single_timestep(rho_np, z_np, rho_sorted_1d, dz_sorted_1d, z_sorted_1d):
     """
-    Compute APE, z_0, and upsilon for one timestep.  All inputs/outputs are
+    Compute APE, z_0, upsilon, and D=dz*/drho for one timestep.  All inputs/outputs are
     plain numpy arrays so the function can be run in a thread or process pool.
     """
     shape = rho_np.shape
@@ -356,7 +356,31 @@ def _process_single_timestep(rho_np, z_np, rho_sorted_1d, dz_sorted_1d, z_sorted
     # --- upsilon: Υ = g (z - z_0) / ρ0 ---
     upsilon_3d = g * (z_np - z0_3d) / ρ0
 
-    return ape_3d, z0_3d, upsilon_3d
+    # --- D(ρ) = dz*/dρ: analytic derivative of the sorted reference profile (see derivation notes),
+    # reused via the same best_idx lookup already computed for z0. Computed via the inverse function
+    # theorem, D = 1/(dρ*/dz̃), differentiating rho_sorted_1d w.r.t. the strictly-increasing z_sorted_1d
+    # (safe for np.gradient) rather than the other way around (rho_sorted_1d can have exact ties in
+    # well-mixed patches of the profile, which would divide by zero if used as the coordinate array).
+    drhostar_dz_1d = np.gradient(rho_sorted_1d, z_sorted_1d)
+    # rho_sorted_1d is constructed by sorting density in descending order (see _sort_single_timestep),
+    # so it is non-increasing by construction and dρ*/dz̃ can only be <= 0 in exact arithmetic -- the
+    # reference profile can never be unstably stratified. Any positive values here are floating-point
+    # round-off from subtracting near-equal densities (observed up to ~1e-10, i.e. machine-epsilon scale,
+    # not a real sign). Clip to the known-true sign before regularizing, so D can never spuriously imply
+    # unstable stratification.
+    drhostar_dz_1d = np.minimum(drhostar_dz_1d, 0.0)
+    # Regularize the genuine singularity of the Υ formulation in exactly-well-mixed patches (dρ*/dz̃ = 0
+    # there) -- a real feature of the theory (see paper, εₐ ∝ ∂z*/∂ρ), not a numerical artifact, but we
+    # still need a finite value to avoid inf/nan propagating downstream. Floor the magnitude at a small
+    # fraction of the (genuinely negative) profile's own typical gradient scale, always resolving toward
+    # the stable (non-positive) side.
+    negative = drhostar_dz_1d[drhostar_dz_1d < 0]
+    eps = 1e-3 * np.abs(negative).mean() if negative.size > 0 else 1e-12
+    drhostar_dz_1d_safe = np.where(drhostar_dz_1d > -eps, -eps, drhostar_dz_1d)
+    D_1d = 1.0 / drhostar_dz_1d_safe
+    D_3d = D_1d[best_idx].reshape(shape)
+
+    return ape_3d, z0_3d, upsilon_3d, D_3d
 #---
 
 #+++ Local APE and TPE time series calculations
@@ -389,7 +413,11 @@ def local_potential_energies_timeseries(ds, rho_sorted, dz_sorted, verbose_level
     xr.Dataset with:
         - ape     : (time, x, y, z) — local APE density [m² s⁻²]
         - z0      : (time, x, y, z) — reference height z_0
-        - upsilon : (time, x, y, z) — buoyancy displacement potential Υ
+        - upsilon : (time, x, y, z) — buoyancy displacement potential Υ (diagnostic only --
+                    see calculate_sfs_ape_dissipation()/calculate_cross_scale_ape_flux() for why its
+                    gradient is reconstructed analytically from D rather than by differentiating this field)
+        - D       : (time, x, y, z) — dz*/dρ, the analytic derivative of the sorted reference profile,
+                    interpolated onto the grid via the same lookup used for z0
         - tpe     : (time, x, y, z) — local TPE density g·ρ·z / ρ0
         - rpe     : (time, z_1d_sorted) — local RPE density in sorted state
         - rho_sorted : (time, z_1d_sorted) — sorted reference density (passed through)
@@ -440,17 +468,20 @@ def local_potential_energies_timeseries(ds, rho_sorted, dz_sorted, verbose_level
     local_ape_list     = []
     local_z0_list      = []
     local_upsilon_list = []
+    local_D_list       = []
 
-    for ape_3d, z0_3d, upsilon_3d in results:
+    for ape_3d, z0_3d, upsilon_3d, D_3d in results:
         local_ape_list.append(    xr.DataArray(ape_3d,     dims=dims0, coords=coords0))
         local_z0_list.append(     xr.DataArray(z0_3d,      dims=dims0, coords=coords0))
         local_upsilon_list.append(xr.DataArray(upsilon_3d, dims=dims0, coords=coords0))
+        local_D_list.append(      xr.DataArray(D_3d,       dims=dims0, coords=coords0))
 
     if verbose_level > 0: print("\nDone!")
 
     local_ape_4d     = xr.concat(local_ape_list,     dim="time").assign_coords(time=ds.time)
     local_z0_4d      = xr.concat(local_z0_list,      dim="time").assign_coords(time=ds.time)
     local_upsilon_4d = xr.concat(local_upsilon_list, dim="time").assign_coords(time=ds.time)
+    local_D_4d        = xr.concat(local_D_list,       dim="time").assign_coords(time=ds.time)
 
     tpe = local_TPE(ds[density_name], z_name=z_name)
     rpe = local_TPE(rho_sorted, z_name="z_1d_sorted")
@@ -460,6 +491,7 @@ def local_potential_energies_timeseries(ds, rho_sorted, dz_sorted, verbose_level
         ape = local_ape_4d,
         z0 = local_z0_4d,
         upsilon = local_upsilon_4d,
+        D = local_D_4d,
         tpe = tpe,
         rpe = rpe,
         rho_sorted = rho_sorted,
@@ -751,14 +783,61 @@ def _anisotropic_dot(a, b, κh, κv, index_dim="i", vertical_index=3):
     return dot_h + dot_v
 
 
+def analytic_grad_upsilon(grad_rho, D, index_dim="i", vertical_index=3):
+    """
+    Analytic ∂ᵢΥ, built from the chain rule rather than by differentiating the assembled
+    (sorted-profile-lookup-based) Υ field directly:
+
+        ∂ᵢΥ = -(g/ρ₀) D(ρ) ∂ᵢρ + (g/ρ₀) δᵢ₃
+
+    where D(ρ) = dz*/dρ (see local_potential_energies_timeseries()). Derived from
+    Υ(ρ,z) = g(z - z*(ρ))/ρ₀ via ∂Υ/∂ρ|_z = -(g/ρ₀)(dz*/dρ) and ∂Υ/∂z|_ρ = g/ρ₀.
+
+    Differentiating ρ (smooth) and multiplying by D (a single 1-D derivative of the sorted
+    profile, interpolated onto the grid) avoids ever finite-differencing the assembled Υ field
+    itself -- which injects grid-scale noise wherever the sorted-profile lookup is locally
+    sensitive (e.g. actively-mixing, weakly-stratified patches) -- while remaining mathematically
+    identical to ∇Υ in the continuum limit.
+
+    Parameters
+    ----------
+    grad_rho : xr.DataArray
+        ∇ρ (or ∇ρ̄), with index dimension `index_dim` taking values 1,2,3 = x,y,z.
+    D : xr.DataArray
+        dz*/dρ evaluated at the same ρ (or ρ̄) used for grad_rho -- from
+        local_potential_energies_timeseries()'s "D" field.
+    index_dim : str
+        Name of the vector index dimension, default "i".
+    vertical_index : int
+        Index value of the vertical (z) component, default 3.
+
+    Returns
+    -------
+    xr.DataArray
+        ∂ᵢΥ with the same dimensions as grad_rho.
+    """
+    grad_term = -(g / ρ0) * D * grad_rho
+    vertical_bump = xr.where(grad_rho[index_dim] == vertical_index, g / ρ0, 0.0)
+    return grad_term + vertical_bump
+
+
 def calculate_sfs_ape_dissipation(rho, upsilon, upsilon_l, κh, κv, filter,
-                                  filter_dims=["x_caa", "y_aca"],
-                                  filtered_density=None, index_dim="i"):
+                                  filter_dims=["x_caa", "y_aca"], filtered_density=None, index_dim="i"):
     """
     Calculate the SFS APE dissipation ε_Aˢ = filtered(κ ∇ρ · ∇Υ) - κ ∇ρ̄ · ∇Υˡ,
     with an anisotropic κ (κh horizontal, κv vertical) matching the model's
     actual anisotropic tracer-diffusion closure (HorizontalScalarDiffusivity(κh)
     + VerticalScalarDiffusivity(κv)).
+
+    ∇Υ and ∇Υˡ are computed by differentiating the assembled Υ/Υˡ fields directly with the standard
+    2nd-order-accurate xr.DataArray.differentiate() (via calculate_gradient()). Two alternatives were
+    tried and rejected: (1) reconstructing ∇Υ/∇Υˡ analytically via D(ρ) = dz*/dρ (see
+    analytic_grad_upsilon() and the derivation note, Wenegrat, Chor & Barkan 2025) -- mathematically
+    verified correct via the exact ε_Aˢ+ε_A^l=χ_APE identity, but highly sensitive to how the reference
+    profile's near-degenerate (locally flat) regions are regularized, an unresolved modeling choice;
+    (2) a 4th-order-accurate stencil matching the simulation's Centered(order=4) advection scheme --
+    gave budget closure and spatial noise characteristics statistically indistinguishable from the
+    plain 2nd-order version, so the added complexity wasn't justified.
 
     The SFS APE dissipation quantifies the removal of large-scale APE by
     subfilter-scale diffusive processes. It follows directly from integrating
@@ -823,17 +902,27 @@ def calculate_sfs_ape_dissipation(rho, upsilon, upsilon_l, κh, κv, filter,
 #---
 
 #+++ Cross-scale APE flux
-def calculate_cross_scale_ape_flux(rho, u_i, upsilon, filter, filter_dims=["x_caa", "y_aca"],
+def calculate_cross_scale_ape_flux(rho, u_i, upsilon_l, filter, filter_dims=["x_caa", "y_aca"],
                                     filtered_density=None, filtered_velocity_vector=None,
                                     index_dim="i"):
     """
-    Calculate the cross-scale APE flux Π = -τᵢ · ∇Υ
+    Calculate the cross-scale APE flux Π = -τᵢ · ∇Υˡ
 
     The cross-scale APE flux quantifies the transfer of APE across the filter
     scale via the contraction of the subfilter tracer flux τᵢ with the gradient
-    of the buoyancy displacement potential Υ = g(z - z₀)/ρ₀:
+    of the large-scale buoyancy displacement potential Υˡ = g(z - z*(ρ̄))/ρ₀:
 
-        Π = -(filtered(ρ uᵢ) - filtered(ρ) filtered(uᵢ)) · ∂Υ/∂xᵢ
+        Π = -(filtered(ρ uᵢ) - filtered(ρ) filtered(uᵢ)) · ∂Υˡ/∂xᵢ
+
+    ∇Υˡ is computed by differentiating the assembled Υˡ field directly with the standard
+    2nd-order-accurate xr.DataArray.differentiate() (via calculate_gradient()). Two alternatives were
+    tried and rejected: (1) reconstructing ∇Υˡ analytically via D(ρ̄) = dz*/dρ (see
+    analytic_grad_upsilon() and the derivation note, Wenegrat, Chor & Barkan 2025) -- mathematically
+    verified correct via the exact ε_Aˢ+ε_A^l=χ_APE identity, but highly sensitive to how the reference
+    profile's near-degenerate (locally flat) regions are regularized, an unresolved modeling choice;
+    (2) a 4th-order-accurate stencil matching the simulation's Centered(order=4) advection scheme --
+    gave budget closure and spatial noise characteristics statistically indistinguishable from the
+    plain 2nd-order version, so the added complexity wasn't justified.
 
     Parameters
     ----------
@@ -842,8 +931,8 @@ def calculate_cross_scale_ape_flux(rho, u_i, upsilon, filter, filter_dims=["x_ca
     u_i : xr.DataArray
         Full (unfiltered) velocity vector with an "i" index dimension, as
         produced by condense_velocities()
-    upsilon : xr.DataArray
-        Buoyancy displacement potential Υ = g(z - z₀)/ρ₀, typically taken
+    upsilon_l : xr.DataArray
+        Large-scale buoyancy displacement potential Υˡ = g(z - z*(ρ̄))/ρ₀, typically taken
         from the filtered potential energies dataset
     filter : gcm_filters.Filter
         Filter object used to apply the spatial filtering operation
@@ -867,6 +956,6 @@ def calculate_cross_scale_ape_flux(rho, u_i, upsilon, filter, filter_dims=["x_ca
         filtered_density=filtered_density,
         filtered_velocity_vector=filtered_velocity_vector,
     )
-    grad_upsilon = calculate_gradient(upsilon)
-    return -(tau_i * grad_upsilon).sum(dim=index_dim)
+    grad_upsilon_l = calculate_gradient(upsilon_l)
+    return -(tau_i * grad_upsilon_l).sum(dim=index_dim)
 #---

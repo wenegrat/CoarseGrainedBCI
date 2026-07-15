@@ -4,11 +4,10 @@ import os
 from pathlib import Path
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
-from src.aux00_utils import load_dataset_and_grid, condense_velocities, integrate, make_gaussian_filter, load_energy_transfer
+from src.aux00_utils import load_dataset_and_grid, condense_velocities, integrate, make_gaussian_filter
 from src.aux01_pe_functions import calculate_density_fields_from_buoyancy, calculate_b_r, calculate_b_r_simple, calculate_ape_to_ke_exchange_term
 from src.aux02_ke_functions import (
     calculate_sfs_stress_tensor,
-    calculate_sfs_ke_dissipation_anisotropic,
     calculate_sfs_ke_tendency,
 )
 #---
@@ -42,16 +41,6 @@ filtered_filename = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities
 ds_filt = xr.open_dataset(filtered_filename, decode_times=False).chunk({"time": 1})
 filtered_dimensions = ["x_caa", "y_aca"]
 filter_scales = ds_filt.filter_scale.values
-gradient_dimensions = ("x_caa", "y_aca", "z_aac")   # full 3D -- needed for ∂u/∂z, ∂v/∂z (see below)
-
-# Viscosities νh, νv: with the 'smagorinsky' closure the simulation writes a single diagnostic eddy
-# viscosity νₑ (spatially/temporally varying, isotropic -- SmagorinskyLilly doesn't track separate
-# horizontal/vertical eddy viscosities), so the same field is used for both. With 'constant' or
-# 'scale_aware' closures, νh/νv are fixed scalars recorded as global attributes.
-if "νₑ" in ds:
-    νh = νv = ds["νₑ"]
-else:
-    νh, νv = ds.attrs["nu_h"], ds.attrs["nu_v"]
 
 ds = condense_velocities(ds, indices=(1, 2, 3))
 ds_full = ds[["b", "dV", "uᵢ"]].copy()
@@ -78,19 +67,10 @@ print("Done!")
 print("\n" + "="*60)
 print("Calculating budget terms for each filter scale...")
 
-# Π_K is loaded from 03_energy_transfer.py's output (computed there, offline, since it's no longer
-# available from the simulation -- see Oceanostics issue #262). ε_Kˢ is computed fresh here, since
-# 03 doesn't need it. Both are reference-independent (they don't depend on the density sort), so the
-# same values serve the time-varying and fixed-reference budgets.
-energy_transfer = load_energy_transfer(filename, ref_suffix=ref_suffix)
-
-# Unfiltered horizontal velocity (i ∈ {1,2}) -- scale-independent, so sliced once outside the loop.
-# ε_Kˢ (below) restricts to u, v only, matching the Π_K restriction: w is diagnostic, not prognostic,
-# in this hydrostatic model, and (unlike u, v) has no diffusion term acting on it at all -- without this
-# restriction the KE budget wouldn't close, since the LHS (SFS KE) would include w's contribution while
-# neither Π_K nor ε_Kˢ (RHS) would.
-u_i_horiz_full = ds_full["uᵢ"].sel(i=[1, 2])
-
+# Π_K and ε_Kˢ are both computed online by the simulation now (KineticEnergyCrossScaleFlux,
+# SubFilterKineticEnergyDissipationRate -- see baroclinic_adjustment.jl), read straight from `ds` below
+# rather than computed offline. Both are reference-independent (they don't depend on the density sort),
+# so the same values serve the time-varying and fixed-reference budgets.
 dV = ds_full.dV
 budget_list = []
 
@@ -100,14 +80,17 @@ for ℓ in filter_scales:
     gaussian_filter = make_gaussian_filter(ℓ, ds)
 
     ds_filt_ℓ = ds_filt.sel(filter_scale=ℓ)
-    u_i_horiz     = ds_full["uᵢ"].sel(i=[1, 2])
-    u_i_bar_horiz = ds_filt_ℓ["ūᵢ"].sel(i=[1, 2])
+    u_i_full     = ds_full["uᵢ"].sel(i=[1, 2, 3])
+    u_i_bar_full = ds_filt_ℓ["ūᵢ"].sel(i=[1, 2, 3])
 
-    # τⁱʲ = filter(uⁱ uʲ) - ūⁱ ūʲ   shape: (i, j, time, z, y, x) -- horizontal-only (i,j ∈ {1,2})
+    # τⁱʲ = filter(uⁱ uʲ) - ūⁱ ūʲ   shape: (i, j, time, z, y, x) -- full 3D (i,j ∈ {1,2,3}): w is a
+    # genuine prognostic variable in this NonhydrostaticModel, with its own dissipative dynamics, so
+    # there's no reason to exclude it from the SFS KE density the way the old HydrostaticFreeSurfaceModel
+    # setup had to (see baroclinic_adjustment.jl and CLAUDE.md's Architecture notes).
     print("  SFS stress tensor...")
-    sfs_stress_tensor = calculate_sfs_stress_tensor(u_i_horiz, gaussian_filter,
+    sfs_stress_tensor = calculate_sfs_stress_tensor(u_i_full, gaussian_filter,
                                                     filter_dims=filtered_dimensions,
-                                                    filtered_u_i=u_i_bar_horiz)
+                                                    filtered_u_i=u_i_bar_full)
     i_vals = sfs_stress_tensor.coords["i"].values
     sfs_stress_tensor_trace = sum(sfs_stress_tensor.sel(i=k, j=k) for k in i_vals)
     sfs_ke_density = sfs_stress_tensor_trace / 2
@@ -129,11 +112,10 @@ for ℓ in filter_scales:
     int_dKE_dt             = integrate(dKE_dt, dV)
     int_ape_to_ke_exchange = integrate(ape_to_ke_exchange.reindex(time=dKE_dt.time), dV)
 
-    print("  Π_K (from 03_energy_transfer.py output) and ε_Kˢ (offline)...")
-    Π_K_ℓ = energy_transfer["Π_K"].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6)
-    sfs_ke_dissipation = calculate_sfs_ke_dissipation_anisotropic(u_i_horiz_full, νh, νv, gaussian_filter,
-                                                                  filter_dims=filtered_dimensions,
-                                                                  dimensions=gradient_dimensions)
+    print("  Π_K and ε_Kˢ (computed online by the simulation)...")
+    ℓ_km = int(round(ℓ / 1000))
+    Π_K_ℓ = ds[f"Π_K_ℓ{ℓ_km}km"]
+    sfs_ke_dissipation = ds[f"ε_Kˢ_ℓ{ℓ_km}km"]
     int_Π_K_ℓ              = integrate(Π_K_ℓ, dV)
     int_sfs_ke_dissipation = integrate(sfs_ke_dissipation, dV)
     residual  = (-int_dKE_dt + int_Π_K_ℓ.reindex(time=dKE_dt.time) + int_ape_to_ke_exchange
