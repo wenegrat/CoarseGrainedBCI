@@ -289,10 +289,13 @@ def calculate_energy_transfer(ds, filter_scales,
     n_workers : int
         Number of threads for APE sorting (ThreadPoolExecutor).
     include_pi_k : bool
-        If True (default) also compute the cross-scale KE flux Π_K, restricted to
-        horizontal velocity components (i,j ∈ {1,2}) since w is diagnostic (not
-        prognostic) in a HydrostaticFreeSurfaceModel and has no independent
-        dissipative dynamics -- consistent with the online Πₖ design.
+        If True (default) also compute the cross-scale KE flux Π_K, full 3D
+        (i,j ∈ {1,2,3}) since w is a genuine prognostic variable with its own
+        dissipative dynamics in the NonhydrostaticModel this repo now uses --
+        consistent with the online Πₖ design (see baroclinic_adjustment.jl).
+        Not the active path in practice (Πₖ is read from the online simulation
+        output instead, see 03_energy_transfer.py/04_sfs_ke_budget.py); kept
+        for offline validation against the online value.
 
     Returns
     -------
@@ -302,7 +305,7 @@ def calculate_energy_transfer(ds, filter_scales,
         ∫Π_K dV) when include_pi_k=True.
     """
     filtered_dimensions = ["x_caa", "y_aca"]
-    tensor_dimensions   = ("x_caa", "y_aca")   # matches horizontal-only indices (1,2) for Π_K
+    tensor_dimensions   = ("x_caa", "y_aca", "z_aac")   # full 3D, matches indices (1,2,3) for Π_K
 
     if ds_filt is None:
         ds_filt = filter_fields(ds, filter_scales)
@@ -336,19 +339,19 @@ def calculate_energy_transfer(ds, filter_scales,
         ds_filt_ℓ["LxLy"] = ds["LxLy"]
         ds_filt_ℓ.attrs.update(ds.attrs)
 
-        # --- KE cross-scale transfer (Π_K), horizontal-only (i,j ∈ {1,2}) ---
-        # w is diagnostic (not prognostic) in a HydrostaticFreeSurfaceModel and has no independent
-        # dissipative dynamics, so the cross-scale flux is restricted to the horizontal velocity
-        # components -- consistent with the online Πₖ design (see baroclinic_adjustment.jl).
+        # --- KE cross-scale transfer (Π_K), full 3D (i,j ∈ {1,2,3}) ---
+        # w is a genuine prognostic variable with its own dissipative dynamics in the NonhydrostaticModel
+        # this repo now uses, so the cross-scale flux includes it fully -- consistent with the online Πₖ
+        # design (see baroclinic_adjustment.jl).
         ke_vars = {}
         if include_pi_k:
-            u_i_horiz     = ds_full["uᵢ"].sel(i=[1, 2])
-            u_i_bar_horiz = ds_filt_ℓ["ūᵢ"].sel(i=[1, 2])
+            u_i_full     = ds_full["uᵢ"].sel(i=[1, 2, 3])
+            u_i_bar_full = ds_filt_ℓ["ūᵢ"].sel(i=[1, 2, 3])
             # τⁱʲ = filter(uⁱuʲ) - ūⁱūʲ ;  Π_K = -τⁱʲ : S̄ⁱʲ
-            sfs_stress_tensor = calculate_sfs_stress_tensor(u_i_horiz, gaussian_filter,
+            sfs_stress_tensor = calculate_sfs_stress_tensor(u_i_full, gaussian_filter,
                                                             filter_dims=filtered_dimensions,
-                                                            filtered_u_i=u_i_bar_horiz)
-            strain_rate_tensor_l = calculate_strain_tensor(u_i_bar_horiz, dimensions=tensor_dimensions)
+                                                            filtered_u_i=u_i_bar_full)
+            strain_rate_tensor_l = calculate_strain_tensor(u_i_bar_full, dimensions=tensor_dimensions)
             Π_K = calculate_cross_scale_ke_flux(sfs_stress_tensor, strain_rate_tensor_l)
             ke_vars = {"Π_K": Π_K, "∫Π_K dV": integrate(Π_K, dV)}
 

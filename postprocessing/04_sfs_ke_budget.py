@@ -80,14 +80,17 @@ for ℓ in filter_scales:
     gaussian_filter = make_gaussian_filter(ℓ, ds)
 
     ds_filt_ℓ = ds_filt.sel(filter_scale=ℓ)
-    u_i_horiz     = ds_full["uᵢ"].sel(i=[1, 2])
-    u_i_bar_horiz = ds_filt_ℓ["ūᵢ"].sel(i=[1, 2])
+    u_i_full     = ds_full["uᵢ"].sel(i=[1, 2, 3])
+    u_i_bar_full = ds_filt_ℓ["ūᵢ"].sel(i=[1, 2, 3])
 
-    # τⁱʲ = filter(uⁱ uʲ) - ūⁱ ūʲ   shape: (i, j, time, z, y, x) -- horizontal-only (i,j ∈ {1,2})
+    # τⁱʲ = filter(uⁱ uʲ) - ūⁱ ūʲ   shape: (i, j, time, z, y, x) -- full 3D (i,j ∈ {1,2,3}): w is a
+    # genuine prognostic variable in this NonhydrostaticModel, with its own dissipative dynamics, so
+    # there's no reason to exclude it from the SFS KE density the way the old HydrostaticFreeSurfaceModel
+    # setup had to (see baroclinic_adjustment.jl and CLAUDE.md's Architecture notes).
     print("  SFS stress tensor...")
-    sfs_stress_tensor = calculate_sfs_stress_tensor(u_i_horiz, gaussian_filter,
+    sfs_stress_tensor = calculate_sfs_stress_tensor(u_i_full, gaussian_filter,
                                                     filter_dims=filtered_dimensions,
-                                                    filtered_u_i=u_i_bar_horiz)
+                                                    filtered_u_i=u_i_bar_full)
     i_vals = sfs_stress_tensor.coords["i"].values
     sfs_stress_tensor_trace = sum(sfs_stress_tensor.sel(i=k, j=k) for k in i_vals)
     sfs_ke_density = sfs_stress_tensor_trace / 2

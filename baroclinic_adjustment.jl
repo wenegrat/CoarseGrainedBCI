@@ -321,14 +321,20 @@ if params.closure == "scale_aware"
     global params = (; params..., nu_h=νh_scale_aware, nu_v=νv_scale_aware)
 end
 
-model = HydrostaticFreeSurfaceModel(grid;
-                                    free_surface = ImplicitFreeSurface(),
-                                    coriolis = BetaPlane(latitude=params.latitude),
-                                    buoyancy = BuoyancyTracer(),
-                                    tracers = :b,
-                                    momentum_advection = advection_scheme,
-                                    tracer_advection = advection_scheme,
-                                    closure = closure)
+# NonhydrostaticModel instead of HydrostaticFreeSurfaceModel: no free surface at all (no η, no
+# barotropic pressure correction -- see conversation for the NetCDFWriter dimension-inference limitation
+# that made patching the free-surface term into the old hydrostatic setup impractical), and w becomes a
+# genuine prognostic variable with its own momentum equation and dissipative dynamics rather than
+# diagnostic. This matches tomchor's own Eady baroclinic-instability example (Oceanostics PR #260),
+# which closes its coarse-grained KE budget cleanly (~11-15% residual/dominant, vs our ~40-60% under the
+# old hydrostatic setup) -- see conversation for the ongoing investigation into how much of that gap is
+# closure/numerics vs. the buoyancy-production-term convention (w̄b̄ vs w̄b̄ᵣ).
+model = NonhydrostaticModel(grid;
+                            coriolis = BetaPlane(latitude=params.latitude),
+                            buoyancy = BuoyancyTracer(),
+                            tracers = :b,
+                            advection = advection_scheme,
+                            closure = closure)
 u, v, w = model.velocities
 b = model.tracers.b
 if params.closure == "scale_aware"
@@ -428,33 +434,31 @@ filtered_fields = (; _filt_pairs...)
 @info "Online diagnostics (filtered fields) built"
 
 #+++ Cross-scale KE flux Πₖ and SFS KE dissipation ε_Kˢ, per filter scale
-# Πₖ is restricted to horizontal velocity components (dims=(1,2)): w is diagnostic (not prognostic) in
-# this HydrostaticFreeSurfaceModel and has no independent dissipative dynamics, so including it would
-# leave the KE budget unable to close even in principle -- matches the horizontal-only restriction used
-# throughout the SFS KE budget (see the Architecture notes in CLAUDE.md).
+# w is a genuine prognostic variable in this NonhydrostaticModel, with its own momentum equation and
+# dissipative dynamics -- unlike the earlier HydrostaticFreeSurfaceModel setup, where w was diagnostic
+# and had to be excluded from the KE budget for it to close even in principle. Πₖ is therefore the full
+# 3D contraction (dims=(1,2,3)), not horizontal-only: restricting to horizontal-only here would
+# reintroduce a different missing term (horizontal-vertical pressure redistribution) in place of the
+# free-surface one this model switch removes.
 #
 # ε_Kˢ (SubFilterKineticEnergyDissipationRate) and εˡ (FilteredKineticEnergyDissipationRate) have no
-# equivalent `dims` restriction in their public API -- both include w's contribution unconditionally, via
-# the model's actual per-direction viscous fluxes (HorizontalScalarDiffusivity's viscous_flux_wx/wy are
-# genuinely nonzero for our closure, even though w has no prognostic equation to feed that "dissipation"
-# into). Verified via a smoke test that this is a negligible departure in practice for ε_Kˢ: the phantom
-# term νh·[(∂w/∂x)² + (∂w/∂y)²] has rms ~1e-8 relative to the real signal (w ≪ u,v in this regime), and
-# the resulting ε_Kˢ agrees with the previous offline (w-excluded) formula to 0.99 spatial correlation
-# and ~1% rms. The same should hold for εˡ by the same argument.
+# `dims` restriction in their public API at all -- both always include w's full contribution via the
+# model's actual per-direction viscous fluxes, which is the physically correct behavior now (it was a
+# small "phantom" w-diffusion term under the old hydrostatic setup, verified negligible there via a
+# smoke test: ~1e-8 relative magnitude, 0.99 spatial correlation with the w-excluded offline formula).
 #
-# εˡ is included alongside Πₖ/ε_Kˢ for an ongoing side investigation into whether the *filtered*
-# (large-scale) KE budget (∂ₜK̄ = w̄b̄ᵣ - Πₖ - εˡ) is a more robust diagnostic than the SFS budget this repo
-# has focused on so far -- unlike ε_Kˢ = filter(ε) - εˡ (a difference of two large, closely-related
+# εˡ is included alongside Πₖ/ε_Kˢ for an ongoing investigation into whether the *filtered* (large-scale)
+# KE budget (∂ₜK̄ = w̄b̄ᵣ - Πₖ - εˡ, K̄ = ½(ū²+v̄²+w̄²)) is a more robust diagnostic than the SFS budget this
+# repo has focused on so far -- unlike ε_Kˢ = filter(ε) - εˡ (a difference of two large, closely-related
 # quantities, fragile by construction), εˡ is a single directly-computed term with no cancellation,
 # matching how tomchor's own Eady baroclinic-instability example (Oceanostics PR #260) closes its
-# coarse-grained KE budget. That comparison is still inconclusive on this HydrostaticFreeSurfaceModel
-# setup (a parallel NonhydrostaticModel experiment -- removing the free surface, using the full 3D Πₖ
-# contraction -- didn't meaningfully improve closure either); see conversation history for the current
-# state of that investigation.
+# coarse-grained KE budget. That example's own setup (NonhydrostaticModel, no free surface, full 3D Πₖ)
+# is exactly what this switch adopts; see conversation history for the ongoing investigation into how
+# much of the closure gap is numerics vs. the buoyancy-production-term convention (w̄b̄ vs w̄b̄ᵣ).
 _ke_pairs = vcat(
-    [Symbol("Π_K_ℓ$(round(Int, ℓ/1000))km")  => KineticEnergyCrossScaleFlux(model, gf; dims=(1, 2)) for (ℓ, gf) in zip(filter_ℓs, gaussian_filters)],
-    [Symbol("ε_Kˢ_ℓ$(round(Int, ℓ/1000))km") => SubFilterKineticEnergyDissipationRate(model, gf)     for (ℓ, gf) in zip(filter_ℓs, gaussian_filters)],
-    [Symbol("ε_l_ℓ$(round(Int, ℓ/1000))km")  => FilteredKineticEnergyDissipationRate(model, gf)      for (ℓ, gf) in zip(filter_ℓs, gaussian_filters)],
+    [Symbol("Π_K_ℓ$(round(Int, ℓ/1000))km")  => KineticEnergyCrossScaleFlux(model, gf; dims=(1, 2, 3)) for (ℓ, gf) in zip(filter_ℓs, gaussian_filters)],
+    [Symbol("ε_Kˢ_ℓ$(round(Int, ℓ/1000))km") => SubFilterKineticEnergyDissipationRate(model, gf)        for (ℓ, gf) in zip(filter_ℓs, gaussian_filters)],
+    [Symbol("ε_l_ℓ$(round(Int, ℓ/1000))km")  => FilteredKineticEnergyDissipationRate(model, gf)         for (ℓ, gf) in zip(filter_ℓs, gaussian_filters)],
 )
 ke_budget_fields = (; _ke_pairs...)
 #---
