@@ -47,9 +47,9 @@ Set `N_WORKERS` env var to control parallelism (default 1): `N_WORKERS=4 bash 00
 pytest tests/ -v -s
 ```
 `test_budgets.py` checks SFS KE/APE budget closure (rms(residual)/min(rms(terms)) < 10%) against
-`postprocessing/output/bci_Nx48_Ny48_Nz8_*` (run `00_get_budgets.sh` first). See Notes below for the current
-state of this test -- it does not yet pass, and that looks like a resolution/duration limitation rather than
-a code bug.
+`postprocessing/output/bci_Nx48_Ny48_Nz8_*` (run `00_get_budgets.sh` first). Historically failed; see the
+Notes entry on the domain-padding bug fix below before assuming it still does -- that bug inflated every
+budget term computed on this dataset too, and hasn't yet been re-checked against this specific test.
 
 ### Python environment
 The repo's `environment.yml` is a Linux-only conda lockfile (built on an HPC). For local development
@@ -187,16 +187,32 @@ surface buoyancy field to a GIF (no ffmpeg dependency, uses matplotlib's `Pillow
   pressure-correction term, no dimension-inference limitation when trying to output η) and makes w a
   properly prognostic variable, matching tomchor's own validated approach -- but it should be treated as an
   ongoing architecture change, not a settled fix for the closure gap.
-- **Budget closure is not yet validated at production resolution.** Historically (under the earlier
-  hydrostatic setup) a 1-day toy run (16x16x4) and a 20-day run at default resolution (48x48x8) both failed
-  the KHAPE-style closure test (`rms(residual)/min(rms(terms)) < 10%); comparing the residual against the
-  *dominant* budget term instead gave ~25-87% depending on filter scale and resolution, and did not converge
-  cleanly with resolution (see conversation history for a full resolution sweep and the many candidate
-  causes tested -- output-sampling interval, gradient stencil order, SFS-vs-filtered budget choice, online
-  vs. offline Πₖ/ε_Kˢ, and now model type -- none of which fully explained the gap on their own). tomchor's
-  own Eady example achieving ~11-15% suggests the coarse-graining framework itself has a real, nonzero
-  closure floor even under near-ideal conditions, but that our own ~40-60% is still meaningfully worse than
-  that floor. Revisit once the buoyancy-convention investigation above concludes.
+- **Budget closure gap was (mostly) explained by a domain-padding bug -- fixed.** `aux00_utils.py`'s
+  `load_dataset_and_grid()` used to call a `_pad_domain_in_z()` helper that doubled the z-domain via
+  edge-value replication before recomputing `dV`, left over from the old KH pipeline where filtering also
+  operated in z. It served no purpose once filtering became horizontal-only, but silently remained, so every
+  volume integral computed via `integrate()` throughout this entire fork's history (everything downstream of
+  `load_dataset_and_grid`: all of 01-05, `plot4_panels.py`, `S2_panels.py`, `inv06_total_mixing_check.py`,
+  `S4_thumbnail.py`, the `sweep*` scripts) summed over roughly twice the physical domain, with the padded
+  cells inflating each budget term by a *different*, term-specific factor (measured on one dataset/timestep:
+  Πₖ 1.96x, εˡ 1.25x, ε_Kˢ 1.48x, raw w 9.21x) rather than a uniform scale that would cancel in a residual.
+  Found during a code review requested specifically to look for bugs affecting the large-scale KE budget;
+  confirmed via direct numerical test, then removed entirely (function and call site) per explicit
+  instruction, since padding-in-z has no remaining purpose. Grep-confirmed no other code depends on it.
+  Re-running the full 01->04 pipeline on `bci_Nx96_Ny96_Nz16_nonhydro` after the fix dropped the filtered
+  (large-scale) KE budget residual/dominant from 39.6%/46.2% to **6.2%/4.6%** (ℓ=50/100km) -- right in the
+  range of tomchor's own Eady-example floor (~11-15%, see above), essentially closing the multi-week
+  "budgets don't converge with resolution" investigation. All closure percentages quoted anywhere earlier in
+  this file or in conversation history predate this fix and should be treated as unreliable until
+  regenerated; the buoyancy-convention investigation above became moot once this fix landed (see the
+  "definitive, exact result" in conversation history: `w̄b̄` and `w̄b̄ᵣ` are provably identical for our own
+  simulation regardless of the padding bug, since it never affected that particular identity). Still open:
+  whether this fix changes closure at other resolutions (e.g. 192x192x32), and whether the SFS KE budget
+  (as opposed to the filtered/large-scale one) improves comparably.
+- **Minor, unresolved: Gaussian filter truncation-radius mismatch.** Oceanostics' online `GaussianFilter`
+  defaults to a 2σ truncation radius (`ceil(Int, 2σ/Δ)` grid cells); this repo's offline
+  `scipy.ndimage.gaussian_filter1d` defaults to 4σ (`truncate=4.0`). Verified numerically on a real w field:
+  ~1.3% relative rms difference, 0.9999 correlation -- real but small, not yet fixed.
 - `online_ke_transfer_validation.md` is a KH-era dev note about computing Πₖ online and validating it against
   the offline pipeline -- it predates both this fork's move to fully-offline Πₖ/ε_Kˢ and the subsequent move
   back to online (see above), so it still doesn't describe current behavior, though the general idea
