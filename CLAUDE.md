@@ -85,22 +85,24 @@ invocation picks it up automatically.
   (4σ truncation). The default halo Oceananigans picks is sized for the advection scheme, not for a wide
   Gaussian filter stencil -- an undersized halo causes silent memory corruption (a segfault at an unrelated
   *later* point, not a clean bounds-check error), not an immediate crash at the filter call site.
-- **Unlike the KH setup, Πₖ (cross-scale KE flux) and ε_Kˢ (SFS KE dissipation) are NOT computed online.**
-  An Oceanostics bug (see Notes) crashes the online multi-direction `GaussianFilter` for a periodic
-  y-direction, so both are computed offline in Python instead (`03_energy_transfer.py`,
-  `04_sfs_ke_budget.py`).
-- The KE-side coarse-graining (Πₖ, ε_Kˢ, and the SFS KE density itself) is restricted to **horizontal
-  velocity components only** (i,j ∈ {1,2}): w is diagnostic (not prognostic) in a
-  `HydrostaticFreeSurfaceModel` and has no independent dissipative dynamics, so including it would leave the
-  KE budget unable to close even in principle. w is still used, unrestricted, for the APE↔KE exchange term
-  (a genuine physical buoyancy-flux conversion that needs the real vertical velocity).
-- `SequentialGaussianFilter` (defined locally in `baroclinic_adjustment.jl`): does two sequential 1D Gaussian
-  filter passes (x then y) instead of asking Oceanostics for one combined `dims=(1,2)` filter -- works
-  around the Oceanostics bug for the plain filtered-field *outputs*. Not used for the composite
-  `KineticEnergyCrossScaleFlux`/`CoarseGrainedKineticEnergyDissipationRate` functions -- threading it through
-  those caused a severe compile-time blowup (LLVM choking on an already deeply-nested
-  `KernelFunctionOperation` tree doubled in nesting depth), which is why Πₖ/ε_Kˢ are computed offline instead
-  of patched online.
+- **Πₖ (cross-scale KE flux) and ε_Kˢ (SFS KE dissipation) are computed online**, via Oceanostics'
+  `KineticEnergyCrossScaleFlux`/`SubFilterKineticEnergyDissipationRate`, one field per filter scale
+  (`Π_K_ℓ50km`, `ε_Kˢ_ℓ50km`, etc.). This used to be offline-only (an Oceanostics bug crashed the online
+  multi-direction `GaussianFilter` for a periodic y-direction -- see Notes) but the fix landed in
+  Oceanostics v0.17.3, and `SubFilterKineticEnergyDissipationRate` (the missing SFS-dissipation
+  diagnostic) was added in the still-unmerged `tc/sfs-ke` branch (pinned in `Project.toml`/`Manifest.toml`
+  via `Pkg.add(url=..., rev="tc/sfs-ke")` -- check whether tomchor/Oceanostics.jl#266 has merged and
+  released before assuming this pin is still needed). Both were validated against the previous offline
+  Python implementation before switching over (0.99 spatial correlation, rms agreement within ~1-10%).
+- Πₖ is restricted to **horizontal velocity components only** (`KineticEnergyCrossScaleFlux(model, filter;
+  dims=(1,2))`): w is diagnostic (not prognostic) in a `HydrostaticFreeSurfaceModel` and has no independent
+  dissipative dynamics, so including it would leave the KE budget unable to close even in principle. w is
+  still used, unrestricted, for the APE↔KE exchange term (a genuine physical buoyancy-flux conversion that
+  needs the real vertical velocity). ε_Kˢ's public API has no equivalent `dims` restriction -- it includes a
+  small, real (not just hypothetical) contribution from w's horizontal diffusion, since
+  `HorizontalScalarDiffusivity` applies νh to w's horizontal gradients even though w has no prognostic
+  equation to feed that "dissipation" into. Verified negligible in practice (~1e-8 relative magnitude, since
+  w ≪ u,v in this flow regime) via the same validation smoke test.
 - `utils.jl` -- `closest_factor_number()` (FFT-friendly grid sizes), `show_gpu_status()` (unchanged from KH).
 
 ### Post-processing pipeline (`postprocessing/`)
@@ -110,8 +112,8 @@ Same 01-06 structure as KHAPE, adapted for horizontal (x,y) filtering instead of
 |--------|--------|
 | `01_filter_fields.py` | filters in (x,y) instead of (x,z); filter scales are free parameters again (no longer need to match an online `filter_ℓs`) |
 | `02_sort_density.py` | unchanged -- the Winters sort is dimension-agnostic |
-| `03_energy_transfer.py` | now computes Πₖ offline (`include_pi_k=True`, was `False` when Julia provided it) |
-| `04_sfs_ke_budget.py` | biggest change -- reads Πₖ from `03`'s output (`load_energy_transfer`) instead of the now-nonexistent online field; computes ε_Kˢ offline via `calculate_sfs_ke_dissipation`; restricts the KE tensors to horizontal-only components so the budget's LHS (SFS KE) and RHS (Πₖ, ε_Kˢ) stay dimensionally consistent |
+| `03_energy_transfer.py` | Πₖ is no longer computed here (`include_pi_k=False`) -- it's read straight from the simulation NetCDF now; still computes Π_A and the APE↔KE exchange offline |
+| `04_sfs_ke_budget.py` | reads Πₖ and ε_Kˢ directly from the simulation output (`ds[f"Π_K_ℓ{ℓ_km}km"]`, `ds[f"ε_Kˢ_ℓ{ℓ_km}km"]`) instead of computing/loading them; still computes the SFS KE density (LHS) offline via the stress-tensor trace, restricted to horizontal-only components so it stays dimensionally consistent with the online Πₖ/ε_Kˢ |
 | `05_sfs_ape_budget.py` | filters in (x,y); diffusivity κ now read from `nu`/`Pr` global attributes (a constant `ScalarDiffusivity`), not a `ds.κ` spatial field (which only exists for non-constant closures and was never actually populated here) |
 
 `aux00_utils.py`'s `GaussianFilter` class filters (x,y), both periodic (`mode='wrap'` on both), replacing
@@ -126,7 +128,9 @@ surface buoyancy field to a GIF (no ffmpeg dependency, uses matplotlib's `Pillow
 
 ### Key dependencies
 - **Python**: `numpy`, `xarray`, `scipy`, `matplotlib`, `dask`, `gcm_filters`, `netcdf4`
-- **Julia**: `Oceananigans` v0.110.8, `Oceanostics` v0.17.2, `NCDatasets`, `CairoMakie` (Julia 1.11.2)
+- **Julia**: `Oceananigans` v0.110.8, `Oceanostics` v0.18.0 (pinned to the `tc/sfs-ke` branch, not yet a
+  tagged release -- see the Notes entry on the online Πₖ/ε_Kˢ switch), `NCDatasets`, `CairoMakie` (Julia
+  1.11.2)
 
 ## Physics Reference
 
@@ -149,12 +153,15 @@ surface buoyancy field to a GIF (no ffmpeg dependency, uses matplotlib's `Pillow
 
 ## Notes
 
-- **Oceanostics bug**: `GaussianFilter(; dims=(1,2), σ)` crashes (heap corruption -> SIGILL) on a grid with
-  real `Ny>1` and periodic y -- filed as
+- **Oceanostics bug (fixed)**: `GaussianFilter(; dims=(1,2), σ)` used to crash (heap corruption -> SIGILL)
+  on a grid with real `Ny>1` and periodic y -- filed as
   [tomchor/Oceanostics.jl#262](https://github.com/tomchor/Oceanostics.jl/issues/262), with a minimal
-  reproducer. `dims=(1,)` alone (periodic x only, matching KH's `Ny=1` case) does not crash -- this repo's
-  Julia script works around it via `SequentialGaussianFilter` for filtered-field outputs, and avoids the
-  composite KE-transfer functions entirely by moving Πₖ/ε_Kˢ offline (see Architecture).
+  reproducer; fixed in v0.17.3 ([PR #263](https://github.com/tomchor/Oceanostics.jl/pull/263), root cause
+  was a multi-direction filter's staged kernel launch being sized from the operand instead of the
+  destination field, which broke specifically for *windowed* destinations like this repo's
+  `indices=(:, :, grid.Nz)` surface output writer). The `SequentialGaussianFilter` workaround this repo used
+  to carry (two sequential 1D passes instead of one `dims=(1,2)` call) has been removed now that the native
+  filter works directly; Πₖ/ε_Kˢ are computed online (see Architecture) instead of deferred offline.
 - **Budget closure is not yet validated at production resolution.** A 1-day toy run (16x16x4) and a 20-day
   run at default resolution (48x48x8) both fail the KHAPE-style closure test (`rms(residual)/min(rms(terms))
   < 10%), though the 20-day run is substantially closer: the raw reported percentage is inflated by an
@@ -165,6 +172,7 @@ surface buoyancy field to a GIF (no ffmpeg dependency, uses matplotlib's `Pillow
   setup, ~1.2 days) rather than a code bug -- revisit with a finer-resolution, longer HPC run before trusting
   the closure numbers, or treating a failure as a real regression.
 - `online_ke_transfer_validation.md` is a KH-era dev note about computing Πₖ online and validating it against
-  the offline pipeline -- it predates this fork's move back to fully-offline Πₖ/ε_Kˢ and no longer describes
-  current behavior.
+  the offline pipeline -- it predates both this fork's move to fully-offline Πₖ/ε_Kˢ and the subsequent move
+  back to online (see above), so it still doesn't describe current behavior, though the general idea
+  (validate online against offline before trusting it) is exactly what was done again for this switch.
 - Output files (`.nc`, `.mp4`, `.pdf`, `.png`, `.gif`, `.jld2`) are excluded from git.

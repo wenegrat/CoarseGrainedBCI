@@ -164,6 +164,9 @@ for ℓ in filter_scales:
     print(f"  local APE filtered  ({time.time()-t0:.1f}s)")
 
     t0 = time.time()
+    # ∇Υ, ∇Υˡ are computed by differentiating the assembled Υ/Υˡ fields directly, using a 4th-order
+    # stencil matching the simulation's own advection scheme -- see calculate_sfs_ape_dissipation()'s
+    # docstring for why (reverted from the analytic D(ρ)-based reconstruction).
     sfs_ape_dissipation = calculate_sfs_ape_dissipation(
         ds_full.ρ, full_local_pes.upsilon, filt_local_pes.upsilon, κh, κv, gaussian_filter,
         filter_dims=filtered_dimensions,
@@ -199,6 +202,8 @@ for ℓ in filter_scales:
         # Buoyancy displacement potentials
         "Υ": full_local_pes.upsilon,
         "Υˡ": filt_local_pes.upsilon,
+        "D": full_local_pes.D,
+        "Dˡ": filt_local_pes.D,
         # Local APE fields
         "Ea(ρ, z)": full_local_pes.ape,
         "Ea(ρ̄, z)": filt_local_pes.ape,

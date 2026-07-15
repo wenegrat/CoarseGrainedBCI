@@ -201,78 +201,6 @@ def calculate_sfs_ke_dissipation(S, ν, filter, filter_dims=["x_caa", "y_aca"],
     return 2 * ν * tau_S_S.sum(list(index_dims))
 #---
 
-#+++ SFS KE dissipation (anisotropic horizontal/vertical closure)
-def calculate_sfs_ke_dissipation_anisotropic(u_i_horiz, νh, νv, filter,
-                                             filter_dims=["x_caa", "y_aca"],
-                                             dimensions=("x_caa", "y_aca", "z_aac"),
-                                             index_dim="i", direction_dim="j"):
-    """
-    Compute the SFS KE dissipation ε<ℓ for an anisotropic Laplacian closure
-    (HorizontalScalarDiffusivity(νh) + VerticalScalarDiffusivity(νv)) applied
-    only to the horizontal momentum equations (u, v) -- matching how
-    Oceananigans actually discretizes this closure: νh·Δ_h u_i + νv·∂zz u_i for
-    i ∈ {1,2} (u, v), with no diffusion term acting on w (diagnostic, not
-    prognostic, in a HydrostaticFreeSurfaceModel).
-
-    This is deliberately NOT expressed as 2ν S:S with the standard symmetric
-    strain-rate tensor: that identity (∫u·ν∇²u = -2ν∫S:S) only holds for a
-    single isotropic ν applied identically to every velocity component,
-    because it relies on ∇²u_i = 2∇_j S_ij for the FULL divergence of a
-    Newtonian stress tensor. Oceananigans' ScalarDiffusivity closures are
-    plain per-component Laplacians (not a divergence-of-stress operator), and
-    with direction-dependent ν the two formulations diverge -- symmetrizing
-    ∂u/∂z with ∂w/∂x into a single S13 term (as calculate_strain_tensor does)
-    would incorrectly mix a diffused quantity (∂u/∂z, weighted by νv) with an
-    undiffused one (∂w/∂x, which has no associated ν at all here). Integrating
-    the model's actual momentum equations by parts instead gives, per unit
-    volume:
-
-        ε_visc = νh[(∂u/∂x)² + (∂u/∂y)² + (∂v/∂x)² + (∂v/∂y)²]
-                 + νv[(∂u/∂z)² + (∂v/∂z)²]
-
-    i.e. a νh- or νv-weighted sum of squared *plain* velocity-gradient
-    components (not symmetrized, and excluding w entirely), matching exactly
-    what each term's own diffusion coefficient is in the model. The subfilter
-    (SFS) version follows the same "filter-variance" trick used everywhere
-    else in this pipeline: ε_Kˢ = Σ ν_j τ(∂u_i/∂x_j, ∂u_i/∂x_j) where
-    τ(a,a) = filter(a²) - filter(a)².
-
-    Parameters
-    ----------
-    u_i_horiz : xr.DataArray
-        Full (unfiltered) horizontal velocity, index dimension i ∈ {1,2} (u, v).
-    νh, νv : xr.DataArray or float
-        Horizontal and vertical viscosities [m² s⁻¹].
-    filter : gcm_filters.Filter
-        Filter object used for the spatial filtering operation.
-    filter_dims : list of str
-        Spatial dimensions along which to apply the filter.
-    dimensions : tuple of str
-        Ordered spatial coordinate names matching direction index values 1, 2, 3.
-    index_dim : str
-        Name of the velocity index dimension (default "i").
-    direction_dim : str
-        Name of the spatial-direction index dimension produced by the
-        gradient calculation (default "j").
-
-    Returns
-    -------
-    xr.DataArray
-        SFS KE dissipation ε<ℓ [m² s⁻³], same spatial dimensions as u_i_horiz
-        (the i and j index dimensions are contracted away).
-    """
-    grad_u = calculate_velocity_gradient_tensor(u_i_horiz, dimensions=dimensions, index_dim=index_dim,
-                                                direction_indices=[1, 2, 3])  # ∂uⁱ/∂xʲ, i∈{1,2}, j∈{1,2,3}
-
-    grad_u_bar = filter.apply(grad_u, dims=filter_dims)
-    tau = filter.apply(grad_u * grad_u, dims=filter_dims) - grad_u_bar * grad_u_bar  # τ(∂uⁱ/∂xʲ, ∂uⁱ/∂xʲ)
-
-    horiz_j = [j for j in tau[direction_dim].values if j != 3]
-    ε_h = νh * tau.sel({direction_dim: horiz_j}).sum([index_dim, direction_dim])
-    ε_v = νv * tau.sel({direction_dim: 3}).sum(index_dim)
-    return ε_h + ε_v
-#---
-
 #+++ SFS KE tendency
 def calculate_sfs_ke_tendency(sfs_ke_density):
     """
@@ -444,7 +372,8 @@ def calculate_energy_transfer(ds, filter_scales,
                                                              rho_sorted=rho_sorted,
                                                              dz_sorted=dz_sorted,
                                                              n_workers=n_workers)
-        # Π_A = -(filter(ρuᵢ) - ρ̄ūᵢ) · ∇Υˡ
+        # Π_A = -(filter(ρuᵢ) - ρ̄ūᵢ) · ∇Υˡ, with ∇Υˡ computed by differentiating the assembled Υˡ
+        # field using a 4th-order stencil (see calculate_cross_scale_ape_flux()).
         Π_A = calculate_cross_scale_ape_flux(ds_full.ρ, ds_full["uᵢ"], filt_local_pes.upsilon,
                                               gaussian_filter, filter_dims=filtered_dimensions,
                                               filtered_density=ds_filt_ℓ.ρ̄,

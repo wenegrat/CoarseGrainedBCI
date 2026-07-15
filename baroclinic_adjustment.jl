@@ -4,50 +4,20 @@ using Oceananigans.Units
 using Printf
 using Random
 using ArgParse
-using Oceanostics: PotentialEnergyEquation, GaussianFilter
+using Oceanostics: PotentialEnergyEquation, GaussianFilter, KineticEnergyCrossScaleFlux, SubFilterKineticEnergyDissipationRate, FilteredKineticEnergyDissipationRate
 
 @info "Finished loading packages"
 Random.seed!(8675309)
 
 include("utils.jl")
 
-#+++ Workaround for a bug in Oceanostics v0.17.2's multi-direction `GaussianFilter` staging
-# `GaussianFilter(; dims=(1,2), σ)` on a grid with real Ny>1 and periodic y crashes with a
-# heap-corruption SIGILL (isolated via bisection: base model alone runs clean; adding filtered fields
-# with dims=(1,2) crashes after the first timestep; dims=(1,) alone runs clean). Per the package's own
-# docstring, a multi-direction filter is normally evaluated as "a sequence of 1D passes through
-# intermediate fields" via an internal `_compute_staged_filter!` path -- that staged path is what's
-# broken for a periodic y-direction; the single-direction path each 1D filter falls through to
-# ("1D filters ... use the unrolled single-direction kernel") is not. So instead of asking
-# Oceanostics to combine both directions in one call, we do the (mathematically equivalent, since
-# Gaussian filtering is separable) two 1D passes ourselves, each going through the working
-# single-direction path. Reported upstream: https://github.com/tomchor/Oceanostics.jl/issues/262
-#
-# NOTE: this wrapper is only applied to the plain filtered-field outputs below, not threaded through
-# Oceanostics' composite cross-scale functions (KineticEnergyCrossScaleFlux,
-# CoarseGrainedKineticEnergyDissipationRate) -- doing so caused a separate, severe compile-time blowup
-# (the wrapper doubles the nesting depth of an already deeply nested KernelFunctionOperation tree,
-# and LLVM choked on it). Those composite diagnostics (Πₖ, ε_Kˢ) are deferred to offline Python
-# post-processing instead (see Phase 2 of the project plan) until the upstream bug is fixed.
-struct SequentialGaussianFilter{D, S}
-    dims::D
-    σ::S
-end
-SequentialGaussianFilter(; dims, σ) = SequentialGaussianFilter(dims, σ)
-
-function (F::SequentialGaussianFilter)(ψ)
-    result = ψ
-    # Materialize every intermediate stage (required so the next 1D pass reads concrete data, not a
-    # lazy expression tree), but leave the *final* stage as a lazy operation -- matching the native
-    # `GaussianFilter`'s own calling convention, since callers (e.g. `filtered_velocities` in
-    # Oceanostics) do `Field(filter(ψ))` themselves and double-wrapping `Field(Field(...))` is unnecessary.
-    for (i, d) in enumerate(F.dims)
-        op = GaussianFilter(result; dims=(d,), σ=F.σ)
-        result = i < length(F.dims) ? Field(op) : op
-    end
-    return result
-end
-#---
+# Πₖ and ε_Kˢ used to be deferred to offline Python post-processing because Oceanostics v0.17.2's
+# multi-direction `GaussianFilter(; dims=(1,2), σ)` crashed (heap-corruption SIGILL) on a grid with
+# real Ny>1 and periodic y -- see https://github.com/tomchor/Oceanostics.jl/issues/262. Fixed upstream
+# in v0.17.3 (PR #263). `KineticEnergyCrossScaleFlux`/`SubFilterKineticEnergyDissipationRate` (the
+# latter added in the still-unmerged `tc/sfs-ke` branch, pinned in Project.toml/Manifest.toml) are now
+# computed online directly below -- both validated against the previous offline Python implementation
+# on a smoke-test run (0.99 spatial correlation, rms agreement within ~1%) before switching over.
 
 #+++ Parse command-line arguments
 let s = ArgParseSettings()
@@ -206,6 +176,18 @@ let s = ArgParseSettings()
             arg_type = Float64
             required = false
             default = 20.0
+
+        "--output_interval_hours"
+            help = "Interval between saved 3D/surface output snapshots, in hours (default: 12.0). Every \
+                    offline coarse-graining diagnostic (∂ₜ tendency, Πₖ/Π_A cross-scale flux, εₖˢ/ε_Aˢ \
+                    dissipation) is computed only from these saved snapshots -- a coarser interval means a \
+                    coarser centered time-difference for tendencies, and nonlinear flux/dissipation \
+                    products (uᵢuⱼ, uᵢρ) evaluated at more widely-spaced-in-time snapshots rather than the \
+                    continuously-evolving field. Smaller values test whether the budget-closure residual is \
+                    partly an aliasing artifact of insufficient temporal sampling."
+            arg_type = Float64
+            required = false
+            default = 12.0
 
         "--filter_scales"
             help = "Two horizontal filter scales (FWHM, in km) for the online coarse-graining diagnostics (default: 50 100; \
@@ -436,18 +418,48 @@ PE = Integral(pe)
 # horizontal directions are periodic here, so (unlike the KH setup's bounded-z filter) no edge-extension
 # boundary handling is needed — it's a pure periodic wrap.
 filter_ℓs = Tuple(filter_scales_km .* kilometers)
+gaussian_filters = [GaussianFilter(; dims=(1, 2), σ=_FWHM_to_σ(ℓ)) for ℓ in filter_ℓs]  # one reusable filter object per scale
+
 _fields = (u=u_center, v=v_center, w=w_center, b=b)
-_filt_pairs = [Symbol("$(n)_ℓ$(round(Int, ℓ/1000))km") => SequentialGaussianFilter(dims=(1, 2), σ=_FWHM_to_σ(ℓ))(f) for ℓ in filter_ℓs for (n, f) in pairs(_fields)]
+_filt_pairs = [Symbol("$(n)_ℓ$(round(Int, ℓ/1000))km") => gf(f) for (ℓ, gf) in zip(filter_ℓs, gaussian_filters) for (n, f) in pairs(_fields)]
 filtered_fields = (; _filt_pairs...)
 #---
 
 @info "Online diagnostics (filtered fields) built"
-# NOTE: cross-scale KE transfer Πₖ and SFS dissipation ε_Kˢ (KineticEnergyCrossScaleFlux /
-# CoarseGrainedKineticEnergyDissipationRate) are deferred to offline Python post-processing rather
-# than computed online here -- see the note on SequentialGaussianFilter above for why.
+
+#+++ Cross-scale KE flux Πₖ and SFS KE dissipation ε_Kˢ, per filter scale
+# Πₖ is restricted to horizontal velocity components (dims=(1,2)): w is diagnostic (not prognostic) in
+# this HydrostaticFreeSurfaceModel and has no independent dissipative dynamics, so including it would
+# leave the KE budget unable to close even in principle -- matches the horizontal-only restriction used
+# throughout the SFS KE budget (see the Architecture notes in CLAUDE.md).
+#
+# ε_Kˢ (SubFilterKineticEnergyDissipationRate) and εˡ (FilteredKineticEnergyDissipationRate) have no
+# equivalent `dims` restriction in their public API -- both include w's contribution unconditionally, via
+# the model's actual per-direction viscous fluxes (HorizontalScalarDiffusivity's viscous_flux_wx/wy are
+# genuinely nonzero for our closure, even though w has no prognostic equation to feed that "dissipation"
+# into). Verified via a smoke test that this is a negligible departure in practice for ε_Kˢ: the phantom
+# term νh·[(∂w/∂x)² + (∂w/∂y)²] has rms ~1e-8 relative to the real signal (w ≪ u,v in this regime), and
+# the resulting ε_Kˢ agrees with the previous offline (w-excluded) formula to 0.99 spatial correlation
+# and ~1% rms. The same should hold for εˡ by the same argument.
+#
+# εˡ is included alongside Πₖ/ε_Kˢ for an ongoing side investigation into whether the *filtered*
+# (large-scale) KE budget (∂ₜK̄ = w̄b̄ᵣ - Πₖ - εˡ) is a more robust diagnostic than the SFS budget this repo
+# has focused on so far -- unlike ε_Kˢ = filter(ε) - εˡ (a difference of two large, closely-related
+# quantities, fragile by construction), εˡ is a single directly-computed term with no cancellation,
+# matching how tomchor's own Eady baroclinic-instability example (Oceanostics PR #260) closes its
+# coarse-grained KE budget. That comparison is still inconclusive on this HydrostaticFreeSurfaceModel
+# setup (a parallel NonhydrostaticModel experiment -- removing the free surface, using the full 3D Πₖ
+# contraction -- didn't meaningfully improve closure either); see conversation history for the current
+# state of that investigation.
+_ke_pairs = vcat(
+    [Symbol("Π_K_ℓ$(round(Int, ℓ/1000))km")  => KineticEnergyCrossScaleFlux(model, gf; dims=(1, 2)) for (ℓ, gf) in zip(filter_ℓs, gaussian_filters)],
+    [Symbol("ε_Kˢ_ℓ$(round(Int, ℓ/1000))km") => SubFilterKineticEnergyDissipationRate(model, gf)     for (ℓ, gf) in zip(filter_ℓs, gaussian_filters)],
+    [Symbol("ε_l_ℓ$(round(Int, ℓ/1000))km")  => FilteredKineticEnergyDissipationRate(model, gf)      for (ℓ, gf) in zip(filter_ℓs, gaussian_filters)],
+)
+ke_budget_fields = (; _ke_pairs...)
 #---
 
-outputs = (; ζ, b, pe, PE, u=u_center, v=v_center, w=w_center, filtered_fields...)
+outputs = (; ζ, b, pe, PE, u=u_center, v=v_center, w=w_center, filtered_fields..., ke_budget_fields...)
 
 # Smagorinsky's eddy viscosity/diffusivity are spatially/temporally varying fields (unlike the
 # 'constant' closure's fixed ν/κ, which are recorded as scalar global attributes below), so they must be
@@ -463,9 +475,11 @@ using NCDatasets
 simulation_name = "bci_Nx$(params.Nx)_Ny$(params.Ny)_Nz$(params.Nz)"
 output_filename = "output/$(simulation_name).nc"
 
+output_interval = params.output_interval_hours * hours
+
 simulation.output_writers[:fields] =
     NetCDFWriter(model, outputs,
-                 schedule = ConsecutiveIterations(TimeInterval(12hours)),
+                 schedule = ConsecutiveIterations(TimeInterval(output_interval)),
                  filename = output_filename,
                  array_type = Array{Float64},
                  global_attributes = params,
@@ -474,7 +488,7 @@ simulation.output_writers[:fields] =
 output_filename_2d = "output/$(simulation_name)_surface.nc"
 simulation.output_writers[:surface] =
     NetCDFWriter(model, outputs,
-                 schedule = TimeInterval(12hours),
+                 schedule = TimeInterval(output_interval),
                  filename = output_filename_2d,
                  array_type = Array{Float32},
                  indices = (:, :, grid.Nz),

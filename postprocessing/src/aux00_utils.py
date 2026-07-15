@@ -159,6 +159,7 @@ def calculate_gradient(scalar, output_name="grad_scalar", dimensions=("x_caa", "
     return aux_ds[output_name]
 #---
 
+
 #+++ Gaussian filter (horizontal: x and y, both periodic)
 # FWHM = 2√(2 ln 2) · σ  →  σ = FWHM / (2√(2 ln 2))
 _FWHM_TO_SIGMA = 1.0 / (2.0 * np.sqrt(2.0 * np.log(2.0)))

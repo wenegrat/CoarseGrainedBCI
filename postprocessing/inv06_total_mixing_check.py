@@ -2,9 +2,13 @@
 """
 Independent sanity check on ε_Aˢ: compare it against the TOTAL (unfiltered, grid-resolved) APE
 dissipation rate χ_APE = ∫[κh(∂ρ/∂x·∂Υ/∂x + ∂ρ/∂y·∂Υ/∂y) + κv(∂ρ/∂z·∂Υ/∂z)] dV, using the *unfiltered*
-ρ and Υ fields directly -- same formula as ε_Aˢ's "term1" but with no filter applied. This is the ℓ→∞
+ρ field directly -- same formula as ε_Aˢ's "term1" but with no filter applied. This is the ℓ→∞
 limit of ε_Aˢ (as the filter widens, ρ̄→const, ∇Υˡ→0, so ε_Aˢ→ this domain-total quantity), so ε_Aˢ(ℓ)
 should stay below χ_APE and increase monotonically with ℓ toward it.
+
+∇Υ is reconstructed analytically from D=dz*/dρ and ∇ρ (the same method ε_Aˢ itself now uses -- see
+analytic_grad_upsilon()), NOT by differentiating the saved Υ field directly, so this is a fair
+apples-to-apples bound: both sides of the comparison go through the same gradient-reconstruction method.
 
 Note: this uses κ∇ρ·∇Υ (an APE dissipation rate, units of power), NOT κ|∇ρ|² (a density-variance
 dissipation rate, different units entirely) -- the two are not interchangeable.
@@ -15,6 +19,7 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 from src.aux00_utils import load_dataset_and_grid, integrate, calculate_gradient
+from src.aux01_pe_functions import analytic_grad_upsilon
 #---
 
 #+++ Configuration
@@ -30,14 +35,14 @@ stem = Path(filename).stem
 print("\n" + "="*70 + f"\n  inv06_total_mixing_check.py  filename={args.filename}\n" + "="*70)
 #---
 
-#+++ Load raw grid (for dV) and the saved full (unfiltered) rho, upsilon fields
+#+++ Load raw grid (for dV) and the saved full (unfiltered) rho, D fields
 ds = load_dataset_and_grid(filename)
 ds = ds.chunk({"time": 1})
 
 fields_filename = PP_OUTPUT / f"{stem}_sfs_ape_budget_fields.nc"
 ds_fields = xr.open_dataset(fields_filename, decode_timedelta=False).chunk({"time": 1})
 rho = ds_fields["ρ"]
-upsilon = ds_fields["Υ"]
+D = ds_fields["D"]
 
 κh, κv = ds.attrs["nu_h"] / ds.attrs["Pr"], ds.attrs["nu_v"] / ds.attrs["Pr"]
 print(f"κh={κh:.4g} m²/s   κv={κv:.4g} m²/s")
@@ -45,7 +50,7 @@ print(f"κh={κh:.4g} m²/s   κv={κv:.4g} m²/s")
 
 #+++ Compute chi_APE = kh*(rho_x*ups_x + rho_y*ups_y) + kv*rho_z*ups_z, integrated over volume -- no filter
 grad_rho = calculate_gradient(rho)      # dims (i, time, z, y, x), i=1,2,3 = x,y,z
-grad_ups = calculate_gradient(upsilon)
+grad_ups = analytic_grad_upsilon(grad_rho, D)
 horiz = (grad_rho.sel(i=[1, 2]) * grad_ups.sel(i=[1, 2])).sum("i")
 vert  = grad_rho.sel(i=3) * grad_ups.sel(i=3)
 chi_local = κh * horiz + κv * vert

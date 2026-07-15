@@ -55,15 +55,16 @@ print(f"  Sorted density loaded from: {sorted_density_filename}  ({time.time()-t
 #+++ Calculate cross-scale transfer terms
 print("\n" + "="*60)
 print("Calculating cross-scale transfer terms...")
-# Π_K (cross-scale KE transfer, horizontal-only) is computed offline here, along with the APE
-# cross-scale transfer Π_A and the APE↔KE exchange (Π_K is no longer computed online by the
-# simulation -- see Oceanostics issue #262 for why).
+# Π_K (cross-scale KE transfer, horizontal-only) is now computed online by the simulation itself
+# (KineticEnergyCrossScaleFlux, restricted to dims=(1,2)) -- see 04_sfs_ke_budget.py, which reads it
+# straight from the simulation NetCDF instead of from this script's output. Only the APE cross-scale
+# transfer Π_A and the APE↔KE exchange are computed offline here.
 energy_transfer = calculate_energy_transfer(ds, filter_scales,
                                             ds_filt=ds_filt,
                                             rho_sorted=ds_sorted.rho_sorted,
                                             dz_sorted=ds_sorted.dz_sorted,
                                             n_workers=n_workers,
-                                            include_pi_k=True)
+                                            include_pi_k=False)
 print("\nDone!")
 #---
 
