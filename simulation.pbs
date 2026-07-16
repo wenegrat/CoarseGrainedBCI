@@ -33,11 +33,19 @@ qalter -N "$JOB_NAME" "$PBS_JOBID"
 
 source hpc_env.sh
 
+# Julia-specific modules on top of hpc_env.sh's shared ncarenv baseline. `julia/1.11.2` is NCAR's own
+# module (matches this repo's pinned Julia version, see README/juliaup override) -- use this instead of
+# juliaup, which downloads Julia at runtime and will likely fail on a compute node without internet
+# access. `cuda` is loaded for parity with prior working NCAR sessions even though this job requests no
+# GPU (ngpus=0 above); harmless to have loaded, does not by itself enable GPU use.
+module --ignore-cache load gcc ncarcompilers netcdf
+module --ignore-cache load cuda
+module --ignore-cache load julia/1.11.2
+
 export JULIA_DEPOT_PATH="$WORK/.julia"
 export JULIA_CPU_TARGET="generic"
-juliaup add 1.11.2   # matches this repo's pinned Julia version (see README/juliaup override)
 
-time julia +1.11.2 --project -t 8 baroclinic_adjustment.jl --Nx $NX --Ny $NY --Nz $NZ \
+time julia --project -t 8 baroclinic_adjustment.jl --Nx $NX --Ny $NY --Nz $NZ \
     --stop_time $STOP_TIME $EXTRA_ARGS 2>&1 | tee logs/${JOB_NAME}.out
 
 qstat -f $PBS_JOBID >> logs/${JOB_NAME}.log
