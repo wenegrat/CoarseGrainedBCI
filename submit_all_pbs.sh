@@ -5,23 +5,25 @@
 #   simulation → budgeting_filter → budgeting → plots   (always: budgets, plot3/5/6, anim2/3)
 #   + sweep_filter → sweep_transfer  (many-filter-scale transfer spectrum; parallel after budgeting)  (SWEEP=1)
 #
-# Usage: bash submit_all_pbs.sh [NX=192] [NY=192] [NZ=32] [STOP_TIME=16] [FIXED_REF=0] [SWEEP=0]
+# Usage: bash submit_all_pbs.sh [NX=192] [NY=192] [NZ=32] [STOP_TIME=16] [FIXED_REF=0] [SWEEP=0] [EXTRA_ARGS='']
 #   NX/NY/NZ    grid resolution
 #   STOP_TIME   simulation length, in days
 #   FIXED_REF   use fixed-in-time reference profile: 0 or 1
 #   SWEEP       also run the many-filter-scale sweep (sweep1/2/3) after budgeting: 0 or 1
+#   EXTRA_ARGS  extra baroclinic_adjustment.jl CLI args, passed through verbatim (quote multi-word values)
 #
 # To run post-processing alone (simulation already done):
 #   bash postprocessing/submit_budgeting.sh [NX=192] [NY=192] [NZ=32] [FIXED_REF=0|1|both]
 
-NX=192; NY=192; NZ=32; STOP_TIME=16; FIXED_REF=0; SWEEP=0
+NX=192; NY=192; NZ=32; STOP_TIME=16; FIXED_REF=0; SWEEP=0; EXTRA_ARGS=""
 for arg in "$@"; do case $arg in
-  NX=*)        NX="${arg#*=}";;
-  NY=*)        NY="${arg#*=}";;
-  NZ=*)        NZ="${arg#*=}";;
-  STOP_TIME=*) STOP_TIME="${arg#*=}";;
-  FIXED_REF=*) FIXED_REF="${arg#*=}";;
-  SWEEP=*)     SWEEP="${arg#*=}";;
+  NX=*)         NX="${arg#*=}";;
+  NY=*)         NY="${arg#*=}";;
+  NZ=*)         NZ="${arg#*=}";;
+  STOP_TIME=*)  STOP_TIME="${arg#*=}";;
+  FIXED_REF=*)  FIXED_REF="${arg#*=}";;
+  SWEEP=*)      SWEEP="${arg#*=}";;
+  EXTRA_ARGS=*) EXTRA_ARGS="${arg#*=}";;
 esac; done
 [ "$FIXED_REF" = "1" ] && REF_SUFFIX="_fixed_ref" || REF_SUFFIX=""
 SIM_NAME="bci_Nx${NX}_Ny${NY}_Nz${NZ}"
@@ -29,7 +31,7 @@ SIM_NAME="bci_Nx${NX}_Ny${NY}_Nz${NZ}"
 SIM_JOB=$(qsub -N "$SIM_NAME" \
                -o "logs/${SIM_NAME}.log" \
                -e "logs/${SIM_NAME}.log" \
-               -v NX=$NX,NY=$NY,NZ=$NZ,STOP_TIME=$STOP_TIME \
+               -v "NX=$NX,NY=$NY,NZ=$NZ,STOP_TIME=$STOP_TIME,EXTRA_ARGS=$EXTRA_ARGS" \
                simulation.pbs)
 echo "Submitted simulation ($SIM_NAME, stop_time=${STOP_TIME}d): $SIM_JOB"
 
