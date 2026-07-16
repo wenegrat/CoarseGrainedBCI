@@ -124,10 +124,30 @@ KH's (x periodic, z bounded `mode='nearest'`). `condense_velocities` (u,v,w) is 
 KH's `condense_uw_velocities` (u,w only, valid for the 2D x-z KH case); w is now included fully in the
 KE cross-scale tensors too (see the Πₖ note above), not excluded.
 
-`sweep*` scripts, `validation/`, and the standalone `plot*`/`anim1_panels.py` scripts still describe the KH
-pipeline's online-vs-offline validation setup and have not been adapted -- there is no online Πₖ/ε_Kˢ to
-validate against anymore. `anim2_surface_buoyancy.py` is new: a simple standalone script that animates the
-surface buoyancy field to a GIF (no ffmpeg dependency, uses matplotlib's `PillowWriter`).
+`validation/` and the standalone `plot*`/`anim1_panels.py` scripts still describe the KH pipeline's
+online-vs-offline validation setup and have not been adapted -- there is no online Πₖ/ε_Kˢ to validate
+against anymore. `anim2_surface_buoyancy.py` is new: a simple standalone script that animates the surface
+buoyancy field to a GIF (no ffmpeg dependency, uses matplotlib's `PillowWriter`).
+
+`sweep1_filter_fields.py` -> `sweep2_energy_transfer.py` -> `sweep3_plot_transfer_spectrum.py` (filter at
+many log-spaced scales, compute Πₖ/Π_A at each, plot the resulting cross-scale transfer spectrum as a
+Hovmöller of time vs. ℓ) have been adapted for BCI: `sweep1`'s filter-scale range is now data-driven
+(`--scale-min`/`--scale-max` default to 2x the grid spacing and 40% of the domain width Lx respectively,
+rather than the old hardcoded KH range in different units), `sweep2`'s log message now says "x and y" not
+"x and z", and `sweep3`'s `SymLogNorm(linthresh=...)` scales with the data's own magnitude (`vmax*1e-3`)
+instead of a fixed absolute value tuned for KH's much smaller Πₖ/Π_A magnitudes. Note `sweep2` calls
+`calculate_energy_transfer` without `--fixed-reference`, so it redoes a full Winters sort per filter scale
+(the sort itself doesn't depend on filter scale, but nothing shares it across scales) -- fine for a handful
+of scales, expensive for `sweep1`'s default 30-scale sweep on a full-length run.
+
+`sweep3` also gained a second row of panels that was previously missing: it already computed a `1/ℓ`
+coordinate (`inv_scale`) specifically so a proper spectrum line plot could use it as the x-axis, but the
+plotting code only ever drew the Hovmöllers -- the spectrum itself was never implemented. Now it also plots
+the time-mean (±1 std across time, excluding the first `--min-time-days` as an initial-transient cutoff)
+of ∫Π_K dV/∫Π_A dV vs. 1/ℓ, with a dashed vertical line at the theoretical Eady deformation radius
+`Ld = N·Lz/|f0|` (computed from the run's own `N2`/`Lz`/`latitude` attrs). The shaded band is temporal
+spread of the diagnostic itself, not a statistical confidence interval -- there's only one simulation
+realization, so don't read it as sampling uncertainty on the mean.
 
 `anim3_panels.py` is also new: a 6-panel GIF animation (`--filename ...`, `--filter-scale` in meters,
 `--fps`, `--dpi`, `--clim-percentile`) combining surface buoyancy, surface Rossby number ζ/f, the SFS

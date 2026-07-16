@@ -12,7 +12,7 @@ from src.aux02_ke_functions import calculate_energy_transfer
 #+++ Configuration
 import argparse
 parser = argparse.ArgumentParser(description="Calculate cross-scale KE and APE transfer terms")
-parser.add_argument("--filename", default="output/khi_Nz1024_Ri0.10.nc", help="Path to simulation NetCDF file")
+parser.add_argument("--filename", default="output/bci_Nx48_Ny48_Nz8.nc", help="Path to simulation NetCDF file")
 parser.add_argument("--n-workers", type=int, default=18, help="Number of CPU workers for APE sorting (ThreadPoolExecutor)")
 parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load the fixed-in-time reference profile (produced by 01 with --fixed-reference)")
 args = parser.parse_args()
@@ -47,7 +47,7 @@ ds = ds.reindex(time=ds_filt.time).chunk(chunks)
 filter_scales = ds_filt.filter_scale.values
 print(f"  Loaded from: {filtered_filename}  ({time.time()-t0:.1f}s)")
 print(f"  Filter length scales: {filter_scales}")
-print(f"  Filter dimensions: x and z")
+print(f"  Filter dimensions: x and y (horizontal)")
 #---
 
 #+++ Load sorted density (only when using fixed reference)
