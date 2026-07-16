@@ -42,7 +42,6 @@ module --ignore-cache load gcc ncarcompilers netcdf
 module --ignore-cache load cuda
 module --ignore-cache load julia/1.11.2
 
-export JULIA_DEPOT_PATH="$WORK/.julia"
 export JULIA_CPU_TARGET="generic"
 
 time julia --project -t 8 baroclinic_adjustment.jl --Nx $NX --Ny $NY --Nz $NZ \
