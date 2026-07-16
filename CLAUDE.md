@@ -182,6 +182,18 @@ f(y), to keep the JPDF axes free of an implicit y-dependence. Two gotchas hit wh
   (the endpoints) draws a flat line at the max, not a V -- `np.abs` needs enough intermediate points to
   trace the actual piecewise-linear shape.
 
+`plot3_budgets.py` had the same KH-era bug as the old `plot3_budgets_bci.py` scratch copy: a hardcoded
+`ax.set_xlim(right=140)` (a leftover non-dimensional-time assumption from KH) that clipped almost the
+entire BCI time axis, since our time coordinate is raw seconds up to ~10⁶. Fixed by plotting `time/86400`
+(days) and dropping the `xlim` call entirely; also updated the default `--filter-scales` from KH's `[7,
+1]` to BCI's `[50000.0, 100000.0]` (meters) and the per-panel `ℓ=` title to display km.
+
+`plot6_middepth_snapshots.py` is new: a permanent version of the ad hoc mid-depth snapshot scripts used
+earlier in this project's investigation (buoyancy, Rossby number ζ/f, cross-scale KE flux Πₖ, cross-scale
+APE flux Π_A, single time/depth/filter-scale, 2x2 panel). Uses the same `fix_orientation()` and
+`coriolis_f()` patterns as `anim3_panels.py`/`plot5_vorticity_strain_flux.py` (`--filename`,
+`--filter-scale` in meters, `--time` in days, `--z` in meters, `--clim-percentile`).
+
 ### Key dependencies
 - **Python**: `numpy`, `xarray`, `scipy`, `matplotlib`, `dask`, `gcm_filters`, `netcdf4`
 - **Julia**: `Oceananigans` v0.110.8, `Oceanostics` v0.18.0 (pinned to the `tc/sfs-ke` branch, not yet a

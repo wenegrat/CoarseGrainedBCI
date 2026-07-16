@@ -11,9 +11,9 @@ from src.aux03_plotting import budget_colors, run_label
 #+++ Configuration
 import argparse
 parser = argparse.ArgumentParser(description="Plot 2x2 panel of SFS KE and APE budgets at two filter scales")
-parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file (used to derive budget filenames)")
+parser.add_argument("--filename", default="output/bci_Nx48_Ny48_Nz8.nc", help="Path to simulation NetCDF file (used to derive budget filenames)")
 parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load the fixed-in-time reference profile outputs")
-parser.add_argument("--filter-scales", type=float, nargs=2, default=[7, 1], help="Two filter length scales for left and right columns")
+parser.add_argument("--filter-scales", type=float, nargs=2, default=[50000.0, 100000.0], help="Two filter length scales (meters) for left and right columns")
 parser.add_argument("--tendency-sign", choices=["negative", "positive"], default="positive", help="Plot -∂ₜE (negative — sums to zero with other terms) or ∂ₜE (positive)")
 args = parser.parse_args()
 
@@ -71,26 +71,25 @@ for row, budget, terms, residual_var, row_title in budget_configs:
         for label, (var, color) in terms.items():
             data = budget[var].sel(filter_scale=ℓ, method="nearest").dropna("time").isel(time=slice(1, None))
             sign = tendency_sign if var.startswith("∫-∂ₜ") else 1
-            ax.plot(data.time, sign * data.values, label=label, color=color, lw=1.5)
+            ax.plot(data.time / 86400, sign * data.values, label=label, color=color, lw=1.5)
         residual = budget[residual_var].sel(filter_scale=ℓ, method="nearest").dropna("time").isel(time=slice(1, None))
-        ax.plot(residual.time, residual.values, color="k", ls="--", lw=1.0, zorder=0)
+        ax.plot(residual.time / 86400, residual.values, color="k", ls="--", lw=1.0, zorder=0)
 
         if col == 0:
             ax.set_ylabel(row_title, fontsize=13)
         else:
             ax.set_ylabel("")
         if row == 1:
-            ax.set_xlabel("Time", fontsize=13)
+            ax.set_xlabel("Time (days)", fontsize=13)
         else:
             ax.set_xlabel("")
             ax.tick_params(labelbottom=False)
-        ax.set_xlim(right=140)
         ax.grid(True, alpha=0.3, lw=0.5)
         ax.set_title("")
 
 for col, ℓ in enumerate(args.filter_scales):
-    actual_ℓ = float(ke_budget.filter_scale.sel(filter_scale=ℓ, method="nearest"))
-    axes[0, col].set_title(f"$\\ell = {actual_ℓ:.1f}$", fontsize=14)
+    actual_ℓ_km = float(ke_budget.filter_scale.sel(filter_scale=ℓ, method="nearest")) / 1000
+    axes[0, col].set_title(f"$\\ell = {actual_ℓ_km:.1f}$ km", fontsize=14)
 #---
 
 #+++ Share y-axis within each column
