@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 from scipy.stats import binned_statistic_2d
 from src.aux00_utils import load_dataset_and_grid
 #---
@@ -21,6 +22,7 @@ parser.add_argument("--z", type=float, default=-500.0, help="Target depth in met
 parser.add_argument("--n-bins", type=int, default=40, help="Number of bins per axis for the vorticity-strain JPDF (default 40)")
 parser.add_argument("--min-count", type=int, default=5, help="Bins with fewer than this many points are masked out in the conditional-mean/net panels (default 5)")
 parser.add_argument("--clim-percentile", type=float, default=99.0, help="Percentile of |data| used to set symmetric color limits for flux panels")
+parser.add_argument("--percentiles", type=float, nargs="+", default=[50, 90, 99], help="JPDF highest-density-region percentiles to contour on each flux panel (default 50 90 99)")
 args = parser.parse_args()
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
 
@@ -139,35 +141,61 @@ for name, frac in fractions.items():
     print(f"  {name}: SD={frac['SD']:.1f}%  AVD={frac['AVD']:.1f}%  CVD={frac['CVD']:.1f}%")
 #---
 
+#+++ JPDF highest-density-region contour levels: the level of P such that the region {P > level} contains
+# a given percentile of the total probability mass (a "percentile contour", as in Balwada et al.'s gray
+# contours) -- NOT a fixed absolute-probability threshold, since that wouldn't compare meaningfully across
+# filter scales/resolutions where the JPDF's overall magnitude differs.
+def percentile_levels(density, mass, percentiles):
+    """Return {percentile: density level} such that {density > level} contains that percentile of the mass."""
+    order = np.argsort(density.ravel())[::-1]
+    sorted_density = density.ravel()[order]
+    cum_mass = np.cumsum(mass.ravel()[order])
+    total = cum_mass[-1]
+    levels = {}
+    for p in percentiles:
+        idx = min(np.searchsorted(cum_mass, p / 100 * total), len(sorted_density) - 1)
+        levels[p] = sorted_density[idx]
+    return levels
+
+mass = jpdf * dζ * dσ
+level_by_percentile = percentile_levels(jpdf, mass, args.percentiles)
+# ax.contour requires levels in ascending order; keep the percentile<->level correspondence via this dict
+# rather than re-deriving it from sort order (silently swaps labels if percentiles aren't already sorted).
+contour_levels = sorted(level_by_percentile.values())
+level_labels = {lvl: f"{p:g}%" for p, lvl in level_by_percentile.items()}
+print(f"  JPDF percentile levels -> {level_by_percentile}")
+#---
+
 #+++ Plot
 print("Building figure...")
-fig = plt.figure(figsize=(18, 9), constrained_layout=True)
-gs = fig.add_gridspec(2, 4, width_ratios=[1.1, 1, 1, 1])
-ax_jpdf = fig.add_subplot(gs[:, 0])
+fig = plt.figure(figsize=(14, 9), constrained_layout=True)
+gs = fig.add_gridspec(2, 3)
 
 flux_panels = [("Πₖ", Pi_K_mean, Pi_K_net), ("Π_A", Pi_A_mean, Pi_A_net), ("Πₖ+Π_A", Pi_total_mean, Pi_total_net)]
-axes_mean = [fig.add_subplot(gs[0, c+1]) for c in range(3)]
-axes_net  = [fig.add_subplot(gs[1, c+1]) for c in range(3)]
+axes_mean = [fig.add_subplot(gs[0, c]) for c in range(3)]
+axes_net  = [fig.add_subplot(gs[1, c]) for c in range(3)]
 
 def add_sd_lines(ax):
     zmax = zeta_edges[-1]
     z = np.linspace(-zmax, zmax, 200)
     ax.plot(z, np.abs(z), "--", color="gray", lw=1)
 
-im = ax_jpdf.pcolormesh(zeta_edges, sigma_edges, np.log10(jpdf.T + 1e-30), cmap="Reds", vmin=-5, vmax=1, shading="flat")
-add_sd_lines(ax_jpdf)
-ax_jpdf.set_xlabel(r"$\bar\zeta / f_0$")
-ax_jpdf.set_ylabel(r"$\bar\sigma / |f_0|$")
-ax_jpdf.set_title(f"JPDF  log$_{{10}}$P($\\bar\\zeta,\\bar\\sigma$)\n{stem}, ℓ={ℓ_km}km, t={t_days:.1f}d, z={z_sel:.0f}m")
-ax_jpdf.text(0.02, 0.97, "SD", transform=ax_jpdf.transAxes, va="top", fontsize=11)
-ax_jpdf.text(0.65, 0.05, "CVD", transform=ax_jpdf.transAxes, fontsize=11)
-ax_jpdf.text(0.05, 0.05, "AVD", transform=ax_jpdf.transAxes, fontsize=11)
-fig.colorbar(im, ax=ax_jpdf, fraction=0.046, pad=0.04)
+_LINESTYLES = ["dotted", "dashed", "solid", "dashdot"]
+
+def add_jpdf_contours(ax):
+    # One contour call per level (not a single multi-level call) so each percentile gets its own linestyle --
+    # inline clabel was rejected: a single JPDF level from one noisy snapshot often breaks into several
+    # disconnected pieces, so clabel stamped the same "50%" text repeatedly across the panel. A shared
+    # figure-level legend (built once, below) avoids that clutter entirely.
+    for i, lvl in enumerate(contour_levels):
+        ax.contour(zeta_centers, sigma_centers, jpdf.T, levels=[lvl], colors="0.25", linewidths=1.0,
+                   linestyles=_LINESTYLES[i % len(_LINESTYLES)])
 
 for ax, (name, mean, _) in zip(axes_mean, flux_panels):
     vmax = np.nanpercentile(np.abs(mean), args.clim_percentile)
     im = ax.pcolormesh(zeta_edges, sigma_edges, mean.T, cmap="RdBu_r", vmin=-vmax, vmax=vmax, shading="flat")
     add_sd_lines(ax)
+    add_jpdf_contours(ax)
     ax.set_title(f"{name} conditional mean\nSD={fractions[name]['SD']:.0f}% AVD={fractions[name]['AVD']:.0f}% CVD={fractions[name]['CVD']:.0f}%", fontsize=10)
     ax.set_xlabel(r"$\bar\zeta / f_0$")
     ax.set_ylabel(r"$\bar\sigma / |f_0|$")
@@ -177,10 +205,18 @@ for ax, (name, _, net) in zip(axes_net, flux_panels):
     vmax = np.nanpercentile(np.abs(net), args.clim_percentile)
     im = ax.pcolormesh(zeta_edges, sigma_edges, net.T, cmap="RdBu_r", vmin=-vmax, vmax=vmax, shading="flat")
     add_sd_lines(ax)
+    add_jpdf_contours(ax)
     ax.set_title(f"{name} net contribution", fontsize=10)
     ax.set_xlabel(r"$\bar\zeta / f_0$")
     ax.set_ylabel(r"$\bar\sigma / |f_0|$")
     fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+
+legend_handles = [Line2D([0], [0], color="0.25", lw=1.2, linestyle=_LINESTYLES[i % len(_LINESTYLES)],
+                        label=f"JPDF {level_labels[lvl]} HDR") for i, lvl in enumerate(contour_levels)]
+fig.legend(handles=legend_handles, loc="upper center", ncol=len(legend_handles), fontsize=9,
+           frameon=False, bbox_to_anchor=(0.5, 1.06))
+
+fig.suptitle(f"{stem}, ℓ={ℓ_km}km, t={t_days:.1f}d, z={z_sel:.0f}m", fontsize=13, y=1.1)
 
 outfile = FIGURES / f"{stem}_vorticity_strain_flux_l{ℓ_km}km.pdf"
 fig.savefig(outfile, dpi=150, bbox_inches="tight")
