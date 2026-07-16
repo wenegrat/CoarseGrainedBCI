@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
-# Usage: bash submit_simulation.sh [NZ=1024] [SAVE_TENSORS=0]
-#   NZ            vertical resolution
-#   SAVE_TENSORS  also write the per-scale strain/stress tensor components (0 or 1, for online-vs-offline validation)
-NZ=1024
-SAVE_TENSORS=0
-for arg in "$@"; do case $arg in NZ=*) NZ="${arg#*=}";; SAVE_TENSORS=*) SAVE_TENSORS="${arg#*=}";; esac; done
-NAME="kelvin_helmholtz_${NZ}"
+# Usage: bash submit_simulation.sh [NX=192] [NY=192] [NZ=32] [STOP_TIME=16]
+#   NX/NY/NZ    grid resolution
+#   STOP_TIME   simulation length, in days
+NX=192; NY=192; NZ=32; STOP_TIME=16
+for arg in "$@"; do case $arg in
+  NX=*)        NX="${arg#*=}";;
+  NY=*)        NY="${arg#*=}";;
+  NZ=*)        NZ="${arg#*=}";;
+  STOP_TIME=*) STOP_TIME="${arg#*=}";;
+esac; done
+NAME="bci_Nx${NX}_Ny${NY}_Nz${NZ}"
 qsub -N "$NAME" \
      -o "logs/${NAME}.log" \
      -e "logs/${NAME}.log" \
-     -v NZ=$NZ,SAVE_TENSORS=$SAVE_TENSORS \
+     -v NX=$NX,NY=$NY,NZ=$NZ,STOP_TIME=$STOP_TIME \
      simulation.pbs
-echo "Submitted simulation (Nz=$NZ, save_tensors=$SAVE_TENSORS): $NAME"
+echo "Submitted simulation ($NAME, stop_time=${STOP_TIME}d): $NAME"

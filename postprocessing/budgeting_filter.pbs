@@ -1,39 +1,29 @@
 #!/bin/bash -l
-#PBS -A UMCP0028
-#PBS -N budgeting_filter_Nz2048_Ri0.10
-#PBS -o logs/budgeting_filter_Nz2048_Ri0.10.log
-#PBS -e logs/budgeting_filter_Nz2048_Ri0.10.log
-# Note: job name above is a default; qalter below updates it at runtime based on NZ
+#PBS -A CHANGE_ME
+#PBS -N bci_budgeting_filter
+#PBS -o logs/bci_budgeting_filter.log
+#PBS -e logs/bci_budgeting_filter.log
+# Note: job name above is a default; qalter below updates it at runtime based on Nx/Ny/Nz
 # Log file paths (-o/-e) cannot be changed at runtime; use the .out file for per-run logs
-#PBS -l walltime=23:59:00
+#PBS -l walltime=04:00:00
 #PBS -q casper
-#PBS -M tchor@umd.edu
+#PBS -M CHANGE_ME@example.com
 #PBS -m ae
 #PBS -r n
-#PBS -l select=1:ncpus=18:mem=730GB:ngpus=0
-#PBS -l job_priority=premium
+#PBS -l select=1:ncpus=8:mem=64GB:ngpus=0
+#PBS -l job_priority=regular
 
+# Runs 01_filter_fields.py (shared across --fixed-reference values, so it only needs to run once).
 set -eo pipefail
 
-NZ=${NZ:-2048}
-SIM=khi_Nz${NZ}_Ri0.10
-PYTHON=/glade/u/home/tomasc/miniconda3/envs/py313/bin/python
-JOB_NAME="budgeting_filter_Nz${NZ}_Ri0.10"
+NX=${NX:-192}
+NY=${NY:-192}
+NZ=${NZ:-32}
+SIM=bci_Nx${NX}_Ny${NY}_Nz${NZ}
+JOB_NAME="${SIM}_budgeting_filter"
 qalter -N "$JOB_NAME" "$PBS_JOBID"
 
-# Clear the environment from any previously loaded modules
-module li
-module --force purge
-module load ncarenv/25.10
-module li
-
-#/glade/u/apps/ch/opt/usr/bin/dumpenv # Dumps environment (for debugging with CISL support)
-
-echo $CUDA_VISIBLE_DEVICES
-
-export JULIA_DEPOT_PATH="$WORK/.julia"
-export JULIA_CPU_TARGET="generic"
-juliaup default 1.12
+source ../hpc_env.sh
 
 time $PYTHON -u 01_filter_fields.py --filename output/${SIM}.nc 2>&1 | tee logs/${JOB_NAME}.out
 

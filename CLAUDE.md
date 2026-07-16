@@ -31,9 +31,24 @@ CLI args: `--Nx`, `--Ny`, `--Nz` (default 48, 48, 8), `--N2`, `--M2`, `--front_w
 km, default 50 100), `--progress_interval` (default 100; use a small value for short/smoke-test runs where the
 default interval may never be reached).
 
-**Note:** the `submit_*.sh`/`*.pbs` job scripts and `README.md`'s job-submission instructions still describe
-the old KH pipeline (`kelvin_helmholtz_instability.jl`, `--Ri`/`--Re0`/`--U`/`--h`) and have not yet been
-updated for `baroclinic_adjustment.jl` -- update them before submitting to the HPC.
+**HPC job submission:** `submit_*.sh`/`*.pbs` (repo root and `postprocessing/`) are adapted for
+`baroclinic_adjustment.jl`/BCI naming (`bci_Nx${NX}_Ny${NY}_Nz${NZ}`), chained via `qsub -W depend=afterok`:
+
+```bash
+bash submit_all_pbs.sh NX=192 NY=192 NZ=32 STOP_TIME=16   # simulation -> budgeting_filter -> budgeting -> plots
+bash submit_all_pbs.sh NX=192 NY=192 NZ=32 SWEEP=1        # + many-filter-scale sweep (sweep1/2/3), parallel branch
+```
+
+The `plots` stage runs `plot3_budgets.py`, `plot5_vorticity_strain_flux.py`/`plot6_middepth_snapshots.py`
+(once per filter scale in `FILTER_SCALES_M`, default `"50000 100000"`), `anim2_surface_buoyancy.py`, and
+`anim3_panels.py` (once per filter scale). The simulation stage requests CPU only, not GPU --
+`baroclinic_adjustment.jl` has no GPU/architecture code path (unlike the KH pipeline this was adapted
+from) -- and its default `mem=64GB` is sized for a modest resolution; scale up for larger `Nx*Ny*Nz` (see
+the memory-estimate/halo-fix notes below for the ~1028x1028x128 target). **Before first use**, every
+`*.pbs` file needs its `#PBS -A`/`#PBS -M` placeholders (`CHANGE_ME`) replaced with your own account code
+and email (PBS directives are parsed statically, so these can't be centralized), and `hpc_env.sh`'s
+`PYTHON` placeholder needs to point at your own HPC Python environment (must have
+`postprocessing/tests/requirements.txt` installed).
 
 ### Post-processing
 ```bash

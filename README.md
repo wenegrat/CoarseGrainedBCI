@@ -63,8 +63,16 @@ Run with `--help` for the full list of CLI arguments (front width, N², M², lat
 Output is written to `output/<stem>.nc` (full 3D fields) and `output/<stem>_surface.nc` (surface slice),
 where `<stem>` encodes the grid size, e.g. `bci_Nx48_Ny48_Nz8`.
 
-**Note:** the `submit_*.sh`/`*.pbs` HPC job scripts still reference the old Kelvin-Helmholtz simulation and
-have not yet been updated for `baroclinic_adjustment.jl`.
+### Running on an HPC cluster (PBS)
+
+```bash
+bash submit_all_pbs.sh NX=192 NY=192 NZ=32 STOP_TIME=16   # simulation -> budgeting_filter -> budgeting -> plots
+```
+
+This chains the simulation, post-processing, and final plots/animations as dependent PBS jobs (submit once,
+each stage runs after the previous succeeds). Add `SWEEP=1` for the many-filter-scale transfer spectrum.
+See `CLAUDE.md`'s "HPC job submission" note for the full flag list, and fill in each `*.pbs` file's
+`#PBS -A`/`#PBS -M` placeholders plus `hpc_env.sh`'s `PYTHON` path before first use.
 
 ## Running the post-processing pipeline
 

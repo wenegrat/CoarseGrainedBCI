@@ -1,36 +1,44 @@
 #!/bin/bash -l
-#PBS -A UMCP0028
-#PBS -N kelvin_helmholtz_1024
-#PBS -o logs/kelvin_helmholtz_1024.log
-#PBS -e logs/kelvin_helmholtz_1024.log
+#PBS -A CHANGE_ME
+#PBS -N bci_sim
+#PBS -o logs/bci_sim.log
+#PBS -e logs/bci_sim.log
+# Note: job name/log paths above are defaults; qalter below updates the job name at runtime based on
+# Nx/Ny/Nz. Log file paths (-o/-e) cannot be changed at runtime; use the .out file for per-run logs.
 #PBS -l walltime=23:59:00
 #PBS -q casper
-#PBS -M tchor@umd.edu
+#PBS -M CHANGE_ME@example.com
 #PBS -m ae
 #PBS -r n
-#PBS -l select=1:ncpus=8:ngpus=1:gpu_type=a100:mem=64GB
+#PBS -l select=1:ncpus=8:mem=64GB:ngpus=0
 #PBS -l job_priority=regular
 
+# CPU-only for now: baroclinic_adjustment.jl has no GPU/architecture code path (unlike the old KH
+# simulation.pbs this was adapted from, which requested an A100). Revisit this resource request if GPU
+# support is ever added.
+#
+# `mem=64GB` is sized for a modest resolution (default below, 192x192x32); scale it up for larger runs.
+# As of the halo-sizing fix (see CLAUDE.md), memory no longer scales with filter scale -- only with
+# Nx*Ny*Nz. For the ~1028x1028x128 target discussed in CLAUDE.md, budget roughly 45-60GB with the default
+# 2 filter scales.
 set -eo pipefail
 
-# Clear the environment from any previously loaded modules
-module li
-module --force purge
-module load ncarenv/25.10
-module li
+NX=${NX:-192}
+NY=${NY:-192}
+NZ=${NZ:-32}
+STOP_TIME=${STOP_TIME:-16}
+EXTRA_ARGS=${EXTRA_ARGS:-}
+JOB_NAME="bci_Nx${NX}_Ny${NY}_Nz${NZ}"
+qalter -N "$JOB_NAME" "$PBS_JOBID"
 
-#/glade/u/apps/ch/opt/usr/bin/dumpenv # Dumps environment (for debugging with CISL support)
-
-echo $CUDA_VISIBLE_DEVICES
-
-NZ=${NZ:-1024}
-SAVE_TENSORS=${SAVE_TENSORS:-0}
-[ "$SAVE_TENSORS" = "1" ] && TENSOR_FLAG="--save_tensors" || TENSOR_FLAG=""
+source hpc_env.sh
 
 export JULIA_DEPOT_PATH="$WORK/.julia"
 export JULIA_CPU_TARGET="generic"
-juliaup add 1.12.4   # Julia 1.12.6 has a GPU-codegen regression (InvalidIRError in gpu_fill_kernel!); 1.12.4 works
-time julia +1.12.4 --project -t 8 kelvin_helmholtz_instability.jl --Nz $NZ $TENSOR_FLAG 2>&1 | tee logs/kelvin_helmholtz_${NZ}.out
+juliaup add 1.11.2   # matches this repo's pinned Julia version (see README/juliaup override)
 
-qstat -f $PBS_JOBID >> logs/kelvin_helmholtz_${NZ}.log
-qstat -f $PBS_JOBID >> logs/kelvin_helmholtz_${NZ}.out
+time julia +1.11.2 --project -t 8 baroclinic_adjustment.jl --Nx $NX --Ny $NY --Nz $NZ \
+    --stop_time $STOP_TIME $EXTRA_ARGS 2>&1 | tee logs/${JOB_NAME}.out
+
+qstat -f $PBS_JOBID >> logs/${JOB_NAME}.log
+qstat -f $PBS_JOBID >> logs/${JOB_NAME}.out

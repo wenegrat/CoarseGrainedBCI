@@ -1,43 +1,34 @@
 #!/bin/bash -l
-#PBS -A UMCP0028
-#PBS -N sweep_transfer_Nz4096_Ri0.10
-#PBS -o logs/sweep_transfer_Nz4096_Ri0.10.log
-#PBS -e logs/sweep_transfer_Nz4096_Ri0.10.log
-# Note: job name above is a default; qalter below updates it at runtime based on NZ/FIXED_REF
+#PBS -A CHANGE_ME
+#PBS -N bci_sweep_transfer
+#PBS -o logs/bci_sweep_transfer.log
+#PBS -e logs/bci_sweep_transfer.log
+# Note: job name above is a default; qalter below updates it at runtime based on Nx/Ny/Nz/FIXED_REF
 # Log file paths (-o/-e) cannot be changed at runtime; use the .out file for per-run logs
 #PBS -l walltime=23:59:00
 #PBS -q casper
-#PBS -M tchor@umd.edu
+#PBS -M CHANGE_ME@example.com
 #PBS -m ae
 #PBS -r n
-#PBS -l select=1:ncpus=18:mem=730GB:ngpus=0
-#PBS -l job_priority=premium
+#PBS -l select=1:ncpus=8:mem=128GB:ngpus=0
+#PBS -l job_priority=regular
 
+# Many-filter-scale sweep, step 2 of 2. Note: calculate_energy_transfer() redoes a full Winters sort per
+# filter scale here (see CLAUDE.md) -- this is the expensive step, scaling with sweep1's --n-scales.
 set -eo pipefail
 
-NZ=${NZ:-4096}
-SIM=khi_Nz${NZ}_Ri0.10
-PYTHON=/glade/u/home/tomasc/miniconda3/envs/py313/bin/python
+NX=${NX:-192}
+NY=${NY:-192}
+NZ=${NZ:-32}
+SIM=bci_Nx${NX}_Ny${NY}_Nz${NZ}
 FIXED_REF=${FIXED_REF:-0}
 [ "$FIXED_REF" = "1" ] && FIXED_REF_FLAG="--fixed-reference" && REF_SUFFIX="_fixed_ref" || { FIXED_REF_FLAG=""; REF_SUFFIX=""; }
-JOB_NAME="sweep_transfer_Nz${NZ}_Ri0.10${REF_SUFFIX}"
+JOB_NAME="${SIM}_sweep_transfer${REF_SUFFIX}"
 qalter -N "$JOB_NAME" "$PBS_JOBID"
 
-# Clear the environment from any previously loaded modules
-module li
-module --force purge
-module load ncarenv/25.10
-module li
+source ../hpc_env.sh
 
-#/glade/u/apps/ch/opt/usr/bin/dumpenv # Dumps environment (for debugging with CISL support)
-
-echo $CUDA_VISIBLE_DEVICES
-
-export JULIA_DEPOT_PATH="$WORK/.julia"
-export JULIA_CPU_TARGET="generic"
-juliaup default 1.12
-
-time $PYTHON -u sweep2_energy_transfer.py --filename output/${SIM}.nc --n-workers 18 $FIXED_REF_FLAG 2>&1 | tee logs/${JOB_NAME}.out
-time $PYTHON -u sweep3_plot_transfer_spectrum.py --filename output/${SIM}.nc $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
+time $PYTHON -u sweep2_energy_transfer.py        --filename output/${SIM}.nc --n-workers 8 $FIXED_REF_FLAG 2>&1 | tee    logs/${JOB_NAME}.out
+time $PYTHON -u sweep3_plot_transfer_spectrum.py --filename output/${SIM}.nc               $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
 
 qstat -f $PBS_JOBID >> logs/${JOB_NAME}.out
