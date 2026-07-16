@@ -129,6 +129,23 @@ pipeline's online-vs-offline validation setup and have not been adapted -- there
 validate against anymore. `anim2_surface_buoyancy.py` is new: a simple standalone script that animates the
 surface buoyancy field to a GIF (no ffmpeg dependency, uses matplotlib's `PillowWriter`).
 
+`anim3_panels.py` is also new: a 6-panel GIF animation (`--filename ...`, `--filter-scale` in meters,
+`--fps`, `--dpi`, `--clim-percentile`) combining surface buoyancy, surface Rossby number ζ/f, the SFS
+APE→KE "conversion" term, cross-scale KE/APE fluxes Πₖ/Π_A, and their sum, all at the top z-level, plus a
+full-width bottom row with the SFS KE and APE budget time series (each with a vertical marker tracking the
+current frame). Two things worth knowing if extending it:
+- Some offline APE-pipeline fields (`Π_A`, the KE↔APE exchange term) are stored with dims `(..., x, y)`
+  instead of `(..., y, x)` like every other field (`b`, `ζ`, `Π_K`) -- a real bug in how those DataArrays
+  get built upstream (`aux01_pe_functions.py`), not just a plotting quirk. Plotting `.values` directly
+  against `(x_km, y_km)` renders them rotated 90° relative to everything else. `anim3_panels.py`'s
+  `fix_orientation()` transposes any field to `(..., y_dim, x_dim)` before plotting regardless of its
+  stored order, so this can't recur there -- but any *other* script plotting `Π_A` or an exchange term
+  directly (e.g. a future `plot_middepth`-style script) needs the same treatment.
+- `constrained_layout` cannot reconcile equal-aspect square map axes sharing one GridSpec with a wide,
+  non-square row (it silently fails -- "axes sizes collapsed to zero" -- and produces uneven gaps).
+  `anim3_panels.py` avoids this with explicit `wspace`/`hspace`/margins plus fixed-fraction colorbars
+  (`fraction=0.046, pad=0.04`) instead of relying on the layout solver.
+
 ### Key dependencies
 - **Python**: `numpy`, `xarray`, `scipy`, `matplotlib`, `dask`, `gcm_filters`, `netcdf4`
 - **Julia**: `Oceananigans` v0.110.8, `Oceanostics` v0.18.0 (pinned to the `tc/sfs-ke` branch, not yet a
