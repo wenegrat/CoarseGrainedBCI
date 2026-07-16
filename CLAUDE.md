@@ -146,6 +146,22 @@ current frame). Two things worth knowing if extending it:
   `anim3_panels.py` avoids this with explicit `wspace`/`hspace`/margins plus fixed-fraction colorbars
   (`fraction=0.046, pad=0.04`) instead of relying on the layout solver.
 
+`plot5_vorticity_strain_flux.py` is new: conditions Πₖ, Π_A, and Πₖ+Π_A on the *filtered*-field vorticity
+ζ̄/f0 and strain σ̄/|f0| (`--filename ...`, `--filter-scale` in meters, `--time` in days, `--z` in meters,
+`--n-bins`, `--min-count`, `--clim-percentile`), following the joint-PDF/conditional-mean method of
+[Balwada et al. (2021, JPO)](https://doi.org/10.1175/JPO-D-21-0016.1) but with our own cross-scale energy
+fluxes in place of their vertical tracer flux. Produces, per filter scale: the JPDF, a conditional-mean
+panel and a "net contribution" panel (conditional mean × JPDF) for each of the three flux quantities, plus
+the flux fraction attributable to strain-dominated (SD) vs. vorticity-dominated (AVD/CVD) regions (the
+σ=|ζ̄| partition from the paper). f0 is a single reference Coriolis value (evaluated at y=0), not local
+f(y), to keep the JPDF axes free of an implicit y-dependence. Two gotchas hit while building it:
+- `ūᵢ` (the filtered-velocity file) is *also* stored with `(..., x_caa, y_aca)` instead of `(..., y_aca,
+  x_caa)` -- the same orientation bug as `Π_A`/the exchange term (see above), just in a different file.
+  Uses the same `fix_orientation()` pattern.
+- When overlaying the σ=|ζ| "V" boundary with `ax.plot(z, np.abs(z), ...)`, sampling `z` at only 2 points
+  (the endpoints) draws a flat line at the max, not a V -- `np.abs` needs enough intermediate points to
+  trace the actual piecewise-linear shape.
+
 ### Key dependencies
 - **Python**: `numpy`, `xarray`, `scipy`, `matplotlib`, `dask`, `gcm_filters`, `netcdf4`
 - **Julia**: `Oceananigans` v0.110.8, `Oceanostics` v0.18.0 (pinned to the `tc/sfs-ke` branch, not yet a
