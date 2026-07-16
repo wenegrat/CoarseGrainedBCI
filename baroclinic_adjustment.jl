@@ -190,9 +190,9 @@ let s = ArgParseSettings()
             default = 12.0
 
         "--filter_scales"
-            help = "Two horizontal filter scales (FWHM, in km) for the online coarse-graining diagnostics (default: 50 100; \
-                    kept modest relative to the example's ~20.8km grid spacing so the Gaussian filter's stencil radius stays \
-                    small relative to the domain -- see the halo-sizing note where the grid is built)"
+            help = "Two horizontal filter scales (FWHM, in km) for the online coarse-graining diagnostics \
+                    (default: 50 100). No halo-size penalty for large scales -- the periodic (x,y) filter \
+                    stencil reads via wrapped interior indexing, not halo cells (see the grid-construction note)."
             arg_type = Float64
             nargs = 2
             required = false
@@ -231,29 +231,27 @@ Ny = closest_factor_number((2, 3, 5), params.Ny)
 Nz = params.Nz
 params = (; params..., Nx, Ny)
 
-# The horizontal Gaussian filter's stencil radius (truncated at 4σ, matching scipy's default) must fit
-# within the grid's halo, or the filter's @inbounds accesses run past the allocated halo region and
-# silently corrupt memory (observed as a segfault at an unrelated later point, e.g. inside `show` while
-# printing an unrelated error/warning -- NOT a clean bounds-check failure). The default halo Oceananigans
-# picks is sized for the advection scheme (a few points for Centered(4)), not for whatever filter scale is
-# requested, so it must be sized explicitly here from the *largest* requested filter scale.
+# The horizontal Gaussian filter's periodic (x, y) stencil does NOT need a halo sized to its truncation
+# radius: Oceanostics' GaussianFilter reads periodic-direction neighbors via a wrapped *interior* array
+# index (`wrap_periodic_index`), never through halo/ghost cells, however wide the stencil is (confirmed
+# directly in Oceanostics' SpatialFilters source, and by tomchor). A small, fixed halo -- matching the z
+# halo below, and Oceananigans' own advection-scheme default -- is sufficient regardless of filter scale.
+# (An earlier version of this file sized Hx/Hy from the filter's 4σ radius, defending against a heap-
+# corruption bug that was actually a kernel-launch-sizing issue in Oceanostics <v0.17.3, unrelated to halo
+# width -- see the note above on issue #262/PR #263, which this repo is already pinned past.)
 _FWHM_to_σ(ℓ) = ℓ / (2 * sqrt(2 * log(2)))
-_filter_radius(σ, Δ) = max(1, floor(Int, 4σ / Δ + 0.5))
 
 Δx = params.Lx / Nx
 Δy = params.Ly / Ny
 Δz = params.Lz / Nz
-σmax = _FWHM_to_σ(maximum(filter_scales_km) * kilometers)
-Hx = max(3, _filter_radius(σmax, Δx))
-Hy = max(3, _filter_radius(σmax, Δy))
 
 grid = RectilinearGrid(size=(Nx, Ny, Nz),
                        x=(0, params.Lx),
                        y=(-params.Ly/2, params.Ly/2),
                        z=(-params.Lz, 0),
-                       halo=(Hx, Hy, 3),
+                       halo=(3, 3, 3),
                        topology=(Periodic, Periodic, Bounded))
-@info "Grid created: Nx=$Nx, Ny=$Ny, Nz=$Nz, halo=($Hx, $Hy, 3)"
+@info "Grid created: Nx=$Nx, Ny=$Ny, Nz=$Nz, halo=(3, 3, 3)"
 #---
 
 #+++ Create model
