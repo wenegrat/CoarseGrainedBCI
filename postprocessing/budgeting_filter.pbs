@@ -1,5 +1,5 @@
 #!/bin/bash -l
-#PBS -A CHANGE_ME
+#PBS -A UMCP0023
 #PBS -N bci_budgeting_filter
 #PBS -o logs/bci_budgeting_filter.log
 #PBS -e logs/bci_budgeting_filter.log
@@ -7,7 +7,7 @@
 # Log file paths (-o/-e) cannot be changed at runtime; use the .out file for per-run logs
 #PBS -l walltime=04:00:00
 #PBS -q casper
-#PBS -M CHANGE_ME@example.com
+#PBS -M wenegrat@umd.edu
 #PBS -m ae
 #PBS -r n
 #PBS -l select=1:ncpus=8:mem=64GB:ngpus=0
