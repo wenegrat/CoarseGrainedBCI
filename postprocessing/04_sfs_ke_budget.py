@@ -31,6 +31,19 @@ print("Loading data and grid...")
 ds = load_dataset_and_grid(filename)
 ds = ds.chunk({"time": 1})
 print(f"Dataset loaded: {len(ds.time)} time steps")
+
+# --implicit (baroclinic_adjustment.jl) means closure=nothing: the online ε_Kˢ read below is computed from
+# the model's explicit viscous fluxes, which are identically zero here -- real dissipation is happening via
+# WENO's own implicit numerics, invisible to that diagnostic. The domain-integrated ε_Kˢ is replaced below
+# with a residual-based estimate (solves the budget for ε_Kˢ assuming every other term is correct); the
+# local (spatial) ε_Kˢ field is left as-is (still the near-zero, uninformative online value) since a local
+# residual would also absorb real spatial transport/flux-divergence terms that only vanish upon domain
+# integration, not pointwise -- there's no principled way to attribute those to "dissipation" at a single
+# grid cell. See 05_sfs_ape_budget.py for the same treatment on the APE side.
+implicit = bool(ds.attrs.get("implicit", 0))
+if implicit:
+    print("  implicit=True (from simulation attrs): domain-integrated ε_Kˢ will be replaced with a "
+          "residual-based estimate; the local (spatial) ε_Kˢ field stays at its uninformative online value")
 #---
 
 #+++ Load filtered fields
@@ -118,6 +131,14 @@ for ℓ in filter_scales:
     sfs_ke_dissipation = ds[f"ε_Kˢ_ℓ{ℓ_km}km"]
     int_Π_K_ℓ              = integrate(Π_K_ℓ, dV)
     int_sfs_ke_dissipation = integrate(sfs_ke_dissipation, dV)
+
+    if implicit:
+        # Solve the budget for ε_Kˢ assuming every other term (Πₖ, ∂ₜE_K^s, exchange) is correct -- this is
+        # exactly the online (near-zero) ε_Kˢ's residual, redefined as the dissipation estimate itself. The
+        # residual computed just below becomes ~0 by construction, a sanity check that the substitution was
+        # applied correctly.
+        int_sfs_ke_dissipation = int_Π_K_ℓ.reindex(time=dKE_dt.time) + int_ape_to_ke_exchange - int_dKE_dt
+
     residual  = (-int_dKE_dt + int_Π_K_ℓ.reindex(time=dKE_dt.time) + int_ape_to_ke_exchange
                  - int_sfs_ke_dissipation.reindex(time=dKE_dt.time))
 
@@ -136,6 +157,10 @@ for ℓ in filter_scales:
         "∫(SFS APE->KE) dV": int_ape_to_ke_exchange,
         "residual_K": residual,
     }).reindex(time=dKE_dt.time)
+
+    if implicit:
+        budget_ℓ["∫-ε_Kˢ dV"].attrs["method"] = "residual estimate (implicit LES): Πₖ + exchange - ∂ₜE_K^s"
+        budget_ℓ["residual_K"].attrs["method"] = "≈0 by construction: ε_Kˢ is defined as the residual estimate (implicit LES)"
 
     budget_list.append(budget_ℓ)
 

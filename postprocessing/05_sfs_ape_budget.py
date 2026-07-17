@@ -47,6 +47,19 @@ t0 = time.time()
 ds = load_dataset_and_grid(filename)
 ds = ds.chunk({"time": 1})
 print(f"Dataset loaded: {len(ds.time)} time steps  ({time.time()-t0:.1f}s)")
+
+# --implicit (baroclinic_adjustment.jl) means closure=nothing: nu_h/nu_v/Pr-derived kh/kv below are
+# identically zero, so ε_Aˢ (like ε_Kˢ in 04_sfs_ke_budget.py) is physically uninformative -- real
+# dissipation is happening via WENO's own implicit numerics, invisible to a diagnostic that only reads an
+# explicit closure's diffusivity. The domain-integrated ε_Aˢ is replaced below with a residual-based
+# estimate (solves the budget for ε_Aˢ assuming every other term is correct); the local (spatial) ε_Aˢ
+# field is left as-is (still the near-zero, uninformative explicit-closure value) since a local residual
+# would also absorb real spatial transport/flux-divergence terms that only vanish upon domain integration,
+# not pointwise -- there's no principled way to attribute those to "dissipation" at a single grid cell.
+implicit = bool(ds.attrs.get("implicit", 0))
+if implicit:
+    print("  implicit=True (from simulation attrs): domain-integrated ε_Aˢ will be replaced with a "
+          "residual-based estimate; the local (spatial) ε_Aˢ field stays at its uninformative explicit-closure value")
 #---
 
 #+++ Load filtered fields and pre-sorted density
@@ -191,6 +204,15 @@ for ℓ in filter_scales:
 
     Π_A_ℓ     = energy_transfer["Π_A"].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6)
     int_Π_A_ℓ = energy_transfer["∫Π_A dV"].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6)
+
+    if implicit:
+        # Solve the budget for ε_Aˢ assuming every other term (Π_A, ∂ₜE_A^s, exchange, Rˢ) is correct --
+        # this is exactly the online (near-zero) ε_Aˢ's residual, redefined as the dissipation estimate
+        # itself. The residual computed just below becomes ~0 by construction, a sanity check that the
+        # substitution was applied correctly.
+        int_sfs_ape_dissipation = (-int_dAPE_dt - int_ape_to_ke_exchange.reindex(time=dAPE_dt.time)
+                                    + int_Π_A_ℓ.reindex(time=dAPE_dt.time) + int_R_s)
+
     residual  = -int_dAPE_dt - int_ape_to_ke_exchange.reindex(time=dAPE_dt.time) + int_Π_A_ℓ.reindex(time=dAPE_dt.time) - int_sfs_ape_dissipation + int_R_s
 
     budget_ℓ = xr.Dataset({
@@ -223,6 +245,10 @@ for ℓ in filter_scales:
         "∫Rˢ dV": int_R_s,
         "residual_A": residual,
     }).reindex(time=dAPE_dt.time)
+
+    if implicit:
+        budget_ℓ["∫-ε_Aˢ dV"].attrs["method"] = "residual estimate (implicit LES): -∂ₜE_A^s - exchange + Π_A + Rˢ"
+        budget_ℓ["residual_A"].attrs["method"] = "≈0 by construction: ε_Aˢ is defined as the residual estimate (implicit LES)"
 
     print(f"  Saving checkpoint...")
     t0 = time.time()

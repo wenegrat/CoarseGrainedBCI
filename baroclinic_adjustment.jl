@@ -81,6 +81,20 @@ let s = ArgParseSettings()
             required = false
             default = -45.0
 
+        "--implicit"
+            help = "Run with fully implicit (numerical) dissipation: forces --closure=nothing (no explicit \
+                    viscosity/diffusivity at all) and --advection_scheme=WENO(order=9), ignoring (with a \
+                    warning) any --closure/--advection_scheme/--Pe_cell_h/--Pe_cell_v/--nu_h/--nu_v flags \
+                    that look like they were also explicitly set. Relies entirely on WENO's own implicit, \
+                    scale-selective numerical dissipation for stability -- an implicit-LES configuration. \
+                    IMPORTANT: the online ε_Kˢ/εˡ SFS dissipation diagnostics and the offline APE \
+                    dissipation term both read from an explicit closure's ν/κ, which is nothing here, so \
+                    they report ~zero rather than the real (numerical, untracked) dissipation actually \
+                    happening -- the post-processing pipeline detects this via this flag's own recorded \
+                    global attribute and substitutes a residual-based estimate instead (see \
+                    04_sfs_ke_budget.py/05_sfs_ape_budget.py). Default: false."
+            action = :store_true
+
         "--closure"
             help = "Turbulence closure: 'constant' (ScalarDiffusivity/anisotropic-Laplacian with fixed \
                     --nu_h/--nu_v, matches the KH setup's explicit-dissipation design, but doesn't converge \
@@ -278,7 +292,8 @@ grid = RectilinearGrid(architecture;
                        z=(-params.Lz, 0),
                        halo=(3, 3, 3),
                        topology=(Periodic, Periodic, Bounded))
-@info "Grid created: Nx=$Nx, Ny=$Ny, Nz=$Nz, halo=(3, 3, 3)"
+@info "Grid created: Nx=$Nx, Ny=$Ny, Nz=$Nz, halo=(3, 3, 3) (may be auto-inflated below if the advection \
+scheme needs more, e.g. --implicit's WENO(order=9))"
 #---
 
 #+++ Create model
@@ -317,8 +332,34 @@ grid = RectilinearGrid(architecture;
 # background stratification N² -- and disabling Cb (--Cb_smag 0) instead makes νₑ wildly too large
 # (~1000s of m²/s), since SmagorinskyLilly's filter width assumes an isotropic grid cell, which this grid
 # is not. Kept only for reference/future work at finer resolution.
+# --implicit forces closure=nothing and advection_scheme=WENO(order=9), ignoring (with a warning) any
+# --closure/--advection_scheme/--Pe_cell_h/--Pe_cell_v/--nu_h/--nu_v flags that look like they were also
+# explicitly set (differ from their own defaults) -- "warn and override" rather than erroring, matching
+# this CLI's generally permissive style elsewhere.
+if params.implicit
+    conflicting = String[]
+    params.closure != "scale_aware"       && push!(conflicting, "--closure=$(params.closure)")
+    params.advection_scheme != "centered" && push!(conflicting, "--advection_scheme=$(params.advection_scheme)")
+    params.Pe_cell_h != 100.0             && push!(conflicting, "--Pe_cell_h=$(params.Pe_cell_h)")
+    params.Pe_cell_v != 50.0              && push!(conflicting, "--Pe_cell_v=$(params.Pe_cell_v)")
+    params.nu_h != 1.0                    && push!(conflicting, "--nu_h=$(params.nu_h)")
+    params.nu_v != 1.0                    && push!(conflicting, "--nu_v=$(params.nu_v)")
+    isempty(conflicting) ||
+        @warn "--implicit=true forces closure=nothing and advection_scheme=WENO(order=9); ignoring: $(join(conflicting, ", "))"
+end
+
 νh_scale_aware = νv_scale_aware = nothing  # populated below only for --closure=scale_aware
-closure = if params.closure == "smagorinsky"
+closure = if params.implicit
+    # NOT `closure = nothing`: confirmed directly (a failed smoke test) that Oceananigans has no
+    # `viscous_flux_ux` method for a `Nothing` closure at all -- `nothing` is not a valid "no dissipation"
+    # sentinel for NonhydrostaticModel in this version, it's simply undispatchable and errors with a
+    # MethodError inside the first tendency calculation. An explicit zero-valued diffusivity dispatches to
+    # the same AbstractScalarDiffusivity code path already used by the other closures below (proven to
+    # work), just multiplying out to zero everywhere -- giving the same "no explicit dissipation" physics
+    # without hitting the missing-method gap.
+    (HorizontalScalarDiffusivity(ν=0, κ=0),
+     VerticalScalarDiffusivity(VerticallyImplicitTimeDiscretization(); ν=0, κ=0))
+elseif params.closure == "smagorinsky"
     SmagorinskyLilly(C=params.C_smag, Cb=params.Cb_smag, Pr=params.Pr)
 elseif params.closure == "scale_aware"
     Ω_earth = 7.2921159e-5  # rad/s
@@ -332,17 +373,31 @@ elseif params.closure == "scale_aware"
 else
     νh, νv = params.nu_h, params.nu_v
     κh, κv = params.nu_h / params.Pr, params.nu_v / params.Pr
-    (νh == 0 && κh == 0 && νv == 0 && κv == 0) ? nothing :
-        (HorizontalScalarDiffusivity(ν=νh, κ=κh),
-         VerticalScalarDiffusivity(VerticallyImplicitTimeDiscretization(); ν=νv, κ=κv))
+    # (Previously special-cased ν=κ=0 to `closure=nothing` here -- removed: that hits the same missing
+    # `viscous_flux_ux` dispatch as --implicit's case above, and was never actually exercised/tested before
+    # now. A zero-valued ScalarDiffusivity works fine and gives identical physics.)
+    (HorizontalScalarDiffusivity(ν=νh, κ=κh),
+     VerticalScalarDiffusivity(VerticallyImplicitTimeDiscretization(); ν=νv, κ=κv))
 end
 
-advection_scheme = params.advection_scheme == "weno" ? WENO(order=5) : Centered(order=4)
+# WENO(order=9) needs a wider stencil (halo≥5) than the grid's fixed halo=(3,3,3), but this needs no manual
+# handling: NonhydrostaticModel auto-inflates and rebuilds the grid's halo to match whatever the advection
+# scheme requires (confirmed directly -- it logs "Inflating model grid halo size to ..." and transparently
+# recreates the grid), and auto-downgrades the order in any direction too short to support the full stencil
+# (e.g. a tiny Nz in a smoke test). No silent-corruption risk here, unlike this repo's own filter-halo
+# history -- that was a hand-rolled stencil bypassing Oceananigans' own machinery, not this.
+advection_scheme = params.implicit ? WENO(order=9) : (params.advection_scheme == "weno" ? WENO(order=5) : Centered(order=4))
 
-# Overwrite nu_h/nu_v with the actual computed values so they're recorded correctly in the NetCDF
-# global attributes below -- the Python postprocessing pipeline falls back to these attributes for any
-# closure whose ν/κ isn't written out as a spatial field (i.e. everything except 'smagorinsky').
-if params.closure == "scale_aware"
+# Overwrite nu_h/nu_v/closure/advection_scheme with the values actually used (rather than the raw
+# --closure/--advection_scheme CLI strings, which stay at their defaults whenever --implicit overrode them)
+# so they're recorded correctly in the NetCDF global attributes below and in the log/summary output. The
+# Python postprocessing pipeline falls back to nu_h/nu_v/Pr for any closure whose ν/κ isn't written out as
+# a spatial field (i.e. everything except 'smagorinsky'), and checks the `implicit` attribute directly to
+# decide whether to use the online/offline dissipation diagnostics or a residual-based estimate instead
+# (see 04_sfs_ke_budget.py/05_sfs_ape_budget.py).
+if params.implicit
+    global params = (; params..., closure="none", advection_scheme="weno9", nu_h=0.0, nu_v=0.0)
+elseif params.closure == "scale_aware"
     global params = (; params..., nu_h=νh_scale_aware, nu_v=νv_scale_aware)
 end
 
@@ -362,10 +417,11 @@ model = NonhydrostaticModel(grid;
                             closure = closure)
 u, v, w = model.velocities
 b = model.tracers.b
+actual_halo = (model.grid.Hx, model.grid.Hy, model.grid.Hz)
 if params.closure == "scale_aware"
-    @info "Model created (advection=$(params.advection_scheme), closure=scale_aware, νh=$νh_scale_aware, νv=$νv_scale_aware)"
+    @info "Model created (advection=$(params.advection_scheme), closure=scale_aware, νh=$νh_scale_aware, νv=$νv_scale_aware, halo=$actual_halo)"
 else
-    @info "Model created (advection=$(params.advection_scheme), closure=$(params.closure))"
+    @info "Model created (advection=$(params.advection_scheme), closure=$(params.closure), halo=$actual_halo)"
 end
 #---
 
@@ -506,12 +562,18 @@ output_filename = "output/$(simulation_name).nc"
 
 output_interval = params.output_interval_hours * hours
 
+# NCDatasets.jl cannot write a raw Bool as a NetCDF attribute at all (errors with "KeyError: key Bool not
+# found") -- confirmed directly. Write `implicit` as Int (0/1) here, in a separate variable, so `params`
+# itself keeps a genuine Bool for use in conditionals earlier in this file. The Python post-processing
+# pipeline reads it back as a plain 0/1 (`bool(ds.attrs["implicit"])`), same as any other numeric attribute.
+netcdf_attributes = (; params..., implicit=Int(params.implicit))
+
 simulation.output_writers[:fields] =
     NetCDFWriter(model, outputs,
                  schedule = ConsecutiveIterations(TimeInterval(output_interval)),
                  filename = output_filename,
                  array_type = Array{Float64},
-                 global_attributes = params,
+                 global_attributes = netcdf_attributes,
                  overwrite_existing = true)
 
 output_filename_2d = "output/$(simulation_name)_surface.nc"
@@ -521,7 +583,7 @@ simulation.output_writers[:surface] =
                  filename = output_filename_2d,
                  array_type = Array{Float32},
                  indices = (:, :, grid.Nz),
-                 global_attributes = params,
+                 global_attributes = netcdf_attributes,
                  overwrite_existing = true)
 
 @info "Output writers configured. Output will be saved to: $(output_filename)"

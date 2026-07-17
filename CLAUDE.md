@@ -35,7 +35,28 @@ short/smoke-test runs where the default interval may never be reached), `--advec
 default or `weno`), `--closure` (`scale_aware` default, `constant`, or `smagorinsky`) with its `--Pe_cell_h`/
 `--Pe_cell_v`/`--nu_h`/`--nu_v`/`--Pr` sub-parameters, `--architecture` (`auto` default -- uses a GPU if
 `CUDA.functional()`, else `CPU()`; `cpu`/`gpu` to force one, `gpu` erroring loudly instead of silently
-falling back if no GPU is found). See the file's own `--help` for full documentation of each.
+falling back if no GPU is found), `--implicit` (boolean flag, default false; forces `--closure=nothing` and
+`--advection_scheme=WENO(order=9)` -- fully implicit/numerical dissipation, an implicit-LES configuration --
+warning and overriding, not erroring, if `--closure`/`--advection_scheme`/`--Pe_cell_h`/`--Pe_cell_v`/
+`--nu_h`/`--nu_v` were also explicitly set; see "Implicit-LES mode" below for the diagnostic implications).
+See the file's own `--help` for full documentation of each.
+
+**Implicit-LES mode (`--implicit`):** the online `ε_Kˢ`/`εˡ` SFS dissipation diagnostics and the offline APE
+dissipation term both derive from an explicit closure's ν/κ, which is `nothing` under `--implicit` -- they
+read ~0 rather than the real (but numerical, untracked) dissipation actually happening via WENO's own
+implicit truncation error. `04_sfs_ke_budget.py`/`05_sfs_ape_budget.py` detect this via the simulation's own
+`implicit` NetCDF attribute and substitute a residual-based estimate for the domain-*integrated* ε_Kˢ/ε_Aˢ
+only (solving the budget for ε_Kˢ/ε_Aˢ assuming every other term is correct, which makes `residual_K`/
+`residual_A` ≈0 by construction) -- the *local* (spatial) `ε_Kˢ`/`ε_Aˢ` fields are left at their
+uninformative near-zero values, since a local residual would also absorb real spatial transport/
+flux-divergence terms that only vanish upon domain integration, not pointwise. Both substituted variables
+carry a `method` attribute in the output NetCDF recording this. This residual-based estimate can go
+negative at some times (unlike a true dissipation rate), since it's absorbing whatever error/noise sits in
+the other terms -- expected, not a bug. `06_plot_budgets.py`/`plot3_budgets.py`/`plot5`/`plot6`/`anim3` need
+no changes, since they consume the same variable names either way. Also note: `NetCDFWriter`'s NCDatasets.jl
+backend cannot write a raw Julia `Bool` as a NetCDF attribute at all (confirmed -- errors "KeyError: key Bool
+not found"); `implicit` is written as `Int` (0/1) via a separate `netcdf_attributes` namedtuple, keeping
+`params.implicit` a genuine `Bool` for use in conditionals earlier in the file.
 
 ### HPC job submission
 
