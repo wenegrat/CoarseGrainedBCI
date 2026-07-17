@@ -5,19 +5,25 @@
 #   simulation → budgeting_filter → budgeting → plots   (always: budgets, plot3/5/6, anim2/3)
 #   + sweep_filter → sweep_transfer  (many-filter-scale transfer spectrum; parallel after budgeting)  (SWEEP=1)
 #
-# Usage: bash submit_all_pbs.sh [NX=192] [NY=192] [NZ=32] [STOP_TIME=16] [FIXED_REF=0] [SWEEP=0] [EXTRA_ARGS=''] [GPU=0]
+# Usage: bash submit_all_pbs.sh [NX=192] [NY=192] [NZ=32] [STOP_TIME=16] [FIXED_REF=0] [SWEEP=0] [EXTRA_ARGS=''] [GPU=0] [FILTER_SCALES_M='50000 100000']
 #   NX/NY/NZ    grid resolution
 #   STOP_TIME   simulation length, in days
 #   FIXED_REF   use fixed-in-time reference profile: 0 or 1
 #   SWEEP       also run the many-filter-scale sweep (sweep1/2/3) after budgeting: 0 or 1
-#   EXTRA_ARGS  extra baroclinic_adjustment.jl CLI args, passed through verbatim (quote multi-word values)
+#   EXTRA_ARGS  extra baroclinic_adjustment.jl CLI args, passed through verbatim (quote multi-word values).
+#               Note: the simulation's own online filter scales are set here via --filter_scales (in KM,
+#               e.g. EXTRA_ARGS='--filter_scales 30 60') -- a separate knob from FILTER_SCALES_M below (in
+#               METERS), which only controls the offline post-processing re-filter. Set both to the same
+#               physical scales if you want online (Πₖ/ε_Kˢ) and offline diagnostics to match.
 #   GPU         1 requests an A100 for the simulation stage only (see submit_simulation.sh); post-processing
 #               stages are pure CPU/numpy/dask regardless and are unaffected
+#   FILTER_SCALES_M   two offline post-processing filter scales, in meters (default "50000 100000"), passed
+#                     to budgeting_filter.pbs (01_filter_fields.py) and plots.pbs
 #
 # To run post-processing alone (simulation already done):
 #   bash postprocessing/submit_budgeting.sh [NX=192] [NY=192] [NZ=32] [FIXED_REF=0|1|both]
 
-NX=192; NY=192; NZ=32; STOP_TIME=16; FIXED_REF=0; SWEEP=0; EXTRA_ARGS=""; GPU=0
+NX=192; NY=192; NZ=32; STOP_TIME=16; FIXED_REF=0; SWEEP=0; EXTRA_ARGS=""; GPU=0; FILTER_SCALES_M="50000 100000"
 for arg in "$@"; do case $arg in
   NX=*)         NX="${arg#*=}";;
   NY=*)         NY="${arg#*=}";;
@@ -27,6 +33,7 @@ for arg in "$@"; do case $arg in
   SWEEP=*)      SWEEP="${arg#*=}";;
   EXTRA_ARGS=*) EXTRA_ARGS="${arg#*=}";;
   GPU=*)        GPU="${arg#*=}";;
+  FILTER_SCALES_M=*) FILTER_SCALES_M="${arg#*=}";;
 esac; done
 [ "$FIXED_REF" = "1" ] && REF_SUFFIX="_fixed_ref" || REF_SUFFIX=""
 SIM_NAME="bci_Nx${NX}_Ny${NY}_Nz${NZ}"
@@ -47,7 +54,7 @@ BF_NAME="${SIM_NAME}_budgeting_filter"
 BF_JOB=$(qsub -N "$BF_NAME" \
               -o "logs/${BF_NAME}.log" \
               -e "logs/${BF_NAME}.log" \
-              -v NX=$NX,NY=$NY,NZ=$NZ \
+              -v "NX=$NX,NY=$NY,NZ=$NZ,FILTER_SCALES_M=$FILTER_SCALES_M" \
               -W depend=afterok:$SIM_JOB \
               budgeting_filter.pbs)
 echo "Submitted budgeting filter (depends on $SIM_JOB): $BF_JOB"
@@ -65,7 +72,7 @@ PLOTS_NAME="${SIM_NAME}_plots"
 PLOTS_JOB=$(qsub -N "$PLOTS_NAME" \
                  -o "logs/${PLOTS_NAME}.log" \
                  -e "logs/${PLOTS_NAME}.log" \
-                 -v NX=$NX,NY=$NY,NZ=$NZ \
+                 -v "NX=$NX,NY=$NY,NZ=$NZ,FILTER_SCALES_M=$FILTER_SCALES_M" \
                  -W depend=afterok:$PP_JOB \
                  plots.pbs)
 echo "Submitted plots+animations (depends on $PP_JOB): $PLOTS_JOB"

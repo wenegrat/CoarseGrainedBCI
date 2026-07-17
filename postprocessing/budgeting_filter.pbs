@@ -19,12 +19,13 @@ set -eo pipefail
 NX=${NX:-192}
 NY=${NY:-192}
 NZ=${NZ:-32}
+FILTER_SCALES_M=${FILTER_SCALES_M:-"50000 100000"}
 SIM=bci_Nx${NX}_Ny${NY}_Nz${NZ}
 JOB_NAME="${SIM}_budgeting_filter"
 qalter -N "$JOB_NAME" "$PBS_JOBID"
 
 source ../hpc_env.sh
 
-time $PYTHON -u 01_filter_fields.py --filename output/${SIM}.nc 2>&1 | tee logs/${JOB_NAME}.out
+time $PYTHON -u 01_filter_fields.py --filename output/${SIM}.nc --filter-scales $FILTER_SCALES_M 2>&1 | tee logs/${JOB_NAME}.out
 
 qstat -f $PBS_JOBID >> logs/${JOB_NAME}.out
