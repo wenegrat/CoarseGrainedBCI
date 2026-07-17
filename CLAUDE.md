@@ -52,6 +52,22 @@ and email (PBS directives are parsed statically, so these can't be centralized),
 `PYTHON` placeholder needs to point at your own HPC Python environment (must have
 `postprocessing/tests/requirements.txt` installed).
 
+**Output storage on the HPC:** `output/` and `postprocessing/output/` are *not* plain directories on the
+HPC -- they're symlinks into scratch space (e.g. `/glade/derecho/scratch/$USER/CoarseGrainedBCI/output/`
+and `.../CoarseGrainedBCI/postprocessing/output/`, mirroring the repo's own layout), because HPC home
+directories tend to have small quotas (100GB is common) that large-resolution runs blow through fast --
+raw simulation NetCDFs and derived post-processing files (filtered velocities, energy transfer, SFS
+budgets) both scale steeply with `Nx*Ny*Nz` and can reach 10s-100s of GB each at resolutions like
+384x384x128. Both directories are fully gitignored (not just their `*.nc` contents) specifically because
+git refuses to operate on tracked paths that sit behind a symlinked directory ("beyond a symbolic link"
+fatal errors on `git stash`/checkout/etc if a `.gitkeep` is still tracked underneath one). A fresh
+checkout needs these created manually before first use: a plain `mkdir output postprocessing/output` for
+local (non-HPC) development, or the scratch-symlink setup above for the HPC. This is unrelated to (but
+was investigated alongside) a separate large consumer of HPC home quota: the Julia package depot
+(`~/.julia`, ~60GB with CUDA artifacts) defaults to the home directory unless `JULIA_DEPOT_PATH` is set
+consistently for both interactive shells and PBS batch jobs -- see conversation history if that migration
+wasn't finished.
+
 ### Post-processing
 ```bash
 cd postprocessing

@@ -74,6 +74,11 @@ each stage runs after the previous succeeds). Add `SWEEP=1` for the many-filter-
 See `CLAUDE.md`'s "HPC job submission" note for the full flag list, and fill in each `*.pbs` file's
 `#PBS -A`/`#PBS -M` placeholders plus `hpc_env.sh`'s `PYTHON` path before first use.
 
+On the HPC, also symlink `output/` and `postprocessing/output/` into scratch space before first use --
+home-directory quotas are typically far too small for raw simulation and derived post-processing NetCDF
+files at production resolutions. See `CLAUDE.md`'s "Output storage on the HPC" note for the full rationale
+and layout.
+
 ## Running the post-processing pipeline
 
 ```bash
