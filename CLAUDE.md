@@ -100,9 +100,14 @@ fatal errors on `git stash`/checkout/etc if a `.gitkeep` is still tracked undern
 checkout needs these created manually before first use: a plain `mkdir output postprocessing/output` for
 local (non-HPC) development, or the scratch-symlink setup above for the HPC. This is unrelated to (but
 was investigated alongside) a separate large consumer of HPC home quota: the Julia package depot
-(`~/.julia`, ~60GB with CUDA artifacts) defaults to the home directory unless `JULIA_DEPOT_PATH` is set
-consistently for both interactive shells and PBS batch jobs -- see conversation history if that migration
-wasn't finished.
+(`~/.julia`, ~60GB with CUDA artifacts) defaults to the home directory unless `JULIA_DEPOT_PATH` is set.
+On this HPC it's been migrated to `$WORK/.julia` (`mv ~/.julia $WORK/.julia`), with `export
+JULIA_DEPOT_PATH="$WORK/.julia"` set in `~/.bash_profile` so interactive shells and any `#!/bin/bash -l`
+(login-shell) PBS script -- including `simulation.pbs`, which also sets it explicitly as a version-controlled
+safety net -- all agree on the same depot. Moving the depot invalidates Julia's precompiled cache (paths
+are baked in), so expect a one-time recompile the first time each package is used afterward. A fresh
+checkout/user on this HPC needs the same migration + `~/.bash_profile` line repeated -- it isn't captured
+by the repo alone, since it's personal shell config.
 
 ### Post-processing
 ```bash

@@ -45,6 +45,15 @@ module --ignore-cache load gcc ncarcompilers netcdf
 module --ignore-cache load cuda
 module --ignore-cache load julia/1.11.2
 
+# JULIA_DEPOT_PATH matches the depot's actual location ($WORK/.julia, migrated from the default ~/.julia
+# to avoid consuming HPC home-directory quota -- a 60+GB depot with CUDA artifacts and compiled-package
+# caches easily fills a 100GB home quota on its own). This line was previously removed after it caused a
+# batch-vs-interactive mismatch (this job pointed here while interactive testing used the untouched
+# default ~/.julia, so the batch job looked in an empty depot) -- it's safe now because $WORK/.julia is
+# also set as the default in ~/.bash_profile, so both contexts agree. Since this job is a login shell
+# (`#!/bin/bash -l` above), it would pick that up automatically anyway; this export is a version-controlled
+# safety net that doesn't depend on personal shell config being present/correct.
+export JULIA_DEPOT_PATH="$WORK/.julia"
 export JULIA_CPU_TARGET="generic"
 
 time julia --project -t 8 baroclinic_adjustment.jl --Nx $NX --Ny $NY --Nz $NZ \
