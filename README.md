@@ -54,8 +54,8 @@ julia --project -t 8 baroclinic_adjustment.jl
 # Custom resolution / short run
 julia --project -t 8 baroclinic_adjustment.jl --Nx 16 --Ny 16 --Nz 4 --stop_time 1
 
-# Custom filter scales (horizontal FWHM, in km) for the online filtered-field diagnostics
-julia --project -t 8 baroclinic_adjustment.jl --filter_scales 50 100
+# Custom filter scales (horizontal FWHM, in meters) for the online filtered-field diagnostics
+julia --project -t 8 baroclinic_adjustment.jl --filter_scales_m 50000 100000
 ```
 
 Run with `--help` for the full list of CLI arguments (front width, N², M², latitude, viscosity, etc.).

@@ -11,10 +11,11 @@
 #   FIXED_REF   use fixed-in-time reference profile: 0 or 1
 #   SWEEP       also run the many-filter-scale sweep (sweep1/2/3) after budgeting: 0 or 1
 #   EXTRA_ARGS  extra baroclinic_adjustment.jl CLI args, passed through verbatim (quote multi-word values).
-#               Note: the simulation's own online filter scales are set here via --filter_scales (in KM,
-#               e.g. EXTRA_ARGS='--filter_scales 30 60') -- a separate knob from FILTER_SCALES_M below (in
-#               METERS), which only controls the offline post-processing re-filter. Set both to the same
-#               physical scales if you want online (Πₖ/ε_Kˢ) and offline diagnostics to match.
+#               Note: the simulation's own online filter scales are set here via --filter_scales_m, in
+#               METERS (e.g. EXTRA_ARGS='--filter_scales_m 30000 60000') -- a separate knob from
+#               FILTER_SCALES_M below, which only controls the offline post-processing re-filter. Both are
+#               in meters; set them to the same values if you want online (Πₖ/ε_Kˢ) and offline diagnostics
+#               to match.
 #   GPU         1 requests an A100 for the simulation stage only (see submit_simulation.sh); post-processing
 #               stages are pure CPU/numpy/dask regardless and are unaffected
 #   FILTER_SCALES_M   two offline post-processing filter scales, in meters (default "50000 100000"), passed

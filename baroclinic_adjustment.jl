@@ -200,14 +200,18 @@ let s = ArgParseSettings()
             required = false
             default = 12.0
 
-        "--filter_scales"
-            help = "Two horizontal filter scales (FWHM, in km) for the online coarse-graining diagnostics \
-                    (default: 50 100). No halo-size penalty for large scales -- the periodic (x,y) filter \
-                    stencil reads via wrapped interior indexing, not halo cells (see the grid-construction note)."
+        "--filter_scales_m"
+            help = "Two horizontal filter scales (FWHM, in meters) for the online coarse-graining diagnostics \
+                    (default: 50000 100000), matching the units used throughout the offline post-processing \
+                    pipeline (--filter-scales/FILTER_SCALES_M). Renamed from the old --filter_scales (which \
+                    took km) specifically so a stale invocation fails loudly (unrecognized argument) instead \
+                    of silently applying scales 1000x too small. No halo-size penalty for large scales -- the \
+                    periodic (x,y) filter stencil reads via wrapped interior indexing, not halo cells (see the \
+                    grid-construction note)."
             arg_type = Float64
             nargs = 2
             required = false
-            default = [50.0, 100.0]
+            default = [50000.0, 100000.0]
 
         "--progress_interval"
             help = "Print a progress message every this many iterations (default: 100; use a small value \
@@ -218,7 +222,7 @@ let s = ArgParseSettings()
     end
     global parsed_args = parse_args(s, as_symbols=true)
 end
-filter_scales_km = pop!(parsed_args, :filter_scales)
+filter_scales_m = pop!(parsed_args, :filter_scales_m)
 params = (; parsed_args...)
 #---
 
@@ -444,7 +448,7 @@ PE = Integral(pe)
 # structure (stratification, surface/bottom boundary layers) that shouldn't be smoothed over. Both
 # horizontal directions are periodic here, so (unlike the KH setup's bounded-z filter) no edge-extension
 # boundary handling is needed — it's a pure periodic wrap.
-filter_ℓs = Tuple(filter_scales_km .* kilometers)
+filter_ℓs = Tuple(filter_scales_m .* meters)
 gaussian_filters = [GaussianFilter(; dims=(1, 2), σ=_FWHM_to_σ(ℓ)) for ℓ in filter_ℓs]  # one reusable filter object per scale
 
 _fields = (u=u_center, v=v_center, w=w_center, b=b)

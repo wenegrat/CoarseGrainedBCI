@@ -27,9 +27,11 @@ julia --project -t 8 baroclinic_adjustment.jl --stop_time 1        # short run
 julia --project -t 8 baroclinic_adjustment.jl --Nx 16 --Ny 16 --Nz 4 --stop_time 0.05 --progress_interval 1   # tiny smoke test
 ```
 CLI args: `--Nx`, `--Ny`, `--Nz` (default 48, 48, 8), `--N2`, `--M2`, `--front_width`, `--perturbation_amplitude`,
-`--latitude`, `--nu`, `--Pr`, `--stop_time` (days, default 20), `--filter_scales` (two horizontal FWHM scales in
-km, default 50 100), `--progress_interval` (default 100; use a small value for short/smoke-test runs where the
-default interval may never be reached).
+`--latitude`, `--nu`, `--Pr`, `--stop_time` (days, default 20), `--filter_scales_m` (two horizontal FWHM scales
+in meters, default 50000 100000 -- matches the units used throughout the offline post-processing pipeline;
+renamed from the old km-based `--filter_scales` specifically so a stale invocation fails loudly instead of
+silently applying scales 1000x too small), `--progress_interval` (default 100; use a small value for
+short/smoke-test runs where the default interval may never be reached).
 
 **HPC job submission:** `submit_*.sh`/`*.pbs` (repo root and `postprocessing/`) are adapted for
 `baroclinic_adjustment.jl`/BCI naming (`bci_Nx${NX}_Ny${NY}_Nz${NZ}`), chained via `qsub -W depend=afterok`:
