@@ -30,3 +30,9 @@ figures/*.pdf
 bathymetry/*nc
 .claude/settings.local.json
 .venv/
+
+# output/ is untracked entirely (not just its *.nc contents) since on the HPC it's a symlink to scratch
+# space -- git refuses to operate on tracked paths behind a symlinked directory ("beyond a symbolic link"
+# fatal errors on stash/checkout/etc). A fresh checkout needs output/ created manually: `mkdir output` for
+# local dev, or the scratch symlink dance documented in conversation history for the HPC.
+/output/
