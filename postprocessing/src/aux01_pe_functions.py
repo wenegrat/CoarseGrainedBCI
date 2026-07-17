@@ -5,6 +5,7 @@ This module contains functions for calculating TPE, RPE, and APE using the sorti
 following Winters et al. (1995).
 """
 
+import time
 import numpy as np
 import xarray as xr
 import concurrent.futures
@@ -485,6 +486,36 @@ def local_potential_energies_timeseries(ds, rho_sorted, dz_sorted, verbose_level
 
     tpe = local_TPE(ds[density_name], z_name=z_name)
     rpe = local_TPE(rho_sorted, z_name="z_1d_sorted")
+
+    # Materialize any still-lazy (dask-backed) pieces before assembling the returned Dataset. ape/z0/
+    # upsilon/D are already eager numpy (built from the ThreadPoolExecutor path above, seeded from
+    # rho_all_np.values), but tpe/rpe/rho_sorted/dz_sorted derive directly from the (dask-chunked) `ds`/
+    # `rho_sorted`/`dz_sorted` arguments and would otherwise stay lazy. A Dataset mixing eager and lazy
+    # variables, written via .to_netcdf(), forces dask's own threaded scheduler to compute the lazy pieces
+    # *during* the write -- multiple threads computing chunks that all write into the same HDF5/NetCDF file
+    # handle is a known hang risk, since the underlying HDF5 C library isn't reliably thread-safe for it.
+    # Confirmed as the cause of a real stall: a checkpoint write sat at 0% progress for 38+ minutes with
+    # near-zero CPU (blocked, not computing) despite ~2.7GB already written and no competing file lock.
+    # Loading everything eagerly here makes the write purely synchronous, eliminating that risk entirely.
+    if verbose_level > 0: print("  Loading tpe...")
+    t0 = time.time()
+    tpe = tpe.load()
+    if verbose_level > 0: print(f"  tpe loaded  ({time.time()-t0:.1f}s)")
+
+    if verbose_level > 0: print("  Loading rpe...")
+    t0 = time.time()
+    rpe = rpe.load()
+    if verbose_level > 0: print(f"  rpe loaded  ({time.time()-t0:.1f}s)")
+
+    if verbose_level > 0: print("  Loading rho_sorted...")
+    t0 = time.time()
+    rho_sorted = rho_sorted.load()
+    if verbose_level > 0: print(f"  rho_sorted loaded  ({time.time()-t0:.1f}s)")
+
+    if verbose_level > 0: print("  Loading dz_sorted...")
+    t0 = time.time()
+    dz_sorted = dz_sorted.load()
+    if verbose_level > 0: print(f"  dz_sorted loaded  ({time.time()-t0:.1f}s)")
 
     # Combine into a Dataset
     local_potential_energies_ds = xr.Dataset(dict(
