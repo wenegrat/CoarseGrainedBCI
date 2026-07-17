@@ -70,9 +70,16 @@ bash submit_all_pbs.sh NX=192 NY=192 NZ=32 STOP_TIME=16   # simulation -> budget
 ```
 
 This chains the simulation, post-processing, and final plots/animations as dependent PBS jobs (submit once,
-each stage runs after the previous succeeds). Add `SWEEP=1` for the many-filter-scale transfer spectrum.
-See `CLAUDE.md`'s "HPC job submission" note for the full flag list, and fill in each `*.pbs` file's
-`#PBS -A`/`#PBS -M` placeholders plus `hpc_env.sh`'s `PYTHON` path before first use.
+each stage runs after the previous succeeds). Add `SWEEP=1` for the many-filter-scale transfer spectrum, or
+`GPU=1` to run the simulation stage on an A100.
+
+If the simulation's already done and you just want to (re)run analysis, use
+`bash postprocessing/submit_budgeting.sh NX=192 NY=192 NZ=32` instead -- same
+budgeting_filter → budgeting → plots chain, without resubmitting the simulation.
+
+See `CLAUDE.md`'s "HPC job submission" section for the full reference (all four entry points, every flag),
+and fill in each `*.pbs` file's `#PBS -A`/`#PBS -M` placeholders plus `hpc_env.sh`'s `PYTHON` path before
+first use.
 
 On the HPC, also symlink `output/` and `postprocessing/output/` into scratch space before first use --
 home-directory quotas are typically far too small for raw simulation and derived post-processing NetCDF

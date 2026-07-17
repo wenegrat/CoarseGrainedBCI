@@ -31,26 +31,62 @@ CLI args: `--Nx`, `--Ny`, `--Nz` (default 48, 48, 8), `--N2`, `--M2`, `--front_w
 in meters, default 50000 100000 -- matches the units used throughout the offline post-processing pipeline;
 renamed from the old km-based `--filter_scales` specifically so a stale invocation fails loudly instead of
 silently applying scales 1000x too small), `--progress_interval` (default 100; use a small value for
-short/smoke-test runs where the default interval may never be reached).
+short/smoke-test runs where the default interval may never be reached), `--advection_scheme` (`centered`
+default or `weno`), `--closure` (`scale_aware` default, `constant`, or `smagorinsky`) with its `--Pe_cell_h`/
+`--Pe_cell_v`/`--nu_h`/`--nu_v`/`--Pr` sub-parameters, `--architecture` (`auto` default -- uses a GPU if
+`CUDA.functional()`, else `CPU()`; `cpu`/`gpu` to force one, `gpu` erroring loudly instead of silently
+falling back if no GPU is found). See the file's own `--help` for full documentation of each.
 
-**HPC job submission:** `submit_*.sh`/`*.pbs` (repo root and `postprocessing/`) are adapted for
-`baroclinic_adjustment.jl`/BCI naming (`bci_Nx${NX}_Ny${NY}_Nz${NZ}`), chained via `qsub -W depend=afterok`:
+### HPC job submission
+
+`submit_*.sh`/`*.pbs` (repo root and `postprocessing/`) are adapted for `baroclinic_adjustment.jl`/BCI
+naming (`bci_Nx${NX}_Ny${NY}_Nz${NZ}`), chained via `qsub -W depend=afterok`. Four entry points, depending
+on how much of the pipeline you need:
+
+| Script | Stages run | Use when |
+|--------|-----------|----------|
+| `bash submit_all_pbs.sh` | simulation → budgeting_filter → budgeting → plots (+ sweep_filter → sweep_transfer if `SWEEP=1`) | starting from scratch |
+| `bash submit_simulation.sh` | simulation only | you only want the `.nc` output, no post-processing yet |
+| `bash postprocessing/submit_budgeting.sh` | budgeting_filter → budgeting → plots | simulation already completed, (re)run analysis only (e.g. after changing filter scales, or after the simulation succeeded but post-processing failed) |
+| `bash postprocessing/submit_sweep.sh` | sweep_filter → sweep_transfer | just the many-filter-scale transfer-spectrum sweep, independent of the fixed-2-scale budgeting above |
 
 ```bash
-bash submit_all_pbs.sh NX=192 NY=192 NZ=32 STOP_TIME=16   # simulation -> budgeting_filter -> budgeting -> plots
-bash submit_all_pbs.sh NX=192 NY=192 NZ=32 SWEEP=1        # + many-filter-scale sweep (sweep1/2/3), parallel branch
+# Full pipeline, WENO advection on a GPU
+bash submit_all_pbs.sh NX=128 NY=128 NZ=64 STOP_TIME=20 \
+    EXTRA_ARGS='--advection_scheme weno --Pe_cell_h 50 --Pe_cell_v 50' GPU=1
+
+# Simulation only
+bash submit_simulation.sh NX=384 NY=384 NZ=128 STOP_TIME=16 GPU=1
+
+# Post-processing only, against an already-completed simulation
+cd postprocessing && bash submit_budgeting.sh NX=384 NY=384 NZ=128
+
+# Many-filter-scale sweep only
+cd postprocessing && bash submit_sweep.sh NX=384 NY=384 NZ=128
 ```
 
+Shared flags across the scripts that take them: `NX`/`NY`/`NZ` (grid resolution), `STOP_TIME` (simulation
+days, `submit_all_pbs.sh`/`submit_simulation.sh` only), `EXTRA_ARGS` (extra `baroclinic_adjustment.jl` CLI
+args passed through verbatim -- quote multi-word values), `GPU=1` (requests an A100 for the simulation
+stage only via a `qsub -l` override, since `#PBS` directives are static; post-processing stages are pure
+CPU/numpy/dask regardless), `FILTER_SCALES_M` (offline post-processing filter scales in **meters**, default
+`"50000 100000"`, passed to `budgeting_filter.pbs`/`01_filter_fields.py` and `plots.pbs` -- an independent
+knob from `EXTRA_ARGS`'s `--filter_scales_m`, which controls the simulation's *online* diagnostics; set
+both to the same values if you want online and offline diagnostics to correspond), `FIXED_REF=0|1|both`
+(fixed-in-time vs. recomputed reference density profile; `both` submits both budgeting variants, sharing
+one filter-step run), `SWEEP=1` (`submit_all_pbs.sh` only, adds the sweep branch after budgeting).
+
 The `plots` stage runs `plot3_budgets.py`, `plot5_vorticity_strain_flux.py`/`plot6_middepth_snapshots.py`
-(once per filter scale in `FILTER_SCALES_M`, default `"50000 100000"`), `anim2_surface_buoyancy.py`, and
-`anim3_panels.py` (once per filter scale). The simulation stage requests CPU only, not GPU --
-`baroclinic_adjustment.jl` has no GPU/architecture code path (unlike the KH pipeline this was adapted
-from) -- and its default `mem=64GB` is sized for a modest resolution; scale up for larger `Nx*Ny*Nz` (see
-the memory-estimate/halo-fix notes below for the ~1028x1028x128 target). **Before first use**, every
-`*.pbs` file needs its `#PBS -A`/`#PBS -M` placeholders (`CHANGE_ME`) replaced with your own account code
-and email (PBS directives are parsed statically, so these can't be centralized), and `hpc_env.sh`'s
-`PYTHON` placeholder needs to point at your own HPC Python environment (must have
-`postprocessing/tests/requirements.txt` installed).
+(once per filter scale in `FILTER_SCALES_M`), `anim2_surface_buoyancy.py`, and `anim3_panels.py` (once per
+filter scale) -- the latter depends specifically on the `FIXED_REF=0` budgeting output (no
+`--fixed-reference` support in the plotting scripts themselves), so `submit_budgeting.sh` skips plots
+automatically if only `FIXED_REF=1` was requested. `simulation.pbs`'s default `mem=64GB` is sized for a
+modest resolution and is a *static* PBS resource request (doesn't scale with `NX*NY*NZ` automatically) --
+bump it by hand in `simulation.pbs` for much larger grids. **Before first use**, every `*.pbs` file needs
+its `#PBS -A`/`#PBS -M` placeholders (`CHANGE_ME`) replaced with your own account code and email (PBS
+directives are parsed statically, so these can't be centralized), and `hpc_env.sh`'s `PYTHON` placeholder
+needs to point at your own HPC Python environment (must have `postprocessing/tests/requirements.txt`
+installed).
 
 **Output storage on the HPC:** `output/` and `postprocessing/output/` are *not* plain directories on the
 HPC -- they're symlinks into scratch space (e.g. `/glade/derecho/scratch/$USER/CoarseGrainedBCI/output/`
