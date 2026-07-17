@@ -40,6 +40,17 @@ let s = ArgParseSettings()
             required = false
             default = 8
 
+        "--architecture"
+            help = "Hardware architecture: 'auto' (default; use GPU() if CUDA.functional() reports a usable \
+                    GPU, else fall back to CPU()), 'cpu' (force CPU() regardless of GPU availability), or \
+                    'gpu' (force GPU(); errors out immediately if no functional CUDA GPU is detected, rather \
+                    than silently falling back to CPU -- use this for a GPU smoke test so a misconfigured \
+                    node fails loudly instead of quietly running on CPU)"
+            arg_type = String
+            required = false
+            default = "auto"
+            range_tester = (s -> s in ("auto", "cpu", "gpu"))
+
         "--N2"
             help = "Background stratification N² (default: 1e-5 s⁻²)"
             arg_type = Float64
@@ -245,7 +256,19 @@ _FWHM_to_σ(ℓ) = ℓ / (2 * sqrt(2 * log(2)))
 Δy = params.Ly / Ny
 Δz = params.Lz / Nz
 
-grid = RectilinearGrid(size=(Nx, Ny, Nz),
+architecture = if params.architecture == "gpu"
+    CUDA.functional() || error("--architecture=gpu was requested but CUDA.functional() is false -- no usable " *
+                                "GPU detected. Check that a GPU is allocated to this job and the `cuda` module is loaded.")
+    GPU()
+elseif params.architecture == "cpu"
+    CPU()
+else # "auto"
+    CUDA.functional() ? GPU() : CPU()
+end
+@info "Using architecture: $architecture"
+
+grid = RectilinearGrid(architecture;
+                       size=(Nx, Ny, Nz),
                        x=(0, params.Lx),
                        y=(-params.Ly/2, params.Ly/2),
                        z=(-params.Lz, 0),

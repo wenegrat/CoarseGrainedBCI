@@ -13,9 +13,11 @@
 #PBS -l select=1:ncpus=8:mem=64GB:ngpus=0
 #PBS -l job_priority=regular
 
-# CPU-only for now: baroclinic_adjustment.jl has no GPU/architecture code path (unlike the old KH
-# simulation.pbs this was adapted from, which requested an A100). Revisit this resource request if GPU
-# support is ever added.
+# CPU-only by default (ngpus=0): baroclinic_adjustment.jl auto-detects a GPU (--architecture=auto, the
+# default) and uses it if present, but this job's own resource request doesn't ask PBS for one. For a GPU
+# run/smoke test, override on the qsub command line (submit_simulation.sh's GPU=1 flag does this, or pass
+# `-l select=1:ncpus=8:ngpus=1:gpu_type=a100:mem=64GB` to qsub directly) -- #PBS directives are static and
+# can't be branched on at runtime.
 #
 # `mem=64GB` is sized for a modest resolution (default below, 192x192x32); scale it up for larger runs.
 # As of the halo-sizing fix (see CLAUDE.md), memory no longer scales with filter scale -- only with
@@ -36,8 +38,9 @@ source hpc_env.sh
 # Julia-specific modules on top of hpc_env.sh's shared ncarenv baseline. `julia/1.11.2` is NCAR's own
 # module (matches this repo's pinned Julia version, see README/juliaup override) -- use this instead of
 # juliaup, which downloads Julia at runtime and will likely fail on a compute node without internet
-# access. `cuda` is loaded for parity with prior working NCAR sessions even though this job requests no
-# GPU (ngpus=0 above); harmless to have loaded, does not by itself enable GPU use.
+# access. `cuda` is loaded so CUDA.jl/GPU() work whenever this job's resource request does include a GPU
+# (see the ngpus note above); harmless to load when it doesn't (ngpus=0), since baroclinic_adjustment.jl's
+# --architecture=auto falls back to CPU() cleanly when CUDA.functional() is false.
 module --ignore-cache load gcc ncarcompilers netcdf
 module --ignore-cache load cuda
 module --ignore-cache load julia/1.11.2
