@@ -80,10 +80,16 @@ output_filename = str(PP_OUTPUT / (Path(filename).stem + f"_energy_transfer_swee
 tmp_dir = PP_OUTPUT / (Path(output_filename).stem + "_tmp")
 tmp_dir.mkdir(exist_ok=True)
 tmp_files = []
+# energy_transfer is fully dask-lazy (calculate_energy_transfer() never .load()s its own output); writing a
+# lazy slice via .to_netcdf() computes it via dask's threaded scheduler *during* the write, with multiple
+# threads writing into the same HDF5 file handle -- the same hang risk fixed for
+# local_potential_energies_timeseries() in aux01_pe_functions.py. Loading one timestep at a time (not the
+# whole energy_transfer up front -- that's the "hundreds of GB" case the comment below is about) keeps this
+# bounded and makes each per-timestep write purely synchronous.
 with ProgressBar(minimum=5, dt=5):
     for i in range(energy_transfer.sizes["time"]):
         tmp_f = str(tmp_dir / f"t{i:04d}.nc")
-        energy_transfer.isel(time=[i]).to_netcdf(tmp_f)
+        energy_transfer.isel(time=[i]).load().to_netcdf(tmp_f)
         tmp_files.append(tmp_f)
         print(f"  wrote time {i+1}/{energy_transfer.sizes['time']}")
 

@@ -73,7 +73,17 @@ print("\n" + "="*60)
 print("Saving results...")
 energy_transfer.attrs.update(ds.attrs)
 output_filename = str(PP_OUTPUT / (Path(filename).stem + f"_energy_transfer{ref_suffix}.nc"))
+# Force full computation before writing -- energy_transfer is still fully dask-lazy at this point (Π_A, the
+# APE->KE exchange terms, and their volume integrals, concatenated across filter scales, none of it .load()'d
+# yet). Writing a lazy Dataset via .to_netcdf() computes it via dask's threaded scheduler *during* the write,
+# with multiple threads writing into the same HDF5 file handle -- the same hang risk fixed for
+# local_potential_energies_timeseries() in aux01_pe_functions.py (see that function's comment for the
+# diagnosed mechanism and a real observed stall). Loading here first makes the write purely synchronous.
+print("  Computing energy_transfer (forces the dask graph before the write)...")
+t0 = time.time()
 with ProgressBar(minimum=5, dt=5):
-    energy_transfer.to_netcdf(output_filename)
+    energy_transfer = energy_transfer.load()
+print(f"  energy_transfer computed  ({time.time()-t0:.1f}s)")
+energy_transfer.to_netcdf(output_filename)
 print(f"Results saved to: {output_filename}")
 #---
