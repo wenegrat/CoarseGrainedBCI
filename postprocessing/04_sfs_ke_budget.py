@@ -3,7 +3,6 @@
 import os
 from pathlib import Path
 import xarray as xr
-import dask
 from dask.diagnostics.progress import ProgressBar
 from src.aux00_utils import load_dataset_and_grid, condense_velocities, integrate, make_gaussian_filter
 from src.aux01_pe_functions import calculate_density_fields_from_buoyancy, calculate_b_r, calculate_b_r_simple, calculate_ape_to_ke_exchange_term
@@ -158,17 +157,21 @@ fields_filename     = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ke_budget_fi
 integrated_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ke_budget_integrated{ref_suffix}.nc"))
 
 # sfs_ke_budget_terms is still fully dask-lazy at this point (KE_of_sfs_flow, Π_K/ε_Kˢ read from the
-# chunked simulation file, and every integral, none of it computed yet). See 01_filter_fields.py's save
-# step for why we use the synchronous scheduler here rather than an eager .load() -- avoids the
-# concurrent-thread HDF5 write hang without requiring the whole dataset to fit in memory (an earlier
-# .load()-based version of this fix OOM-killed a production-scale HPC run).
+# chunked simulation file, and every integral, none of it .load()'d yet). Writing a
+# lazy Dataset via .to_netcdf() computes it via dask's threaded scheduler *during* the write, with multiple
+# threads writing into the same HDF5 file handle -- the same hang risk fixed for
+# local_potential_energies_timeseries() in aux01_pe_functions.py. Loading each subset right before its own
+# write (rather than the whole Dataset up front) keeps peak memory the same as the two separate to_netcdf()
+# calls already imply.
 print("  Saving local fields...")
-with dask.config.set(scheduler="synchronous"), ProgressBar(minimum=5, dt=5):
-    sfs_ke_budget_terms[local_vars].to_netcdf(fields_filename)
+with ProgressBar(minimum=5, dt=5):
+    local_fields = sfs_ke_budget_terms[local_vars].load()
+local_fields.to_netcdf(fields_filename)
 print(f"  Fields saved to:     {fields_filename}")
 
 print("  Saving integrated timeseries...")
-with dask.config.set(scheduler="synchronous"), ProgressBar(minimum=5, dt=5):
-    sfs_ke_budget_terms[integrated_vars].to_netcdf(integrated_filename)
+with ProgressBar(minimum=5, dt=5):
+    integrated_fields = sfs_ke_budget_terms[integrated_vars].load()
+integrated_fields.to_netcdf(integrated_filename)
 print(f"  Integrated saved to: {integrated_filename}")
 #---
