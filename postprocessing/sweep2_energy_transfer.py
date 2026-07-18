@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import time
 import xarray as xr
+import dask
 from dask.diagnostics.progress import ProgressBar
 from src.aux00_utils import load_dataset_and_grid
 from src.aux02_ke_functions import calculate_energy_transfer
@@ -80,25 +81,29 @@ output_filename = str(PP_OUTPUT / (Path(filename).stem + f"_energy_transfer_swee
 tmp_dir = PP_OUTPUT / (Path(output_filename).stem + "_tmp")
 tmp_dir.mkdir(exist_ok=True)
 tmp_files = []
-# energy_transfer is fully dask-lazy (calculate_energy_transfer() never .load()s its own output); writing a
-# lazy slice via .to_netcdf() computes it via dask's threaded scheduler *during* the write, with multiple
-# threads writing into the same HDF5 file handle -- the same hang risk fixed for
-# local_potential_energies_timeseries() in aux01_pe_functions.py. Loading one timestep at a time (not the
-# whole energy_transfer up front -- that's the "hundreds of GB" case the comment below is about) keeps this
-# bounded and makes each per-timestep write purely synchronous.
-with ProgressBar(minimum=5, dt=5):
+# energy_transfer is fully dask-lazy (calculate_energy_transfer() never computes its own output); writing a
+# lazy slice via .to_netcdf() normally computes it via dask's default *threaded* scheduler during the
+# write, with multiple threads writing into the same HDF5 file handle -- the same hang risk fixed for
+# local_potential_energies_timeseries() in aux01_pe_functions.py. Forcing the *synchronous* (single-
+# threaded) scheduler for these writes removes the concurrent-thread hazard; it doesn't change memory
+# behavior here (each iteration is already bounded to one timestep) but avoids relying on .load() (an
+# eager .load() elsewhere in this pipeline OOM-killed a production-scale HPC run, so it's avoided here too
+# on principle even though a single timestep is unlikely to be the culprit).
+with dask.config.set(scheduler="synchronous"), ProgressBar(minimum=5, dt=5):
     for i in range(energy_transfer.sizes["time"]):
         tmp_f = str(tmp_dir / f"t{i:04d}.nc")
-        energy_transfer.isel(time=[i]).load().to_netcdf(tmp_f)
+        energy_transfer.isel(time=[i]).to_netcdf(tmp_f)
         tmp_files.append(tmp_f)
         print(f"  wrote time {i+1}/{energy_transfer.sizes['time']}")
 
 print("Merging per-timestep files...")
-# Stream via dask (no .load(): the merged dataset is hundreds of GB and won't fit in RAM).
+# Stream via dask (no .load(): the merged dataset is hundreds of GB and won't fit in RAM). Same
+# synchronous-scheduler reasoning as above -- avoids the concurrent-thread HDF5 write hang for this merge
+# too, without requiring the merged dataset to fit in memory.
 with xr.open_mfdataset(tmp_files, combine="by_coords", decode_timedelta=False,
                        parallel=False, chunks={"time": 1}) as merged:
     write_job = merged.to_netcdf(output_filename, compute=False)
-    with ProgressBar(minimum=5, dt=5):
+    with dask.config.set(scheduler="synchronous"), ProgressBar(minimum=5, dt=5):
         write_job.compute()
 for f in tmp_files:
     os.remove(f)

@@ -3,6 +3,7 @@
 import os
 from pathlib import Path
 import numpy as np
+import dask
 from dask.diagnostics.progress import ProgressBar
 from src.aux00_utils import load_dataset_and_grid, filter_fields
 #---
@@ -55,16 +56,18 @@ print("\n" + "="*60)
 print("Saving filtered fields...")
 
 output_filename = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities_sweep.nc"))
-# Force full computation before writing -- ds_filt is still fully dask-lazy here (GaussianFilter.apply uses
-# xr.apply_ufunc(dask="parallelized"), which stays lazy on this chunked input). Writing a lazy Dataset via
-# .to_netcdf() computes it via dask's threaded scheduler *during* the write, with multiple threads writing
-# into the same HDF5 file handle -- a known hang risk, since the underlying HDF5 C library isn't reliably
-# thread-safe for it (see local_potential_energies_timeseries() in aux01_pe_functions.py for a real observed
-# stall of this kind). Loading here first makes the write purely synchronous.
-print("  Computing filtered fields (forces the dask graph before the write)...")
-with ProgressBar(minimum=5, dt=5):
-    ds_filt = ds_filt.load()
-ds_filt.to_netcdf(output_filename)
+# ds_filt is still fully dask-lazy here (GaussianFilter.apply uses xr.apply_ufunc(dask="parallelized"),
+# which stays lazy on this chunked input) and, with up to --n-scales filter scales concatenated, can be
+# much bigger than a single-scale dataset. Writing it via .to_netcdf() normally computes it via dask's
+# default *threaded* scheduler during the write, with multiple threads writing into the same HDF5 file
+# handle -- a known hang risk (see local_potential_energies_timeseries() in aux01_pe_functions.py for a
+# real observed stall of this kind). Forcing the *synchronous* (single-threaded) scheduler for just this
+# write removes the concurrent-thread hazard while still streaming/computing chunk-by-chunk -- unlike an
+# eager .load() first, this doesn't require the whole (many-scale) dataset to fit in memory at once (an
+# earlier .load()-based version of this fix OOM-killed a production-scale HPC run).
+print("  Saving (single-threaded scheduler, to avoid concurrent-thread HDF5 writes)...")
+with dask.config.set(scheduler="synchronous"), ProgressBar(minimum=5, dt=5):
+    ds_filt.to_netcdf(output_filename)
 os.sync()
 print(f"Filtered fields saved to: {output_filename}")
 #---
