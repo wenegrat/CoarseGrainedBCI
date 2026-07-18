@@ -69,16 +69,41 @@ Shared flags across the scripts that take them: `NX`/`NY`/`NZ` (grid resolution)
 days, `submit_all_pbs.sh`/`submit_simulation.sh` only), `EXTRA_ARGS` (extra `baroclinic_adjustment.jl` CLI
 args passed through verbatim -- quote multi-word values), `GPU=1` (requests an A100 for the simulation
 stage only via a `qsub -l` override, since `#PBS` directives are static; post-processing stages are pure
-CPU/numpy/dask regardless), `FILTER_SCALES_M` (offline post-processing filter scales in **meters**, default
-`"50000 100000"`, passed to `budgeting_filter.pbs`/`01_filter_fields.py` and `plots.pbs` -- an independent
-knob from `EXTRA_ARGS`'s `--filter_scales_m`, which controls the simulation's *online* diagnostics; set
-both to the same values if you want online and offline diagnostics to correspond), `FIXED_REF=0|1|both`
-(fixed-in-time vs. recomputed reference density profile; `both` submits both budgeting variants, sharing
-one filter-step run), `SWEEP=1` (`submit_all_pbs.sh` only, adds the sweep branch after budgeting).
+CPU/numpy/dask regardless), `FILTER_SCALES_M` (offline post-processing filter scales in **meters**, passed
+to `budgeting_filter.pbs`/`01_filter_fields.py` and `plots.pbs` -- **left unset by default**, which means
+"use whatever the simulation actually used" rather than a separate hardcoded default; see the "Filter
+scales: single source of truth" note below), `FIXED_REF=0|1|both` (fixed-in-time vs. recomputed reference
+density profile; `both` submits both budgeting variants, sharing one filter-step run), `SWEEP=1`
+(`submit_all_pbs.sh` only, adds the sweep branch after budgeting).
+
+**Filter scales: single source of truth.** `baroclinic_adjustment.jl`'s `--filter_scales_m` (online
+diagnostics) and the offline pipeline's `--filter-scales`/`FILTER_SCALES_M` used to be two fully independent
+knobs with matching-but-separate hardcoded defaults (`50000 100000` in both places) -- easy to let drift
+silently, since nothing checked they agreed. Fixed by making the simulation's own choice the source of
+truth for the common case: `filter_scales_m` is now recorded as a NetCDF global attribute (confirmed
+NCDatasets.jl writes/reads a `Vector{Float64}` attribute cleanly, unlike `Bool` -- see the `--implicit`
+branch's NetCDF-attribute gotcha), and every offline script that previously hardcoded `[50000, 100000]` as
+its `--filter-scales`/`--filter-scale` default now instead falls back to reading that attribute when the
+flag isn't explicitly passed:
+- `01_filter_fields.py` -- defaults to `ds.attrs["filter_scales_m"]` (falls back to `[50000, 100000]` only
+  for older files that predate the attribute)
+- `plot3_budgets.py` -- defaults to the first two scales actually present in the budget file's own
+  `filter_scale` coordinate (which reflects whatever `01_filter_fields.py` actually used, so this is
+  consistent with the point above by construction)
+- `budgeting_filter.pbs`/`plots.pbs` -- `FILTER_SCALES_M` unset means "don't pass `--filter-scales` at
+  all", letting the Python scripts' new defaults take over; `plots.pbs`'s per-scale loop (driving
+  `plot5`/`plot6`/`anim3`) falls back to every scale in the budget file when `FILTER_SCALES_M` is unset
+
+Passing `--filter-scales`/`FILTER_SCALES_M` explicitly still works exactly as before (deliberately using
+different offline scales than the simulation's online ones is a real, intentional workflow -- re-exploring
+offline without rerunning the simulation). The only thing that changed is what happens when you *don't*
+specify it: previously a silent, independently-hardcoded guess; now derived from the one place that
+actually knows what was used.
 
 The `plots` stage runs `plot3_budgets.py`, `plot5_vorticity_strain_flux.py`/`plot6_middepth_snapshots.py`
-(once per filter scale in `FILTER_SCALES_M`), `anim2_surface_buoyancy.py`, and `anim3_panels.py` (once per
-filter scale) -- the latter depends specifically on the `FIXED_REF=0` budgeting output (no
+(once per filter scale -- `FILTER_SCALES_M` if set, else every scale in the budget file),
+`anim2_surface_buoyancy.py`, and `anim3_panels.py` (once per filter scale) -- the latter depends
+specifically on the `FIXED_REF=0` budgeting output (no
 `--fixed-reference` support in the plotting scripts themselves), so `submit_budgeting.sh` skips plots
 automatically if only `FIXED_REF=1` was requested. `simulation.pbs`'s default `mem=64GB` is sized for a
 modest resolution and is a *static* PBS resource request (doesn't scale with `NX*NY*NZ` automatically) --

@@ -222,7 +222,6 @@ let s = ArgParseSettings()
     end
     global parsed_args = parse_args(s, as_symbols=true)
 end
-filter_scales_m = pop!(parsed_args, :filter_scales_m)
 params = (; parsed_args...)
 #---
 
@@ -448,7 +447,7 @@ PE = Integral(pe)
 # structure (stratification, surface/bottom boundary layers) that shouldn't be smoothed over. Both
 # horizontal directions are periodic here, so (unlike the KH setup's bounded-z filter) no edge-extension
 # boundary handling is needed — it's a pure periodic wrap.
-filter_ℓs = Tuple(filter_scales_m .* meters)
+filter_ℓs = Tuple(params.filter_scales_m .* meters)
 gaussian_filters = [GaussianFilter(; dims=(1, 2), σ=_FWHM_to_σ(ℓ)) for ℓ in filter_ℓs]  # one reusable filter object per scale
 
 _fields = (u=u_center, v=v_center, w=w_center, b=b)

@@ -13,7 +13,10 @@ import argparse
 parser = argparse.ArgumentParser(description="Plot 2x2 panel of SFS KE and APE budgets at two filter scales")
 parser.add_argument("--filename", default="output/bci_Nx48_Ny48_Nz8.nc", help="Path to simulation NetCDF file (used to derive budget filenames)")
 parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load the fixed-in-time reference profile outputs")
-parser.add_argument("--filter-scales", type=float, nargs=2, default=[50000.0, 100000.0], help="Two filter length scales (meters) for left and right columns")
+parser.add_argument("--filter-scales", type=float, nargs=2, default=None,
+    help="Two filter length scales (meters) for left and right columns. Defaults to the first two scales "
+         "actually present in the budget file (avoids a silent nearest-match to the wrong scale if the "
+         "file was built with non-default filter scales).")
 parser.add_argument("--tendency-sign", choices=["negative", "positive"], default="positive", help="Plot -∂ₜE (negative — sums to zero with other terms) or ∂ₜE (positive)")
 args = parser.parse_args()
 
@@ -33,6 +36,13 @@ print("Loading budget data...")
 ke_budget  = xr.open_dataset(str(PP_OUTPUT / f"{stem}_sfs_ke_budget_integrated{ref_suffix}.nc"),  decode_timedelta=False)
 ape_budget = xr.open_dataset(str(PP_OUTPUT / f"{stem}_sfs_ape_budget_integrated{ref_suffix}.nc"), decode_timedelta=False)
 print(f"  Filter scales available: {ke_budget.filter_scale.values}")
+
+if args.filter_scales is not None:
+    filter_scales = args.filter_scales
+    print(f"  Filter scales (explicit --filter-scales): {filter_scales}")
+else:
+    filter_scales = list(ke_budget.filter_scale.values[:2])
+    print(f"  Filter scales (from budget file, --filter-scales not given): {filter_scales}")
 #---
 
 #+++ Define budget terms (shared colors across all panels)
@@ -66,7 +76,7 @@ budget_configs = [
 ]
 
 for row, budget, terms, residual_var, row_title in budget_configs:
-    for col, ℓ in enumerate(args.filter_scales):
+    for col, ℓ in enumerate(filter_scales):
         ax = axes[row, col]
         for label, (var, color) in terms.items():
             data = budget[var].sel(filter_scale=ℓ, method="nearest").dropna("time").isel(time=slice(1, None))
@@ -87,7 +97,7 @@ for row, budget, terms, residual_var, row_title in budget_configs:
         ax.grid(True, alpha=0.3, lw=0.5)
         ax.set_title("")
 
-for col, ℓ in enumerate(args.filter_scales):
+for col, ℓ in enumerate(filter_scales):
     actual_ℓ_km = float(ke_budget.filter_scale.sel(filter_scale=ℓ, method="nearest")) / 1000
     axes[0, col].set_title(f"$\\ell = {actual_ℓ_km:.1f}$ km", fontsize=14)
 #---

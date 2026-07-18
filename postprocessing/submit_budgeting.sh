@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 # Submit budgeting jobs: shared filter step (01) once, then per-FIXED_REF steps (02-06), then plots (once).
-# Usage: bash submit_budgeting.sh [NX=192] [NY=192] [NZ=32] [FIXED_REF=0|1|both] [FILTER_SCALES_M='50000 100000']
+# Usage: bash submit_budgeting.sh [NX=192] [NY=192] [NZ=32] [FIXED_REF=0|1|both] [FILTER_SCALES_M='']
 #   FIXED_REF=both       submits budget jobs for both 0 and 1 (filter runs only once)
 #   FILTER_SCALES_M      offline post-processing filter scales, in meters, passed to budgeting_filter.pbs
-#                        (01_filter_fields.py) and plots.pbs (default "50000 100000")
+#                        (01_filter_fields.py) and plots.pbs. Left unset (default): use whatever the
+#                        simulation's own filter_scales_m attribute says, i.e. automatically match the
+#                        scales it was run with. Set explicitly (e.g. '30000 60000') only to deliberately
+#                        use different offline scales than the simulation's online ones.
 # Plots (plots.pbs) is chained after the FIXED_REF=0 budgeting job specifically -- that's the only variant
 # its own scripts (anim3_panels.py etc.) actually read (they have no --fixed-reference support). It's
 # submitted automatically whenever FIXED_REF is 0 or both; skipped (with a note) if FIXED_REF=1 only.
-NX=192; NY=192; NZ=32; FIXED_REF=0; FILTER_SCALES_M="50000 100000"
+NX=192; NY=192; NZ=32; FIXED_REF=0; FILTER_SCALES_M=""
 for arg in "$@"; do case $arg in
   NX=*)        NX="${arg#*=}";;
   NY=*)        NY="${arg#*=}";;

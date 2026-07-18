@@ -5,26 +5,27 @@
 #   simulation → budgeting_filter → budgeting → plots   (always: budgets, plot3/5/6, anim2/3)
 #   + sweep_filter → sweep_transfer  (many-filter-scale transfer spectrum; parallel after budgeting)  (SWEEP=1)
 #
-# Usage: bash submit_all_pbs.sh [NX=192] [NY=192] [NZ=32] [STOP_TIME=16] [FIXED_REF=0] [SWEEP=0] [EXTRA_ARGS=''] [GPU=0] [FILTER_SCALES_M='50000 100000']
+# Usage: bash submit_all_pbs.sh [NX=192] [NY=192] [NZ=32] [STOP_TIME=16] [FIXED_REF=0] [SWEEP=0] [EXTRA_ARGS=''] [GPU=0] [FILTER_SCALES_M='']
 #   NX/NY/NZ    grid resolution
 #   STOP_TIME   simulation length, in days
 #   FIXED_REF   use fixed-in-time reference profile: 0 or 1
 #   SWEEP       also run the many-filter-scale sweep (sweep1/2/3) after budgeting: 0 or 1
 #   EXTRA_ARGS  extra baroclinic_adjustment.jl CLI args, passed through verbatim (quote multi-word values).
-#               Note: the simulation's own online filter scales are set here via --filter_scales_m, in
-#               METERS (e.g. EXTRA_ARGS='--filter_scales_m 30000 60000') -- a separate knob from
-#               FILTER_SCALES_M below, which only controls the offline post-processing re-filter. Both are
-#               in meters; set them to the same values if you want online (Πₖ/ε_Kˢ) and offline diagnostics
-#               to match.
+#               The simulation's own online filter scales are set here via --filter_scales_m, in METERS
+#               (e.g. EXTRA_ARGS='--filter_scales_m 30000 60000'; default 50000 100000).
 #   GPU         1 requests an A100 for the simulation stage only (see submit_simulation.sh); post-processing
 #               stages are pure CPU/numpy/dask regardless and are unaffected
-#   FILTER_SCALES_M   two offline post-processing filter scales, in meters (default "50000 100000"), passed
-#                     to budgeting_filter.pbs (01_filter_fields.py) and plots.pbs
+#   FILTER_SCALES_M   offline post-processing filter scales, in meters, passed to budgeting_filter.pbs
+#                     (01_filter_fields.py) and plots.pbs. Left unset (default) means: use whatever the
+#                     simulation's own filter_scales_m attribute says, i.e. automatically match the online
+#                     scales above -- no need to specify scales in two places for the common case. Set
+#                     explicitly (e.g. '30000 60000') only to deliberately use different offline scales
+#                     than the simulation's online ones.
 #
 # To run post-processing alone (simulation already done):
 #   bash postprocessing/submit_budgeting.sh [NX=192] [NY=192] [NZ=32] [FIXED_REF=0|1|both]
 
-NX=192; NY=192; NZ=32; STOP_TIME=16; FIXED_REF=0; SWEEP=0; EXTRA_ARGS=""; GPU=0; FILTER_SCALES_M="50000 100000"
+NX=192; NY=192; NZ=32; STOP_TIME=16; FIXED_REF=0; SWEEP=0; EXTRA_ARGS=""; GPU=0; FILTER_SCALES_M=""
 for arg in "$@"; do case $arg in
   NX=*)         NX="${arg#*=}";;
   NY=*)         NY="${arg#*=}";;

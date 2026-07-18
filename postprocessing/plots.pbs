@@ -23,7 +23,10 @@ set -eo pipefail
 NX=${NX:-192}
 NY=${NY:-192}
 NZ=${NZ:-32}
-FILTER_SCALES_M=${FILTER_SCALES_M:-"50000 100000"}
+# FILTER_SCALES_M unset (default) -> plot3_budgets.py falls back to the first two scales actually in the
+# budget file, and the per-scale loop below (plot5/plot6/anim3) reads every scale from that same file.
+# Set explicitly to restrict/override which scales get plotted.
+FILTER_SCALES_M=${FILTER_SCALES_M:-}
 SIM=bci_Nx${NX}_Ny${NY}_Nz${NZ}
 JOB_NAME="${SIM}_plots"
 qalter -N "$JOB_NAME" "$PBS_JOBID"
@@ -31,17 +34,32 @@ qalter -N "$JOB_NAME" "$PBS_JOBID"
 source ../hpc_env.sh
 
 LOG=logs/${JOB_NAME}.out
-read -r SCALE_A SCALE_B <<< "$FILTER_SCALES_M"
 
-time $PYTHON -u plot3_budgets.py --filename output/${SIM}.nc --filter-scales $SCALE_A $SCALE_B 2>&1 | tee $LOG
+FILTER_SCALES_FLAG=()
+if [ -n "$FILTER_SCALES_M" ]; then
+    read -r SCALE_A SCALE_B <<< "$FILTER_SCALES_M"
+    FILTER_SCALES_FLAG=(--filter-scales $SCALE_A $SCALE_B)
+fi
+time $PYTHON -u plot3_budgets.py --filename output/${SIM}.nc "${FILTER_SCALES_FLAG[@]}" 2>&1 | tee $LOG
 
-for FS in $FILTER_SCALES_M; do
+# Scales to loop plot5/plot6/anim3 over: explicit FILTER_SCALES_M, else every scale actually in the budget
+# file (guaranteed to exist at this point -- budgeting.pbs must have completed before plots.pbs runs).
+LOOP_SCALES=$FILTER_SCALES_M
+if [ -z "$LOOP_SCALES" ]; then
+    LOOP_SCALES=$($PYTHON -c "
+import xarray as xr
+ds = xr.open_dataset('output/${SIM}_sfs_ke_budget_integrated.nc', decode_times=False)
+print(' '.join(str(float(x)) for x in ds.filter_scale.values))
+")
+fi
+
+for FS in $LOOP_SCALES; do
     time $PYTHON -u plot5_vorticity_strain_flux.py --filename output/${SIM}.nc --filter-scale $FS 2>&1 | tee -a $LOG
     time $PYTHON -u plot6_middepth_snapshots.py    --filename output/${SIM}.nc --filter-scale $FS 2>&1 | tee -a $LOG
 done
 
 time $PYTHON -u anim2_surface_buoyancy.py --filename output/${SIM}.nc 2>&1 | tee -a $LOG
-for FS in $FILTER_SCALES_M; do
+for FS in $LOOP_SCALES; do
     time $PYTHON -u anim3_panels.py --filename output/${SIM}.nc --filter-scale $FS 2>&1 | tee -a $LOG
 done
 
