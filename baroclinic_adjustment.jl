@@ -172,6 +172,25 @@ let s = ArgParseSettings()
             required = false
             default = 1.0
 
+        "--bottom_drag"
+            help = "Apply a quadratic bottom drag boundary condition on u/v: τ = Cd|U|u, U=(u,v,w) at the \
+                    bottom cell, following \
+                    https://github.com/whitleyv/IntWaveSlope/blob/main/Simulations/IntWave.jl. Cd is \
+                    computed from a Monin-Obukhov log law, not set directly -- see --z0. Default: false \
+                    (no bottom drag; free-slip at the bottom, matching all prior behavior)."
+            action = :store_true
+
+        "--z0"
+            help = "Bottom roughness length, in meters, for the quadratic bottom drag's log-law \
+                    coefficient Cd = (κᵥₖ/log(Δz/(2·z0)))², where κᵥₖ=0.4 (von Kármán constant, fixed) and \
+                    Δz is this grid's vertical spacing. Ignored unless --bottom_drag. Default: 0.01 (1 cm, \
+                    matching the reference implementation's Charnock roughness). Cd is resolution-dependent \
+                    by design (a log law evaluated at the first grid point above the bottom, not a fixed \
+                    physical constant) -- expect different effective drag at different Nz for the same z0."
+            arg_type = Float64
+            required = false
+            default = 0.01
+
         "--advection_scheme"
             help = "Advection scheme: 'centered' (default; Centered(order=4), matches KH's setup) or 'weno' \
                     (WENO(order=5), matches the Oceananigans baroclinic_adjustment example; has its own \
@@ -338,12 +357,37 @@ end
 
 advection_scheme = params.advection_scheme == "weno" ? WENO(order=5) : Centered(order=4)
 
-# Overwrite nu_h/nu_v with the actual computed values so they're recorded correctly in the NetCDF
-# global attributes below -- the Python postprocessing pipeline falls back to these attributes for any
-# closure whose ν/κ isn't written out as a spatial field (i.e. everything except 'smagorinsky').
+# Quadratic bottom drag (--bottom_drag): τ = Cd|U|u, U=(u,v,w) at the bottom cell, following
+# https://github.com/whitleyv/IntWaveSlope/blob/main/Simulations/IntWave.jl. Cd is a Monin-Obukhov log-law
+# coefficient (see --z0's help for why it's resolution-dependent by design), applied as a
+# FluxBoundaryCondition on u and v at the bottom only -- this domain has a flat top and bottom (unlike the
+# reference's sloping-bottom/immersed-boundary setup), so no immersed-boundary drag case is needed. Cd is
+# passed via `parameters` rather than closed over as a global: a non-const global referenced inside a
+# hot-path boundary function (called every timestep, every bottom cell) is a classic Julia performance trap.
+κᵥₖ = 0.4  # von Kármán constant
+Cd = nothing
+boundary_conditions = NamedTuple()
+if params.bottom_drag
+    global Cd = (κᵥₖ / log(Δz / (2 * params.z0)))^2
+    bottom_drag_u(x, y, t, u, v, w, p) = -p.Cd * u * sqrt(u^2 + v^2 + w^2)
+    bottom_drag_v(x, y, t, u, v, w, p) = -p.Cd * v * sqrt(u^2 + v^2 + w^2)
+    u_drag_bc = FluxBoundaryCondition(bottom_drag_u, field_dependencies=(:u, :v, :w), parameters=(; Cd))
+    v_drag_bc = FluxBoundaryCondition(bottom_drag_v, field_dependencies=(:u, :v, :w), parameters=(; Cd))
+    global boundary_conditions = (; u=FieldBoundaryConditions(bottom=u_drag_bc),
+                                     v=FieldBoundaryConditions(bottom=v_drag_bc))
+    @info "Bottom drag enabled: z0=$(params.z0) m, Δz=$Δz m, Cd=$Cd"
+end
+
+# Overwrite nu_h/nu_v/bottom_drag/Cd with the actual computed/normalized values so they're recorded
+# correctly in the NetCDF global attributes below -- the Python postprocessing pipeline falls back to
+# nu_h/nu_v for any closure whose ν/κ isn't written out as a spatial field (i.e. everything except
+# 'smagorinsky'), and checks bottom_drag/Cd directly to decide whether to assemble the drag-work budget
+# terms. `Cd=0.0` (not `nothing`) when disabled, since NCDatasets.jl can only write numeric/string
+# attributes, not `nothing`.
 if params.closure == "scale_aware"
     global params = (; params..., nu_h=νh_scale_aware, nu_v=νv_scale_aware)
 end
+global params = (; params..., Cd=(Cd === nothing ? 0.0 : Cd))
 
 # NonhydrostaticModel instead of HydrostaticFreeSurfaceModel: no free surface at all (no η, no
 # barotropic pressure correction -- see conversation for the NetCDFWriter dimension-inference limitation
@@ -358,13 +402,14 @@ model = NonhydrostaticModel(grid;
                             buoyancy = BuoyancyTracer(),
                             tracers = :b,
                             advection = advection_scheme,
-                            closure = closure)
+                            closure = closure,
+                            boundary_conditions = boundary_conditions)
 u, v, w = model.velocities
 b = model.tracers.b
 if params.closure == "scale_aware"
-    @info "Model created (advection=$(params.advection_scheme), closure=scale_aware, νh=$νh_scale_aware, νv=$νv_scale_aware)"
+    @info "Model created (advection=$(params.advection_scheme), closure=scale_aware, νh=$νh_scale_aware, νv=$νv_scale_aware, bottom_drag=$(params.bottom_drag))"
 else
-    @info "Model created (advection=$(params.advection_scheme), closure=$(params.closure))"
+    @info "Model created (advection=$(params.advection_scheme), closure=$(params.closure), bottom_drag=$(params.bottom_drag))"
 end
 #---
 
@@ -487,6 +532,28 @@ _ke_pairs = vcat(
 ke_budget_fields = (; _ke_pairs...)
 #---
 
+#+++ Bottom drag work diagnostics: τ̄ (filtered stress) and overline{τ·u_b} (filtered pointwise work), per
+# filter scale -- only when --bottom_drag. These are the "primitive" SFS-decomposition ingredients: offline
+# assembly (04_sfs_ke_budget.py) combines them into the large-scale term -(τ̄·ū_b) and the SFS term
+# -(overline{τ·u_b} - τ̄·ū_b). ū_b/v̄_b need no separate computation here -- they're already the bottom
+# z-slice of the filtered u_ℓ/v_ℓ fields built above. τ_x, τ_y, and the raw work τ·u_b are built as full 3D
+# expressions from u_center/v_center/w_center for convenience (reusing the same gaussian_filters, which only
+# ever touch x,y), but only the bottom z-level (written via the new :bottom output writer below,
+# indices=(:,:,1)) is physically meaningful -- horizontal-only filtering and z-slicing commute, so this is
+# equivalent to slicing first and filtering the 2D result.
+bottom_drag_fields = NamedTuple()
+if params.bottom_drag
+    τ_x = Cd * sqrt(u_center^2 + v_center^2 + w_center^2) * u_center
+    τ_y = Cd * sqrt(u_center^2 + v_center^2 + w_center^2) * v_center
+    τu_b_raw = τ_x * u_center + τ_y * v_center  # τ·u_b, pointwise
+
+    _τx_pairs   = [Symbol("τx_b_ℓ$(round(Int, ℓ/1000))km") => gf(τ_x)      for (ℓ, gf) in zip(filter_ℓs, gaussian_filters)]
+    _τy_pairs   = [Symbol("τy_b_ℓ$(round(Int, ℓ/1000))km") => gf(τ_y)      for (ℓ, gf) in zip(filter_ℓs, gaussian_filters)]
+    _work_pairs = [Symbol("τu_b_ℓ$(round(Int, ℓ/1000))km") => gf(τu_b_raw) for (ℓ, gf) in zip(filter_ℓs, gaussian_filters)]
+    global bottom_drag_fields = (; _τx_pairs..., _τy_pairs..., _work_pairs...)
+end
+#---
+
 outputs = (; ζ, b, pe, PE, u=u_center, v=v_center, w=w_center, filtered_fields..., ke_budget_fields...)
 
 # Smagorinsky's eddy viscosity/diffusivity are spatially/temporally varying fields (unlike the
@@ -505,12 +572,19 @@ output_filename = "output/$(simulation_name).nc"
 
 output_interval = params.output_interval_hours * hours
 
+# NCDatasets.jl cannot write a raw Bool as a NetCDF attribute at all (errors "KeyError: key Bool not
+# found") -- confirmed directly (see the --implicit branch's identical gotcha). Write bottom_drag as Int
+# (0/1) here, in a separate variable, so `params` itself keeps a genuine Bool for use in conditionals
+# earlier in this file. The Python post-processing pipeline reads it back as a plain 0/1
+# (`bool(ds.attrs["bottom_drag"])`), same as any other numeric attribute.
+netcdf_attributes = (; params..., bottom_drag=Int(params.bottom_drag))
+
 simulation.output_writers[:fields] =
     NetCDFWriter(model, outputs,
                  schedule = ConsecutiveIterations(TimeInterval(output_interval)),
                  filename = output_filename,
                  array_type = Array{Float64},
-                 global_attributes = params,
+                 global_attributes = netcdf_attributes,
                  overwrite_existing = true)
 
 output_filename_2d = "output/$(simulation_name)_surface.nc"
@@ -520,8 +594,24 @@ simulation.output_writers[:surface] =
                  filename = output_filename_2d,
                  array_type = Array{Float32},
                  indices = (:, :, grid.Nz),
-                 global_attributes = params,
+                 global_attributes = netcdf_attributes,
                  overwrite_existing = true)
+
+if params.bottom_drag
+    # ConsecutiveIterations (not plain TimeInterval, unlike :surface) -- matches :fields' own schedule, so
+    # this file's time grid aligns with ds_filt's (01_filter_fields.py operates on the :fields output).
+    # Confirmed necessary directly: a first attempt with plain TimeInterval produced silent all-NaN results
+    # in 04_sfs_ke_budget.py when combining τ̄ (from this file) with ū_b (from ds_filt) on mismatched times.
+    output_filename_bottom = "output/$(simulation_name)_bottom.nc"
+    simulation.output_writers[:bottom] =
+        NetCDFWriter(model, bottom_drag_fields,
+                     schedule = ConsecutiveIterations(TimeInterval(output_interval)),
+                     filename = output_filename_bottom,
+                     array_type = Array{Float32},
+                     indices = (:, :, 1),
+                     global_attributes = netcdf_attributes,
+                     overwrite_existing = true)
+end
 
 @info "Output writers configured. Output will be saved to: $(output_filename)"
 #---
@@ -538,6 +628,7 @@ simulation.output_writers[:surface] =
   Latitude:      %.1f
   Advection:     %s
   Closure:       %s%s
+  Bottom drag:   %s
 ================================================================================
 """,
     params.Nx, params.Ny, params.Nz,
@@ -547,7 +638,8 @@ simulation.output_writers[:surface] =
     params.latitude,
     params.advection_scheme,
     params.closure,
-    params.closure == "scale_aware" ? @sprintf(" (νh=%.4g, νv=%.4g m² s⁻¹)", params.nu_h, params.nu_v) : "")
+    params.closure == "scale_aware" ? @sprintf(" (νh=%.4g, νv=%.4g m² s⁻¹)", params.nu_h, params.nu_v) : "",
+    params.bottom_drag ? @sprintf("enabled (z0=%.4g m, Cd=%.4g)", params.z0, params.Cd) : "disabled")
 @info "Running baroclinic adjustment simulation..."
 run!(simulation)
 #---

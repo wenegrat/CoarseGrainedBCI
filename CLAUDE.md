@@ -35,7 +35,35 @@ short/smoke-test runs where the default interval may never be reached), `--advec
 default or `weno`), `--closure` (`scale_aware` default, `constant`, or `smagorinsky`) with its `--Pe_cell_h`/
 `--Pe_cell_v`/`--nu_h`/`--nu_v`/`--Pr` sub-parameters, `--architecture` (`auto` default -- uses a GPU if
 `CUDA.functional()`, else `CPU()`; `cpu`/`gpu` to force one, `gpu` erroring loudly instead of silently
-falling back if no GPU is found). See the file's own `--help` for full documentation of each.
+falling back if no GPU is found), `--bottom_drag` (boolean, default false; quadratic bottom drag -- see
+"Bottom drag" below) with its `--z0` sub-parameter. See the file's own `--help` for full documentation of
+each.
+
+**Bottom drag (`--bottom_drag`, `--z0`):** quadratic drag `τ = Cd|U|u` (`U=(u,v,w)` at the bottom cell)
+applied as a `FluxBoundaryCondition` on `u`/`v` at the bottom only, following
+[whitleyv/IntWaveSlope](https://github.com/whitleyv/IntWaveSlope/blob/main/Simulations/IntWave.jl). `Cd =
+(κᵥₖ/log(Δz/(2·z0)))²` (Monin-Obukhov log law, `κᵥₖ=0.4` fixed, `z0` the roughness length in meters via
+`--z0`, default 0.01) -- **resolution-dependent by design**: the same `z0` gives different `Cd` at different
+`Nz`, since it's a log law evaluated at the first grid point above the bottom, not a fixed physical
+constant. `Cd` is passed to the boundary function via `parameters=`, not closed over as a global (a
+non-const global referenced inside a per-timestep, per-cell hot-path function is a real Julia performance
+trap). When enabled, three new online diagnostic fields are written per filter scale to a separate
+`_bottom.nc` file (`indices=(:,:,1)`, `ConsecutiveIterations` schedule matching `:fields` -- **not** plain
+`TimeInterval` like `:surface`, since these fields get combined with `:fields`-derived quantities offline
+and need the same time grid; confirmed necessary directly, a first attempt with `TimeInterval` produced
+silent all-NaN results downstream): `τx_b_ℓ{scale}km`/`τy_b_ℓ{scale}km` (filtered bottom stress
+components) and `τu_b_ℓ{scale}km` (filtered pointwise drag work `overline{τ·u_b}`).
+
+Offline (`04_sfs_ke_budget.py`), when `ds.attrs["bottom_drag"]` is true: assembles the large-scale term
+`-(τ̄·ū_b)` (`ū_b`/`v̄_b` reuse the already-filtered `u_ℓ`/`v_ℓ` sliced at the bottom -- no new computation)
+and the SFS term `-(overline{τ·u_b} - τ̄·ū_b)`, both **area**-integrated (`dA = Δx·Δy`, not the volume `dV`
+every other term uses -- bottom drag is a boundary process). The SFS term is folded into `residual_K`
+(a new sink in the SFS KE budget); the large-scale term is recorded as a standalone diagnostic only --
+there's no full large-scale/filtered KE budget assembly in this pipeline yet (see the εˡ note above), so it
+isn't wired into any budget equation. Both terms are always negative by construction (`τ·u_b ≥ 0`
+pointwise, since drag magnitude and velocity share the same sign by construction -- verified directly on a
+real test run). `06_plot_budgets.py`/`plot3_budgets.py`/`anim3_panels.py` all show both terms when present,
+gated on the variable actually existing in the budget file (so non-bottom-drag runs are unaffected).
 
 ### HPC job submission
 
