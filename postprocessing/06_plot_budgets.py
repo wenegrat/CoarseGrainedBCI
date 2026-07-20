@@ -41,12 +41,11 @@ ke_vars = {
     "∫(SFS APE->KE) dV": budget_colors["exchange"],
     "residual_K":         budget_colors["residual"],
 }
-# --bottom_drag (baroclinic_adjustment.jl) only: SFS term is folded into residual_K already (04_sfs_ke_budget.py)
-# and shown here for visibility; LS term is a standalone diagnostic, not part of any budget/residual sum here.
+# --bottom_drag (baroclinic_adjustment.jl) only: SFS term (D_K^s) is folded into residual_K already
+# (04_sfs_ke_budget.py) and shown here for visibility. The large-scale term is a standalone diagnostic
+# (not part of any budget/residual sum here) and deliberately not plotted.
 if "∫-(bottom drag work, SFS) dA" in ke_budget.data_vars:
     ke_vars["∫-(bottom drag work, SFS) dA"] = "C5"
-if "∫-(bottom drag work, LS) dA" in ke_budget.data_vars:
-    ke_vars["∫-(bottom drag work, LS) dA"] = "gray"
 ape_vars = {
     "∫-∂ₜ SFS APE dV":  budget_colors["tendency"],
     "∫Π_A dV":           budget_colors["flux"],

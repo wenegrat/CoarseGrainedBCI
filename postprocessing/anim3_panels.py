@@ -132,13 +132,11 @@ ke_terms = [
     ("∫-ε_Kˢ dV",         "C2", r"$-\varepsilon_K^s$"),
     ("∫(SFS APE->KE) dV", "C3", r"$E_A^s \to E_K^s$"),
 ]
-# --bottom_drag (baroclinic_adjustment.jl) only: SFS term is folded into residual_K already
-# (04_sfs_ke_budget.py) and shown here for visibility; LS term is a standalone diagnostic, not part of
-# any budget/residual sum here.
+# --bottom_drag (baroclinic_adjustment.jl) only: SFS term (D_K^s) is folded into residual_K already
+# (04_sfs_ke_budget.py) and shown here for visibility. The large-scale term is a standalone diagnostic
+# (not part of any budget/residual sum here) and deliberately not plotted.
 if "∫-(bottom drag work, SFS) dA" in ke_int.data_vars:
-    ke_terms.append(("∫-(bottom drag work, SFS) dA", "C5",   r"$-\tau u_b^{s}$"))
-if "∫-(bottom drag work, LS) dA" in ke_int.data_vars:
-    ke_terms.append(("∫-(bottom drag work, LS) dA",  "gray", r"$-\bar\tau\cdot\bar u_b$"))
+    ke_terms.append(("∫-(bottom drag work, SFS) dA", "C5", r"$-D_K^s$"))
 ape_terms = [
     ("∫-∂ₜ SFS APE dV",   "C0", r"$\partial_t E_A^s$"),
     ("∫Π_A dV",           "C1", r"$\Pi_A$"),
