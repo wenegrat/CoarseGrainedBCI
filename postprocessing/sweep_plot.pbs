@@ -1,0 +1,37 @@
+#!/bin/bash -l
+#PBS -A UMCP0023
+#PBS -N bci_sweep_plot
+#PBS -o logs/bci_sweep_plot.log
+#PBS -e logs/bci_sweep_plot.log
+# Note: job name above is a default; qalter below updates it at runtime based on Nx/Ny/Nz/FIXED_REF
+# Log file paths (-o/-e) cannot be changed at runtime; use the .out file for per-run logs
+#PBS -l walltime=01:00:00
+#PBS -q casper
+#PBS -M wenegrat@umd.edu
+#PBS -m ae
+#PBS -r n
+#PBS -l select=1:ncpus=8:mem=64GB:ngpus=0
+#PBS -l job_priority=regular
+
+# Sweep plots only, from an already-computed _energy_transfer_sweep.nc (sweep2_energy_transfer.py must
+# have already completed -- this does NOT recompute it). Use this to re-plot (e.g. after changing
+# --min-time-days, or after adding a new plotting script like sweep4) without re-running the expensive
+# sweep2 step. 64GB/1hr is plenty: sweep3 only touches the small volume-integrated ∫Π dV variables, and
+# sweep4 streams the full local Π_K/Π_A fields one timestep at a time rather than loading them all at once.
+set -eo pipefail
+
+NX=${NX:-192}
+NY=${NY:-192}
+NZ=${NZ:-32}
+SIM=bci_Nx${NX}_Ny${NY}_Nz${NZ}
+FIXED_REF=${FIXED_REF:-0}
+[ "$FIXED_REF" = "1" ] && FIXED_REF_FLAG="--fixed-reference" && REF_SUFFIX="_fixed_ref" || { FIXED_REF_FLAG=""; REF_SUFFIX=""; }
+JOB_NAME="${SIM}_sweep_plot${REF_SUFFIX}"
+qalter -N "$JOB_NAME" "$PBS_JOBID"
+
+source ../hpc_env.sh
+
+time $PYTHON -u sweep3_plot_transfer_spectrum.py --filename output/${SIM}.nc $FIXED_REF_FLAG 2>&1 | tee    logs/${JOB_NAME}.out
+time $PYTHON -u sweep4_plot_depth_scale.py       --filename output/${SIM}.nc $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
+
+qstat -f $PBS_JOBID >> logs/${JOB_NAME}.out
