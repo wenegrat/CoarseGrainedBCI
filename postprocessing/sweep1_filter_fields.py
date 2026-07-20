@@ -3,8 +3,9 @@
 import os
 from pathlib import Path
 import numpy as np
+import xarray as xr
 from dask.diagnostics.progress import ProgressBar
-from src.aux00_utils import load_dataset_and_grid, filter_fields
+from src.aux00_utils import load_dataset_and_grid, condense_velocities, make_gaussian_filter
 #---
 
 #+++ Configuration
@@ -42,29 +43,53 @@ filter_scales = np.geomspace(scale_min, scale_max, args.n_scales)
 print(f"Filter scales: {scale_min/1e3:.1f}km to {scale_max/1e3:.1f}km ({args.n_scales} log-spaced steps)")
 #---
 
-#+++ Filter velocity and buoyancy fields at each length scale
+#+++ Filter and save velocity/buoyancy fields, one filter scale at a time to bound memory
+# filter_fields() (used by 01_filter_fields.py) computes every filter scale and concatenates them into one
+# Dataset before returning -- fine for 01's 2 default scales, but this sweep's default of 30 scales means
+# a single .load() of the concatenated result needs ~30x the memory of any one scale, all resident at once
+# for the write (a 384x384x64 run OOM'd a 256GB node this way, dying at ~30% progress as dask accumulated
+# more completed scales in memory). Instead, filter and write each scale to its own small tmp file, freeing
+# memory before the next scale, then merge via dask's streaming to_netcdf (the same pattern already used
+# for sweep2_energy_transfer.py's per-timestep writes) -- bounds peak memory to ~1 scale's worth (all
+# times, one scale) instead of all n_scales.
 print("\n" + "="*60)
-print("Filtering velocity and buoyancy fields in x and y...")
+print("Filtering and saving velocity/buoyancy fields, one scale at a time...")
 
-ds_filt = filter_fields(ds, filter_scales)
+ds = condense_velocities(ds, indices=(1, 2, 3))
+output_filename = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities_sweep.nc"))
+tmp_dir = PP_OUTPUT / (Path(output_filename).stem + "_tmp")
+tmp_dir.mkdir(exist_ok=True)
+tmp_files = []
+
+with ProgressBar(minimum=5, dt=5):
+    for scale_idx, ℓ in enumerate(filter_scales):
+        print(f"  filter_scale = {ℓ:.4f}  ({scale_idx+1}/{len(filter_scales)})...")
+        gf = make_gaussian_filter(ℓ, ds)
+        ds_filt_ℓ = xr.Dataset({
+            "ūᵢ": gf.apply(ds["uᵢ"], dims=["x_caa", "y_aca"]),
+            "b̄":  gf.apply(ds["b"],  dims=["x_caa", "y_aca"]),
+        }).expand_dims(filter_scale=[ℓ]).load()
+        tmp_f = str(tmp_dir / f"scale{scale_idx:03d}.nc")
+        ds_filt_ℓ.to_netcdf(tmp_f)
+        tmp_files.append(tmp_f)
+        del ds_filt_ℓ
 print("Done!")
 #---
 
-#+++ Save filtered fields
+#+++ Merge per-scale files into the final filtered-fields output
 print("\n" + "="*60)
-print("Saving filtered fields...")
-
-output_filename = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities_sweep.nc"))
-# Force full computation before writing -- ds_filt is still fully dask-lazy here (GaussianFilter.apply uses
-# xr.apply_ufunc(dask="parallelized"), which stays lazy on this chunked input). Writing a lazy Dataset via
-# .to_netcdf() computes it via dask's threaded scheduler *during* the write, with multiple threads writing
-# into the same HDF5 file handle -- a known hang risk, since the underlying HDF5 C library isn't reliably
-# thread-safe for it (see local_potential_energies_timeseries() in aux01_pe_functions.py for a real observed
-# stall of this kind). Loading here first makes the write purely synchronous.
-print("  Computing filtered fields (forces the dask graph before the write)...")
-with ProgressBar(minimum=5, dt=5):
-    ds_filt = ds_filt.load()
-ds_filt.to_netcdf(output_filename)
+print("Merging per-scale files...")
+with xr.open_mfdataset(tmp_files, combine="by_coords", decode_timedelta=False,
+                       parallel=False, chunks={"filter_scale": 1}) as merged:
+    merged["dV"] = ds["dV"]
+    merged.attrs.update(ds.attrs)
+    merged.attrs["filter_dims"] = "x_caa,y_aca"
+    write_job = merged.to_netcdf(output_filename, compute=False)
+    with ProgressBar(minimum=5, dt=5):
+        write_job.compute()
+for f in tmp_files:
+    os.remove(f)
+tmp_dir.rmdir()
 os.sync()
 print(f"Filtered fields saved to: {output_filename}")
 #---
