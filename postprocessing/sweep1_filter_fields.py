@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
-from src.aux00_utils import load_dataset_and_grid, condense_velocities, make_gaussian_filter
+from src.aux00_utils import load_dataset_and_grid, condense_velocities, GaussianFilter
 #---
 
 #+++ Configuration
@@ -61,10 +61,18 @@ tmp_dir = PP_OUTPUT / (Path(output_filename).stem + "_tmp")
 tmp_dir.mkdir(exist_ok=True)
 tmp_files = []
 
+# dx_min/dy_min don't depend on ℓ -- compute once outside the loop (and outside the ProgressBar scope
+# below) rather than via make_gaussian_filter(ℓ, ds) on every iteration. That call does two eager
+# float(...) scalar computes on grid spacing; triggering them inside the per-scale ProgressBar block was
+# measured to cost a flat ~5s (the dt=5 polling floor) *each*, purely for a scalar that's identical across
+# every scale -- 2 x n_scales wasted ~5s floors for no reason.
+dx_min = float(ds.Δx_caa.min())
+dy_min = float(ds.Δy_aca.min())
+
 with ProgressBar(minimum=5, dt=5):
     for scale_idx, ℓ in enumerate(filter_scales):
         print(f"  filter_scale = {ℓ:.4f}  ({scale_idx+1}/{len(filter_scales)})...")
-        gf = make_gaussian_filter(ℓ, ds)
+        gf = GaussianFilter(ℓ, dx_min, dy_min)
         ds_filt_ℓ = xr.Dataset({
             "ūᵢ": gf.apply(ds["uᵢ"], dims=["x_caa", "y_aca"]),
             "b̄":  gf.apply(ds["b"],  dims=["x_caa", "y_aca"]),
