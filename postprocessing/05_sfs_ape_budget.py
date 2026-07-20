@@ -224,10 +224,24 @@ for ℓ in filter_scales:
         "residual_A": residual,
     }).reindex(time=dAPE_dt.time)
 
-    print(f"  Saving checkpoint...")
+    # budget_ℓ mixes eager (filt_local_pes.*, from the already-fixed local_potential_energies_timeseries())
+    # with lazy (full_local_pes.*, re-read from its own on-disk checkpoint above -- open_dataset(...).chunk()
+    # is always lazy regardless of how the source data was originally computed) and other lazy pieces (ρ̄,
+    # sfs_ape_dissipation, R_s, etc.). This is the exact eager+lazy mix that caused a real write hang in
+    # local_potential_energies_timeseries() (see that function's comment in aux01_pe_functions.py): writing a
+    # mixed Dataset via .to_netcdf() computes the lazy pieces via dask's threaded scheduler *during* the
+    # write, with multiple threads writing into the same HDF5 file handle. Loading here first makes the
+    # write purely synchronous; peak memory is unchanged since .to_netcdf() would have had to materialize
+    # the same data anyway, just later and via a different (thread-concurrent) path.
+    print(f"  Computing budget_ℓ (forces the dask graph before the checkpoint write)...")
     t0 = time.time()
     with ProgressBar(minimum=5, dt=5):
-        budget_ℓ.to_netcdf(str(checkpoint_path))
+        budget_ℓ = budget_ℓ.load()
+    print(f"  budget_ℓ computed  ({time.time()-t0:.1f}s)")
+
+    print(f"  Saving checkpoint...")
+    t0 = time.time()
+    budget_ℓ.to_netcdf(str(checkpoint_path))
     print(f"  Checkpoint saved  ({time.time()-t0:.1f}s)")
 
     # Free memory before the next iteration
@@ -259,14 +273,21 @@ local_vars      = [v for v in sfs_ape_budget_terms.data_vars if v not in integra
 fields_filename     = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ape_budget_fields{ref_suffix}.nc"))
 integrated_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ape_budget_integrated{ref_suffix}.nc"))
 
+# sfs_ape_budget_terms is fully dask-lazy here too -- xr.concat() of per-scale checkpoint reloads (each
+# open_dataset(...).chunk() is lazy regardless of the checkpoint's own data having been eager on disk) plus
+# ds_full.ρ. Same hang risk as the checkpoint write above; loading each subset right before its own write
+# (rather than the whole Dataset up front) keeps peak memory the same as the two separate to_netcdf() calls
+# already imply -- comparable to what a single filter scale's worth of local fields already costs above.
 print("  Saving local fields...")
 with ProgressBar(minimum=5, dt=5):
-    sfs_ape_budget_terms[local_vars].to_netcdf(fields_filename)
+    local_fields = sfs_ape_budget_terms[local_vars].load()
+local_fields.to_netcdf(fields_filename)
 print(f"  Fields saved to:     {fields_filename}")
 
 print("  Saving integrated timeseries...")
 with ProgressBar(minimum=5, dt=5):
-    sfs_ape_budget_terms[integrated_vars].to_netcdf(integrated_filename)
+    integrated_fields = sfs_ape_budget_terms[integrated_vars].load()
+integrated_fields.to_netcdf(integrated_filename)
 print(f"  Integrated saved to: {integrated_filename}")
 
 print("\nDeleting intermediate checkpoint files...")
