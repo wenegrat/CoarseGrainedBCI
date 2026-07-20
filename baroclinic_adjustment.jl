@@ -57,6 +57,16 @@ let s = ArgParseSettings()
             required = false
             default = 1e-5
 
+        "--mixed_layer_depth"
+            help = "Depth of a surface mixed layer with N²=0, in meters (default: 200.0). The initial \
+                    buoyancy profile is b(z) = N²·min(z, -mixed_layer_depth) instead of the plain N²·z -- \
+                    i.e. buoyancy is constant (well-mixed) from the surface down to this depth, then \
+                    stratified at the background N² below it, continuous at the base of the mixed layer. \
+                    Set to 0 to recover the original uniformly-stratified profile."
+            arg_type = Float64
+            required = false
+            default = 200.0
+
         "--M2"
             help = "Horizontal buoyancy gradient M² across each front (default: 1e-7 s⁻²)"
             arg_type = Float64
@@ -386,7 +396,7 @@ y₂ = +params.Ly/4
 
 double_ramp(y, Δy) = ramp(y - y₁, Δy) - ramp(y - y₂, Δy)
 
-bᵢ(x, y, z) = params.N2 * z + Δb * double_ramp(y, Δy) + ϵb * randn()
+bᵢ(x, y, z) = params.N2 * min(z, -params.mixed_layer_depth) + Δb * double_ramp(y, Δy) + ϵb * randn()
 
 set!(model, b=bᵢ)
 @info "Initial conditions set"
@@ -535,6 +545,7 @@ simulation.output_writers[:surface] =
   Domain:        Lx=%.1f km, Ly=%.1f km, Lz=%.1f km
   Stop time:     %.1f days
   N²=%.2e s⁻², M²=%.2e s⁻², front width=%.1f km
+  Mixed layer:   %.1f m (N²=0 above this depth)
   Latitude:      %.1f
   Advection:     %s
   Closure:       %s%s
@@ -544,6 +555,7 @@ simulation.output_writers[:surface] =
     params.Lx/1000, params.Ly/1000, params.Lz/1000,
     params.stop_time,
     params.N2, params.M2, params.front_width,
+    params.mixed_layer_depth,
     params.latitude,
     params.advection_scheme,
     params.closure,
