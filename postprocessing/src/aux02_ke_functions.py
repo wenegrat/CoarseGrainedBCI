@@ -4,6 +4,7 @@ Kinetic energy calculation functions
 This module contains functions for calculating kinetic energy (KE).
 """
 
+import gc
 import xarray as xr
 from src.aux00_utils import (integrate, calculate_gradient,
                          condense_velocities,
@@ -381,6 +382,20 @@ def calculate_energy_transfer(ds, filter_scales,
                                               gaussian_filter, filter_dims=filtered_dimensions,
                                               filtered_density=ds_filt_ℓ.ρ̄,
                                               filtered_velocity_vector=ds_filt_ℓ["ūᵢ"])
+        # filt_local_pes (local_potential_energies_timeseries(), now fully eager per its own fix) holds 8
+        # full fields (ape/z0/upsilon/D/tpe/rpe/rho_sorted/dz_sorted), but only .upsilon is used above. Π_A
+        # is still a lazy dask graph at this point, and that graph captures filt_local_pes.upsilon (already-
+        # materialized numpy) as a leaf input -- so as long as Π_A stays lazy, the *entire* filt_local_pes
+        # object it was built from stays reachable and alive. Left this way, every one of the n_scales
+        # iterations' filt_local_pes would remain resident simultaneously once all scales are concatenated
+        # below (nothing forces computation before then) -- confirmed as the cause of a real OOM on a
+        # 384x384x64, n_scales=30 sweep run (sweep2_energy_transfer.py), dying inside this loop despite each
+        # individual scale's data being modest. Loading Π_A here breaks that reference so filt_local_pes can
+        # be freed before the next scale, bounding peak memory to ~1 scale's filt_local_pes instead of all
+        # n_scales -- the same pattern already used in 05_sfs_ape_budget.py's own per-scale loop.
+        Π_A = Π_A.load()
+        del filt_local_pes
+        gc.collect()
 
         int_Π_A                = integrate(Π_A, dV)
         int_ape_to_ke_exchange = integrate(ape_to_ke_exchange, dV)
