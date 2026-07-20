@@ -58,14 +58,15 @@ let s = ArgParseSettings()
             default = 1e-5
 
         "--mixed_layer_depth"
-            help = "Depth of a surface mixed layer with N²=0, in meters (default: 200.0). The initial \
-                    buoyancy profile is b(z) = N²·min(z, -mixed_layer_depth) instead of the plain N²·z -- \
-                    i.e. buoyancy is constant (well-mixed) from the surface down to this depth, then \
-                    stratified at the background N² below it, continuous at the base of the mixed layer. \
-                    Set to 0 to recover the original uniformly-stratified profile."
+            help = "Depth of a surface mixed layer with N²=0, in meters (default: 0.0, i.e. disabled -- the \
+                    plain uniformly-stratified profile, matching all prior behavior). The initial buoyancy \
+                    profile is b(z) = N²·min(z, -mixed_layer_depth) instead of the plain N²·z -- i.e. \
+                    buoyancy is constant (well-mixed) from the surface down to this depth, then stratified \
+                    at the background N² below it, continuous at the base of the mixed layer. Pass e.g. \
+                    200 for a 200 m mixed layer."
             arg_type = Float64
             required = false
-            default = 200.0
+            default = 0.0
 
         "--M2"
             help = "Horizontal buoyancy gradient M² across each front (default: 1e-7 s⁻²)"
