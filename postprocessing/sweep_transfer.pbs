@@ -30,5 +30,6 @@ source ../hpc_env.sh
 
 time $PYTHON -u sweep2_energy_transfer.py        --filename output/${SIM}.nc --n-workers 8 $FIXED_REF_FLAG 2>&1 | tee    logs/${JOB_NAME}.out
 time $PYTHON -u sweep3_plot_transfer_spectrum.py --filename output/${SIM}.nc               $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
+time $PYTHON -u sweep4_plot_depth_scale.py       --filename output/${SIM}.nc               $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
 
 qstat -f $PBS_JOBID >> logs/${JOB_NAME}.out
