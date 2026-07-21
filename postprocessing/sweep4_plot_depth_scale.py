@@ -55,15 +55,23 @@ def horiz_time_mean(da):
 
 Pi_K_zl = horiz_time_mean(et_avg["Π_K"])
 Pi_A_zl = horiz_time_mean(et_avg["Π_A"])
+Pi_total_zl = Pi_K_zl + Pi_A_zl
 print("Done!")
 #---
 
-#+++ Plot: depth vs. 1/ℓ, one panel each for Π_K and Π_A
+#+++ Plot: depth vs. 1/ℓ, one panel each for Π_K, Π_A, and their sum -- each with its own colorscale
+# (rather than one shared vmax) since Π_K and Π_A can differ by an order of magnitude or more, and a
+# shared scale would wash out whichever term is smaller.
 inv_scale = 1.0 / et.filter_scale.values
-fig, axes = plt.subplots(1, 2, figsize=(11, 5), constrained_layout=True, sharey=True)
+fig, axes = plt.subplots(1, 3, figsize=(16, 5), constrained_layout=True, sharey=True)
 
-vmax = float(max(np.nanpercentile(np.abs(Pi_K_zl), 99), np.nanpercentile(np.abs(Pi_A_zl), 99)))
-for ax, da, title in zip(axes, [Pi_K_zl, Pi_A_zl], ["KE cross-scale transfer  Π_K(z, ℓ)", "APE cross-scale transfer  Π_A(z, ℓ)"]):
+panels = [
+    (Pi_K_zl,     "KE cross-scale transfer  Π_K(z, ℓ)"),
+    (Pi_A_zl,     "APE cross-scale transfer  Π_A(z, ℓ)"),
+    (Pi_total_zl, "Total cross-scale transfer  Π_K+Π_A(z, ℓ)"),
+]
+for ax, (da, title) in zip(axes, panels):
+    vmax = float(np.nanpercentile(np.abs(da), 99))
     im = ax.pcolormesh(inv_scale, da.z_aac, da.transpose("z_aac", "filter_scale").values,
                        cmap="RdBu_r", vmin=-vmax, vmax=vmax, shading="nearest")
     ax.set_xscale("log")

@@ -651,7 +651,8 @@ end
     params.latitude,
     params.advection_scheme,
     params.closure,
-    params.closure == "scale_aware" ? @sprintf(" (νh=%.4g, νv=%.4g m² s⁻¹)", params.nu_h, params.nu_v) : "",
+    params.closure == "scale_aware" ? @sprintf(" (νh=%.4g, νv=%.4g m² s⁻¹, Pe_cell_h=%.4g, Pe_cell_v=%.4g)",
+                                                params.nu_h, params.nu_v, params.Pe_cell_h, params.Pe_cell_v) : "",
     params.bottom_drag ? @sprintf("enabled (z0=%.4g m, Cd=%.4g)", params.z0, params.Cd) : "disabled")
 @info "Running baroclinic adjustment simulation..."
 run!(simulation)
