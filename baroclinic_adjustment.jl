@@ -560,7 +560,8 @@ simulation.output_writers[:surface] =
     params.latitude,
     params.advection_scheme,
     params.closure,
-    params.closure == "scale_aware" ? @sprintf(" (νh=%.4g, νv=%.4g m² s⁻¹)", params.nu_h, params.nu_v) : "")
+    params.closure == "scale_aware" ? @sprintf(" (νh=%.4g, νv=%.4g m² s⁻¹, Pe_cell_h=%.4g, Pe_cell_v=%.4g)",
+                                                params.nu_h, params.nu_v, params.Pe_cell_h, params.Pe_cell_v) : "")
 @info "Running baroclinic adjustment simulation..."
 run!(simulation)
 #---
