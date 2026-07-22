@@ -38,8 +38,9 @@ default or `weno`), `--closure` (`scale_aware` default, `constant`, or `smagorin
 falling back if no GPU is found), `--implicit` (boolean flag, default false; forces `--closure=nothing` and
 `--advection_scheme=WENO(order=9)` -- fully implicit/numerical dissipation, an implicit-LES configuration --
 warning and overriding, not erroring, if `--closure`/`--advection_scheme`/`--Pe_cell_h`/`--Pe_cell_v`/
-`--nu_h`/`--nu_v` were also explicitly set; see "Implicit-LES mode" below for the diagnostic implications).
-See the file's own `--help` for full documentation of each.
+`--nu_h`/`--nu_v` were also explicitly set; see "Implicit-LES mode" below for the diagnostic implications),
+`--bottom_drag` (boolean, default false; quadratic bottom drag -- see "Bottom drag" below) with its `--z0`
+sub-parameter. See the file's own `--help` for full documentation of each.
 
 **Implicit-LES mode (`--implicit`):** the online `ε_Kˢ`/`εˡ` SFS dissipation diagnostics and the offline APE
 dissipation term both derive from an explicit closure's ν/κ, which is `nothing` under `--implicit` -- they
@@ -57,6 +58,43 @@ no changes, since they consume the same variable names either way. Also note: `N
 backend cannot write a raw Julia `Bool` as a NetCDF attribute at all (confirmed -- errors "KeyError: key Bool
 not found"); `implicit` is written as `Int` (0/1) via a separate `netcdf_attributes` namedtuple, keeping
 `params.implicit` a genuine `Bool` for use in conditionals earlier in the file.
+
+**Bottom drag (`--bottom_drag`, `--z0`):** quadratic drag `τ = Cd|U|u` (`U=(u,v,w)` at the bottom cell)
+applied as a `FluxBoundaryCondition` on `u`/`v` at the bottom only, following
+[whitleyv/IntWaveSlope](https://github.com/whitleyv/IntWaveSlope/blob/main/Simulations/IntWave.jl). `Cd =
+(κᵥₖ/log(Δz/(2·z0)))²` (Monin-Obukhov log law, `κᵥₖ=0.4` fixed, `z0` the roughness length in meters via
+`--z0`, default 0.01) -- **resolution-dependent by design**: the same `z0` gives different `Cd` at different
+`Nz`, since it's a log law evaluated at the first grid point above the bottom, not a fixed physical
+constant. `Cd` is passed to the boundary function via `parameters=`, not closed over as a global (a
+non-const global referenced inside a per-timestep, per-cell hot-path function is a real Julia performance
+trap). When enabled, three new online diagnostic fields are written per filter scale to a separate
+`_bottom.nc` file (`indices=(:,:,1)`, `ConsecutiveIterations` schedule matching `:fields` -- **not** plain
+`TimeInterval` like `:surface`, since these fields get combined with `:fields`-derived quantities offline
+and need the same time grid; confirmed necessary directly, a first attempt with `TimeInterval` produced
+silent all-NaN results downstream): `τx_b_ℓ{scale}km`/`τy_b_ℓ{scale}km` (filtered bottom stress
+components) and `τu_b_ℓ{scale}km` (filtered pointwise drag work `overline{τ·u_b}`).
+
+Offline (`04_sfs_ke_budget.py`), when `ds.attrs["bottom_drag"]` is true: assembles the large-scale term
+`-(τ̄·ū_b)` (`ū_b`/`v̄_b` reuse the already-filtered `u_ℓ`/`v_ℓ` sliced at the bottom -- no new computation)
+and the SFS term `-(overline{τ·u_b} - τ̄·ū_b)`, both **area**-integrated (`dA = Δx·Δy`, not the volume `dV`
+every other term uses -- bottom drag is a boundary process). The SFS term is folded into `residual_K`
+(a new sink in the SFS KE budget); the large-scale term is recorded as a standalone diagnostic only --
+there's no full large-scale/filtered KE budget assembly in this pipeline yet (see the εˡ note above), so it
+isn't wired into any budget equation. Both terms are always negative by construction (`τ·u_b ≥ 0`
+pointwise, since drag magnitude and velocity share the same sign by construction -- verified directly on a
+real test run). `06_plot_budgets.py`/`plot3_budgets.py`/`anim3_panels.py` all show both terms when present,
+gated on the variable actually existing in the budget file (so non-bottom-drag runs are unaffected).
+
+**Interaction with `--implicit`:** when both flags are active, `04_sfs_ke_budget.py`'s residual-based `ε_Kˢ`
+estimate (see above) also subtracts `int_bottom_drag_work_SFS`, not just `Πₖ + exchange - ∂ₜE_K^s` --
+otherwise the bottom-drag SFS sink (a real, independently-diagnosed physical term, not numerical
+dissipation) would leak into `residual_K` instead of being absorbed like everything else, breaking the
+"`residual_K` ≈0 by construction" sanity check that's the whole point of the implicit substitution.
+Confirmed directly: without this, `residual_K` came out identical to `∫-(bottom drag work, SFS) dA`
+exactly. The bottom-drag computation was also reordered to run *before* the `--implicit` block (previously
+independent, since neither branch was ever tested with the other active) so `int_bottom_drag_work_SFS`
+exists by the time it's needed. `--implicit` alone (no bottom drag) is unaffected -- the extra subtraction
+is itself gated on `bottom_drag`.
 
 ### HPC job submission
 

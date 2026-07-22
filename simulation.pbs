@@ -6,7 +6,8 @@
 # Note: job name/log paths above are defaults; qalter below updates the job name at runtime based on
 # Nx/Ny/Nz. Log file paths (-o/-e) cannot be changed at runtime; use the .out file for per-run logs.
 #PBS -l walltime=03:59:00
-#PBS -q casper
+###PBS -q casper
+#PBS -q main@desched1
 #PBS -M wenegrat@umd.edu
 #PBS -m ae
 #PBS -r n

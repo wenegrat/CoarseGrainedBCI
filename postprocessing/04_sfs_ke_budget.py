@@ -44,6 +44,16 @@ implicit = bool(ds.attrs.get("implicit", 0))
 if implicit:
     print("  implicit=True (from simulation attrs): domain-integrated ε_Kˢ will be replaced with a "
           "residual-based estimate; the local (spatial) ε_Kˢ field stays at its uninformative online value")
+
+# --bottom_drag (baroclinic_adjustment.jl): adds a quadratic bottom-drag sink to the SFS KE budget.
+# τ̄_x,ℓ/τ̄_y,ℓ (filtered bottom stress) and overline{τ·u_b}_ℓ (filtered pointwise drag work) are computed
+# online (same gaussian_filters as Πₖ/ε_Kˢ) and written to a separate _bottom.nc file (indices=(:,:,1) --
+# only the bottom z-level is physically meaningful, matching the existing _surface.nc convention).
+bottom_drag = bool(ds.attrs.get("bottom_drag", 0))
+if bottom_drag:
+    bottom_filename = str(Path(filename).parent / (Path(filename).stem + "_bottom.nc"))
+    ds_bottom = xr.open_dataset(bottom_filename, decode_times=False).chunk({"time": 1}).isel(z_aac=0)
+    print(f"  bottom_drag=True (from simulation attrs): loaded bottom-boundary fields from {bottom_filename}")
 #---
 
 #+++ Load filtered fields
@@ -85,6 +95,7 @@ print("Calculating budget terms for each filter scale...")
 # rather than computed offline. Both are reference-independent (they don't depend on the density sort),
 # so the same values serve the time-varying and fixed-reference budgets.
 dV = ds_full.dV
+dA = ds.Δx_caa * ds.Δy_aca  # for the bottom-drag work terms, which are boundary (area), not volume, integrals -- ds_full is a subset (b, dV, uᵢ only) that drops Δx_caa/Δy_aca
 budget_list = []
 
 for ℓ in filter_scales:
@@ -132,15 +143,45 @@ for ℓ in filter_scales:
     int_Π_K_ℓ              = integrate(Π_K_ℓ, dV)
     int_sfs_ke_dissipation = integrate(sfs_ke_dissipation, dV)
 
+    if bottom_drag:
+        # Large-scale bottom drag work: -(τ̄·ū_b). SFS bottom drag work: -(overline{τ·u_b} - τ̄·ū_b).
+        # τ̄_x,ℓ/τ̄_y,ℓ/overline{τ·u_b}_ℓ are the online-filtered primitives (Oceanostics' GaussianFilter);
+        # ū_b,ℓ/v̄_b,ℓ reuse the offline-filtered u_ℓ/v_ℓ already loaded above (ds_filt_ℓ), sliced at the
+        # bottom z-level -- no new computation needed there. Mixing an online-filtered term (τ̄) with an
+        # offline-filtered one (ū_b) here is the same pre-existing online/offline filter discrepancy this
+        # pipeline already has elsewhere (Πₖ vs Π_A/exchange), not a new inconsistency. Computed before the
+        # `if implicit:` block below (rather than after, as originally written) so that block can fold
+        # int_bottom_drag_work_SFS into its residual-based ε_Kˢ estimate when both flags are active.
+        print("  Bottom drag work terms...")
+        τx_b_bar   = ds_bottom[f"τx_b_ℓ{ℓ_km}km"]
+        τy_b_bar   = ds_bottom[f"τy_b_ℓ{ℓ_km}km"]
+        τu_b_bar   = ds_bottom[f"τu_b_ℓ{ℓ_km}km"]
+        u_b_bar    = ds_filt_ℓ["ūᵢ"].sel(i=1).isel(z_aac=0)
+        v_b_bar    = ds_filt_ℓ["ūᵢ"].sel(i=2).isel(z_aac=0)
+
+        bottom_drag_work_LS  = τx_b_bar * u_b_bar + τy_b_bar * v_b_bar
+        bottom_drag_work_SFS = τu_b_bar.reindex(time=bottom_drag_work_LS.time) - bottom_drag_work_LS
+
+        int_bottom_drag_work_LS  = integrate(bottom_drag_work_LS,  dA, dims=("x_caa", "y_aca"))
+        int_bottom_drag_work_SFS = integrate(bottom_drag_work_SFS, dA, dims=("x_caa", "y_aca"))
+
     if implicit:
-        # Solve the budget for ε_Kˢ assuming every other term (Πₖ, ∂ₜE_K^s, exchange) is correct -- this is
-        # exactly the online (near-zero) ε_Kˢ's residual, redefined as the dissipation estimate itself. The
-        # residual computed just below becomes ~0 by construction, a sanity check that the substitution was
-        # applied correctly.
+        # Solve the budget for ε_Kˢ assuming every other term (Πₖ, ∂ₜE_K^s, exchange, and -- when
+        # --bottom_drag is also active -- the independently-diagnosed bottom-drag SFS sink) is correct.
+        # Without --bottom_drag this is exactly the online (near-zero) ε_Kˢ's residual, redefined as the
+        # dissipation estimate itself; with it, the bottom-drag term is a real, separately-diagnosed
+        # physical sink (not numerical dissipation), so it must be subtracted out here too, or it would
+        # leak into the final residual below instead of being absorbed into ε_Kˢ like everything else. The
+        # residual computed just below becomes ~0 by construction either way, a sanity check that the
+        # substitution was applied correctly.
         int_sfs_ke_dissipation = int_Π_K_ℓ.reindex(time=dKE_dt.time) + int_ape_to_ke_exchange - int_dKE_dt
+        if bottom_drag:
+            int_sfs_ke_dissipation = int_sfs_ke_dissipation - int_bottom_drag_work_SFS.reindex(time=dKE_dt.time)
 
     residual  = (-int_dKE_dt + int_Π_K_ℓ.reindex(time=dKE_dt.time) + int_ape_to_ke_exchange
                  - int_sfs_ke_dissipation.reindex(time=dKE_dt.time))
+    if bottom_drag:
+        residual = residual - int_bottom_drag_work_SFS.reindex(time=dKE_dt.time)
 
     budget_ℓ = xr.Dataset({
         # Local KE fields
@@ -159,8 +200,20 @@ for ℓ in filter_scales:
     }).reindex(time=dKE_dt.time)
 
     if implicit:
-        budget_ℓ["∫-ε_Kˢ dV"].attrs["method"] = "residual estimate (implicit LES): Πₖ + exchange - ∂ₜE_K^s"
+        method = "residual estimate (implicit LES): Πₖ + exchange - ∂ₜE_K^s"
+        if bottom_drag:
+            method += " - (bottom drag work, SFS)"
+        budget_ℓ["∫-ε_Kˢ dV"].attrs["method"] = method
         budget_ℓ["residual_K"].attrs["method"] = "≈0 by construction: ε_Kˢ is defined as the residual estimate (implicit LES)"
+
+    if bottom_drag:
+        # Large-scale term is a standalone diagnostic (not wired into any budget equation here -- there's
+        # no full large-scale/filtered KE budget assembly in this pipeline yet). SFS term is already
+        # folded into residual_K above; recorded here too for visibility/plotting.
+        budget_ℓ["bottom drag work (LS)"]  = bottom_drag_work_LS
+        budget_ℓ["bottom drag work (SFS)"] = bottom_drag_work_SFS
+        budget_ℓ["∫-(bottom drag work, LS) dA"]  = -int_bottom_drag_work_LS
+        budget_ℓ["∫-(bottom drag work, SFS) dA"] = -int_bottom_drag_work_SFS
 
     budget_list.append(budget_ℓ)
 
