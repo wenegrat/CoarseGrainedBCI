@@ -32,6 +32,19 @@ ds = load_dataset_and_grid(filename)
 ds = ds.chunk({"time": 1})
 print(f"Dataset loaded: {len(ds.time)} time steps")
 
+# --implicit (baroclinic_adjustment.jl) means closure=nothing: the online ε_Kˢ read below is computed from
+# the model's explicit viscous fluxes, which are identically zero here -- real dissipation is happening via
+# WENO's own implicit numerics, invisible to that diagnostic. The domain-integrated ε_Kˢ is replaced below
+# with a residual-based estimate (solves the budget for ε_Kˢ assuming every other term is correct); the
+# local (spatial) ε_Kˢ field is left as-is (still the near-zero, uninformative online value) since a local
+# residual would also absorb real spatial transport/flux-divergence terms that only vanish upon domain
+# integration, not pointwise -- there's no principled way to attribute those to "dissipation" at a single
+# grid cell. See 05_sfs_ape_budget.py for the same treatment on the APE side.
+implicit = bool(ds.attrs.get("implicit", 0))
+if implicit:
+    print("  implicit=True (from simulation attrs): domain-integrated ε_Kˢ will be replaced with a "
+          "residual-based estimate; the local (spatial) ε_Kˢ field stays at its uninformative online value")
+
 # --bottom_drag (baroclinic_adjustment.jl): adds a quadratic bottom-drag sink to the SFS KE budget.
 # τ̄_x,ℓ/τ̄_y,ℓ (filtered bottom stress) and overline{τ·u_b}_ℓ (filtered pointwise drag work) are computed
 # online (same gaussian_filters as Πₖ/ε_Kˢ) and written to a separate _bottom.nc file (indices=(:,:,1) --
@@ -136,7 +149,9 @@ for ℓ in filter_scales:
         # ū_b,ℓ/v̄_b,ℓ reuse the offline-filtered u_ℓ/v_ℓ already loaded above (ds_filt_ℓ), sliced at the
         # bottom z-level -- no new computation needed there. Mixing an online-filtered term (τ̄) with an
         # offline-filtered one (ū_b) here is the same pre-existing online/offline filter discrepancy this
-        # pipeline already has elsewhere (Πₖ vs Π_A/exchange), not a new inconsistency.
+        # pipeline already has elsewhere (Πₖ vs Π_A/exchange), not a new inconsistency. Computed before the
+        # `if implicit:` block below (rather than after, as originally written) so that block can fold
+        # int_bottom_drag_work_SFS into its residual-based ε_Kˢ estimate when both flags are active.
         print("  Bottom drag work terms...")
         τx_b_bar   = ds_bottom[f"τx_b_ℓ{ℓ_km}km"]
         τy_b_bar   = ds_bottom[f"τy_b_ℓ{ℓ_km}km"]
@@ -149,6 +164,19 @@ for ℓ in filter_scales:
 
         int_bottom_drag_work_LS  = integrate(bottom_drag_work_LS,  dA, dims=("x_caa", "y_aca"))
         int_bottom_drag_work_SFS = integrate(bottom_drag_work_SFS, dA, dims=("x_caa", "y_aca"))
+
+    if implicit:
+        # Solve the budget for ε_Kˢ assuming every other term (Πₖ, ∂ₜE_K^s, exchange, and -- when
+        # --bottom_drag is also active -- the independently-diagnosed bottom-drag SFS sink) is correct.
+        # Without --bottom_drag this is exactly the online (near-zero) ε_Kˢ's residual, redefined as the
+        # dissipation estimate itself; with it, the bottom-drag term is a real, separately-diagnosed
+        # physical sink (not numerical dissipation), so it must be subtracted out here too, or it would
+        # leak into the final residual below instead of being absorbed into ε_Kˢ like everything else. The
+        # residual computed just below becomes ~0 by construction either way, a sanity check that the
+        # substitution was applied correctly.
+        int_sfs_ke_dissipation = int_Π_K_ℓ.reindex(time=dKE_dt.time) + int_ape_to_ke_exchange - int_dKE_dt
+        if bottom_drag:
+            int_sfs_ke_dissipation = int_sfs_ke_dissipation - int_bottom_drag_work_SFS.reindex(time=dKE_dt.time)
 
     residual  = (-int_dKE_dt + int_Π_K_ℓ.reindex(time=dKE_dt.time) + int_ape_to_ke_exchange
                  - int_sfs_ke_dissipation.reindex(time=dKE_dt.time))
@@ -170,6 +198,13 @@ for ℓ in filter_scales:
         "∫(SFS APE->KE) dV": int_ape_to_ke_exchange,
         "residual_K": residual,
     }).reindex(time=dKE_dt.time)
+
+    if implicit:
+        method = "residual estimate (implicit LES): Πₖ + exchange - ∂ₜE_K^s"
+        if bottom_drag:
+            method += " - (bottom drag work, SFS)"
+        budget_ℓ["∫-ε_Kˢ dV"].attrs["method"] = method
+        budget_ℓ["residual_K"].attrs["method"] = "≈0 by construction: ε_Kˢ is defined as the residual estimate (implicit LES)"
 
     if bottom_drag:
         # Large-scale term is a standalone diagnostic (not wired into any budget equation here -- there's
