@@ -40,6 +40,18 @@ let s = ArgParseSettings()
             required = false
             default = 8
 
+        "--name_suffix"
+            help = "Extra tag appended to the output simulation name (default: \"\", i.e. no tag), giving \
+                    output/bci_Nx\$(Nx)_Ny\$(Ny)_Nz\$(Nz)_<suffix>.nc instead of the plain \
+                    output/bci_Nx\$(Nx)_Ny\$(Ny)_Nz\$(Nz).nc. Needed whenever multiple runs share the same \
+                    resolution but differ in some other parameter (e.g. a Pe_cell sweep) and would \
+                    otherwise silently overwrite each other's output -- every downstream Python \
+                    post-processing script already derives its own filenames from --filename's stem, so \
+                    nothing else needs to know about this flag."
+            arg_type = String
+            required = false
+            default = ""
+
         "--architecture"
             help = "Hardware architecture: 'auto' (default; use GPU() if CUDA.functional() reports a usable \
                     GPU, else fall back to CPU()), 'cpu' (force CPU() regardless of GPU availability), or \
@@ -645,7 +657,7 @@ if params.closure == "smagorinsky"
 end
 
 using NCDatasets
-simulation_name = "bci_Nx$(params.Nx)_Ny$(params.Ny)_Nz$(params.Nz)"
+simulation_name = "bci_Nx$(params.Nx)_Ny$(params.Ny)_Nz$(params.Nz)" * (isempty(params.name_suffix) ? "" : "_$(params.name_suffix)")
 output_filename = "output/$(simulation_name).nc"
 
 output_interval = params.output_interval_hours * hours

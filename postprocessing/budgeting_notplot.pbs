@@ -1,0 +1,41 @@
+#!/bin/bash -l
+#PBS -A UMCP0023
+#PBS -N bci_budgeting_notplot
+#PBS -o logs/bci_budgeting_notplot.log
+#PBS -e logs/bci_budgeting_notplot.log
+# Note: job name above is a default; qalter below updates it at runtime based on Nx/Ny/Nz/FIXED_REF
+# Log file paths (-o/-e) cannot be changed at runtime; use the .out file for per-run logs
+#PBS -l walltime=08:00:00
+#PBS -q casper
+#PBS -M wenegrat@umd.edu
+#PBS -m ae
+#PBS -r n
+#PBS -l select=1:ncpus=8:mem=256GB:ngpus=0
+#PBS -l job_priority=regular
+
+# Streamlined variant of budgeting.pbs: runs 02-05 (density sort, energy transfer, SFS KE/APE budgets)
+# only -- skips 06_plot_budgets.py. For parameter sweeps (e.g. Pe_cell tuning) where only the numeric
+# residual/dominant-term ratio is needed, not the figures; saves the plotting step's time on every point
+# in the sweep. Requires budgeting_filter.pbs (01_filter_fields.py) to have completed first.
+set -eo pipefail
+
+NX=${NX:-192}
+NY=${NY:-192}
+NZ=${NZ:-32}
+# NAME_SUFFIX: must match whatever --name_suffix the simulation itself was run with (baroclinic_adjustment.jl),
+# so this job points at the right (suffixed) output file -- unset/empty by default, matching a plain run.
+NAME_SUFFIX=${NAME_SUFFIX:-}
+SIM=bci_Nx${NX}_Ny${NY}_Nz${NZ}${NAME_SUFFIX:+_$NAME_SUFFIX}
+FIXED_REF=${FIXED_REF:-0}
+[ "$FIXED_REF" = "1" ] && FIXED_REF_FLAG="--fixed-reference" && REF_SUFFIX="_fixed_ref" || { FIXED_REF_FLAG=""; REF_SUFFIX=""; }
+JOB_NAME="${SIM}_budgeting_notplot${REF_SUFFIX}"
+qalter -N "$JOB_NAME" "$PBS_JOBID"
+
+source ../hpc_env.sh
+
+time $PYTHON -u 02_sort_density.py    --filename output/${SIM}.nc --n-workers 8 $FIXED_REF_FLAG 2>&1 | tee    logs/${JOB_NAME}.out
+time $PYTHON -u 03_energy_transfer.py --filename output/${SIM}.nc --n-workers 8 $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
+time $PYTHON -u 04_sfs_ke_budget.py   --filename output/${SIM}.nc               $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
+time $PYTHON -u 05_sfs_ape_budget.py  --filename output/${SIM}.nc --n-workers 8 $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
+
+qstat -f $PBS_JOBID >> logs/${JOB_NAME}.out
