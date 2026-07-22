@@ -36,13 +36,21 @@ default or `weno`), `--closure` (`scale_aware` default, `constant`, or `smagorin
 `--Pe_cell_v`/`--nu_h`/`--nu_v`/`--Pr` sub-parameters, `--architecture` (`auto` default -- uses a GPU if
 `CUDA.functional()`, else `CPU()`; `cpu`/`gpu` to force one, `gpu` erroring loudly instead of silently
 falling back if no GPU is found), `--implicit` (boolean flag, default false; forces `--closure=nothing` and
-`--advection_scheme=WENO(order=9)` -- fully implicit/numerical dissipation, an implicit-LES configuration --
-warning and overriding, not erroring, if `--closure`/`--advection_scheme`/`--Pe_cell_h`/`--Pe_cell_v`/
-`--nu_h`/`--nu_v` were also explicitly set; see "Implicit-LES mode" below for the diagnostic implications),
-`--bottom_drag` (boolean, default false; quadratic bottom drag -- see "Bottom drag" below) with its `--z0`
-sub-parameter. See the file's own `--help` for full documentation of each.
+`--advection_scheme=WENO(order=--implicit_weno_order)` -- fully implicit/numerical dissipation, an
+implicit-LES configuration -- warning and overriding, not erroring, if `--closure`/`--advection_scheme`/
+`--Pe_cell_h`/`--Pe_cell_v`/`--nu_h`/`--nu_v` were also explicitly set; see "Implicit-LES mode" below for
+the diagnostic implications) with its `--implicit_weno_order` sub-parameter (`5` or `9`, default `9`;
+ignored unless `--implicit`), `--bottom_drag` (boolean, default false; quadratic bottom drag -- see "Bottom
+drag" below) with its `--z0` sub-parameter. See the file's own `--help` for full documentation of each.
 
-**Implicit-LES mode (`--implicit`):** the online `ε_Kˢ`/`εˡ` SFS dissipation diagnostics and the offline APE
+**Implicit-LES mode (`--implicit`, `--implicit_weno_order`):** `--implicit_weno_order` (5 or 9, default 9)
+picks the WENO order used for the forced advection scheme -- lower order is a less compact/less
+dissipative stencil, so 5 vs. 9 are both valid implicit-LES configurations with different amounts of
+implicit numerical dissipation, offered for comparison rather than one being "correct." Both are odd orders
+Oceananigans' `WENO` accepts; the halo auto-inflation (below) adjusts accordingly -- order 9 needs halo≥5,
+order 5 only needs halo≥3 (already satisfied by the base grid, so no inflation happens for order 5).
+
+The online `ε_Kˢ`/`εˡ` SFS dissipation diagnostics and the offline APE
 dissipation term both derive from an explicit closure's ν/κ, which is `nothing` under `--implicit` -- they
 read ~0 rather than the real (but numerical, untracked) dissipation actually happening via WENO's own
 implicit truncation error. `04_sfs_ke_budget.py`/`05_sfs_ape_budget.py` detect this via the simulation's own

@@ -94,17 +94,28 @@ let s = ArgParseSettings()
 
         "--implicit"
             help = "Run with fully implicit (numerical) dissipation: forces --closure=nothing (no explicit \
-                    viscosity/diffusivity at all) and --advection_scheme=WENO(order=9), ignoring (with a \
-                    warning) any --closure/--advection_scheme/--Pe_cell_h/--Pe_cell_v/--nu_h/--nu_v flags \
-                    that look like they were also explicitly set. Relies entirely on WENO's own implicit, \
-                    scale-selective numerical dissipation for stability -- an implicit-LES configuration. \
-                    IMPORTANT: the online ε_Kˢ/εˡ SFS dissipation diagnostics and the offline APE \
-                    dissipation term both read from an explicit closure's ν/κ, which is nothing here, so \
-                    they report ~zero rather than the real (numerical, untracked) dissipation actually \
-                    happening -- the post-processing pipeline detects this via this flag's own recorded \
-                    global attribute and substitutes a residual-based estimate instead (see \
-                    04_sfs_ke_budget.py/05_sfs_ape_budget.py). Default: false."
+                    viscosity/diffusivity at all) and --advection_scheme=WENO(order=--implicit_weno_order), \
+                    ignoring (with a warning) any --closure/--advection_scheme/--Pe_cell_h/--Pe_cell_v/ \
+                    --nu_h/--nu_v flags that look like they were also explicitly set. Relies entirely on \
+                    WENO's own implicit, scale-selective numerical dissipation for stability -- an \
+                    implicit-LES configuration. IMPORTANT: the online ε_Kˢ/εˡ SFS dissipation diagnostics \
+                    and the offline APE dissipation term both read from an explicit closure's ν/κ, which is \
+                    nothing here, so they report ~zero rather than the real (numerical, untracked) \
+                    dissipation actually happening -- the post-processing pipeline detects this via this \
+                    flag's own recorded global attribute and substitutes a residual-based estimate instead \
+                    (see 04_sfs_ke_budget.py/05_sfs_ape_budget.py). Default: false."
             action = :store_true
+
+        "--implicit_weno_order"
+            help = "WENO order used when --implicit is active (default: 9). Ignored unless --implicit. \
+                    Lower order (5) is a less dissipative/less compact stencil than 9 -- both are valid \
+                    implicit-LES configurations, just with different amounts of implicit numerical \
+                    dissipation; 9 was the original/default choice, 5 is offered for comparison since it's \
+                    also the order used by --advection_scheme=weno's own (non-implicit) WENO path."
+            arg_type = Int
+            required = false
+            default = 9
+            range_tester = (o -> o in (5, 9))
 
         "--closure"
             help = "Turbulence closure: 'constant' (ScalarDiffusivity/anisotropic-Laplacian with fixed \
@@ -322,7 +333,7 @@ grid = RectilinearGrid(architecture;
                        halo=(3, 3, 3),
                        topology=(Periodic, Periodic, Bounded))
 @info "Grid created: Nx=$Nx, Ny=$Ny, Nz=$Nz, halo=(3, 3, 3) (may be auto-inflated below if the advection \
-scheme needs more, e.g. --implicit's WENO(order=9))"
+scheme needs more, e.g. --implicit's WENO(order=$(params.implicit_weno_order)))"
 #---
 
 #+++ Create model
@@ -361,10 +372,10 @@ scheme needs more, e.g. --implicit's WENO(order=9))"
 # background stratification N² -- and disabling Cb (--Cb_smag 0) instead makes νₑ wildly too large
 # (~1000s of m²/s), since SmagorinskyLilly's filter width assumes an isotropic grid cell, which this grid
 # is not. Kept only for reference/future work at finer resolution.
-# --implicit forces closure=nothing and advection_scheme=WENO(order=9), ignoring (with a warning) any
-# --closure/--advection_scheme/--Pe_cell_h/--Pe_cell_v/--nu_h/--nu_v flags that look like they were also
-# explicitly set (differ from their own defaults) -- "warn and override" rather than erroring, matching
-# this CLI's generally permissive style elsewhere.
+# --implicit forces closure=nothing and advection_scheme=WENO(order=--implicit_weno_order), ignoring (with
+# a warning) any --closure/--advection_scheme/--Pe_cell_h/--Pe_cell_v/--nu_h/--nu_v flags that look like
+# they were also explicitly set (differ from their own defaults) -- "warn and override" rather than
+# erroring, matching this CLI's generally permissive style elsewhere.
 if params.implicit
     conflicting = String[]
     params.closure != "scale_aware"       && push!(conflicting, "--closure=$(params.closure)")
@@ -374,7 +385,7 @@ if params.implicit
     params.nu_h != 1.0                    && push!(conflicting, "--nu_h=$(params.nu_h)")
     params.nu_v != 1.0                    && push!(conflicting, "--nu_v=$(params.nu_v)")
     isempty(conflicting) ||
-        @warn "--implicit=true forces closure=nothing and advection_scheme=WENO(order=9); ignoring: $(join(conflicting, ", "))"
+        @warn "--implicit=true forces closure=nothing and advection_scheme=WENO(order=$(params.implicit_weno_order)); ignoring: $(join(conflicting, ", "))"
 end
 
 νh_scale_aware = νv_scale_aware = nothing  # populated below only for --closure=scale_aware
@@ -409,13 +420,14 @@ else
      VerticalScalarDiffusivity(VerticallyImplicitTimeDiscretization(); ν=νv, κ=κv))
 end
 
-# WENO(order=9) needs a wider stencil (halo≥5) than the grid's fixed halo=(3,3,3), but this needs no manual
-# handling: NonhydrostaticModel auto-inflates and rebuilds the grid's halo to match whatever the advection
-# scheme requires (confirmed directly -- it logs "Inflating model grid halo size to ..." and transparently
-# recreates the grid), and auto-downgrades the order in any direction too short to support the full stencil
-# (e.g. a tiny Nz in a smoke test). No silent-corruption risk here, unlike this repo's own filter-halo
-# history -- that was a hand-rolled stencil bypassing Oceananigans' own machinery, not this.
-advection_scheme = params.implicit ? WENO(order=9) : (params.advection_scheme == "weno" ? WENO(order=5) : Centered(order=4))
+# WENO(order=9) needs a wider stencil (halo≥5) than the grid's fixed halo=(3,3,3) -- order=5 needs halo≥3,
+# already satisfied -- but this needs no manual handling either way: NonhydrostaticModel auto-inflates and
+# rebuilds the grid's halo to match whatever the advection scheme requires (confirmed directly -- it logs
+# "Inflating model grid halo size to ..." and transparently recreates the grid), and auto-downgrades the
+# order in any direction too short to support the full stencil (e.g. a tiny Nz in a smoke test). No
+# silent-corruption risk here, unlike this repo's own filter-halo history -- that was a hand-rolled stencil
+# bypassing Oceananigans' own machinery, not this.
+advection_scheme = params.implicit ? WENO(order=params.implicit_weno_order) : (params.advection_scheme == "weno" ? WENO(order=5) : Centered(order=4))
 
 # Quadratic bottom drag (--bottom_drag): τ = Cd|U|u, U=(u,v,w) at the bottom cell, following
 # https://github.com/whitleyv/IntWaveSlope/blob/main/Simulations/IntWave.jl. Cd is a Monin-Obukhov log-law
@@ -448,7 +460,7 @@ end
 # terms (see 04_sfs_ke_budget.py/05_sfs_ape_budget.py). `Cd=0.0` (not `nothing`) when disabled, since
 # NCDatasets.jl can only write numeric/string attributes, not `nothing`.
 if params.implicit
-    global params = (; params..., closure="none", advection_scheme="weno9", nu_h=0.0, nu_v=0.0)
+    global params = (; params..., closure="none", advection_scheme="weno$(params.implicit_weno_order)", nu_h=0.0, nu_v=0.0)
 elseif params.closure == "scale_aware"
     global params = (; params..., nu_h=νh_scale_aware, nu_v=νv_scale_aware)
 end
