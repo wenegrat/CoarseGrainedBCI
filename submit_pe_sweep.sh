@@ -7,17 +7,24 @@
 # simulation -> own filter -> own budgeting), so memory requirements are unchanged from the existing
 # budgeting_filter.pbs/budgeting_notplot.pbs defaults regardless of how many points are in the sweep.
 #
-# Usage: bash submit_pe_sweep.sh [RESOLUTIONS='256x256x64 192x192x64'] [STOP_TIME=15] [PE_VALUES='1 20 40 60']
+# Usage: bash submit_pe_sweep.sh [RESOLUTIONS='256x256x64 192x192x64'] [STOP_TIME=15] [PE_VALUES='1 20 40 60'] [GPU=1]
 #   RESOLUTIONS   space-separated NxYxZx triples (e.g. '256x256x64 192x192x64')
+#   GPU           1 (default) requests an A100 for each simulation (see submit_simulation.sh's own GPU=1
+#                 flag); 0 falls back to simulation.pbs's default CPU-only request. Post-processing stages
+#                 (budgeting_filter/budgeting_notplot) are pure CPU/numpy/dask regardless and unaffected.
 #
 # After all jobs complete, aggregate results with:
 #   python postprocessing/pe_sweep_results.py --resolutions 256x256x64 192x192x64 --pe-values 1 20 40 60 --min-time-days 5
-RESOLUTIONS="256x256x64 192x192x64"; STOP_TIME=15; PE_VALUES="1 20 40 60"
+RESOLUTIONS="256x256x64 192x192x64"; STOP_TIME=15; PE_VALUES="1 20 40 60"; GPU=1
 for arg in "$@"; do case $arg in
   RESOLUTIONS=*) RESOLUTIONS="${arg#*=}";;
   STOP_TIME=*)   STOP_TIME="${arg#*=}";;
   PE_VALUES=*)   PE_VALUES="${arg#*=}";;
+  GPU=*)         GPU="${arg#*=}";;
 esac; done
+
+GPU_FLAGS=()
+[ "$GPU" = "1" ] && GPU_FLAGS=(-l select=1:ncpus=8:ngpus=1:gpu_type=a100:mem=64GB)
 
 for RES in $RESOLUTIONS; do
     NX=$(echo "$RES" | cut -dx -f1)
@@ -32,9 +39,10 @@ for RES in $RESOLUTIONS; do
         SIM_JOB=$(qsub -N "$SIM_NAME" \
                        -o "logs/${SIM_NAME}.log" \
                        -e "logs/${SIM_NAME}.log" \
+                       "${GPU_FLAGS[@]}" \
                        -v "NX=$NX,NY=$NY,NZ=$NZ,STOP_TIME=$STOP_TIME,NAME_SUFFIX=$NAME_SUFFIX,EXTRA_ARGS=$EXTRA_ARGS" \
                        simulation.pbs)
-        echo "Submitted simulation (Nx=$NX,Ny=$NY,Nz=$NZ, Pe_cell_h=Pe_cell_v=$PE, $SIM_NAME): $SIM_JOB"
+        echo "Submitted simulation (Nx=$NX,Ny=$NY,Nz=$NZ, Pe_cell_h=Pe_cell_v=$PE, GPU=$GPU, $SIM_NAME): $SIM_JOB"
 
         cd postprocessing
 
