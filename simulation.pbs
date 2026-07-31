@@ -31,7 +31,13 @@ NY=${NY:-192}
 NZ=${NZ:-32}
 STOP_TIME=${STOP_TIME:-16}
 EXTRA_ARGS=${EXTRA_ARGS:-}
-JOB_NAME="bci_Nx${NX}_Ny${NY}_Nz${NZ}"
+# NAME_SUFFIX (baroclinic_adjustment.jl's --name_suffix): distinguishes output when multiple runs share a
+# resolution but differ in some other parameter (e.g. a Pe_cell sweep) -- unset/empty by default, matching
+# the Julia flag's own default (no suffix, plain bci_Nx..._Ny..._Nz....nc).
+NAME_SUFFIX=${NAME_SUFFIX:-}
+NAME_SUFFIX_FLAG=()
+[ -n "$NAME_SUFFIX" ] && NAME_SUFFIX_FLAG=(--name_suffix "$NAME_SUFFIX")
+JOB_NAME="bci_Nx${NX}_Ny${NY}_Nz${NZ}${NAME_SUFFIX:+_$NAME_SUFFIX}"
 qalter -N "$JOB_NAME" "$PBS_JOBID"
 
 source hpc_env.sh
@@ -58,7 +64,7 @@ export JULIA_DEPOT_PATH="$WORK/.julia"
 export JULIA_CPU_TARGET="generic"
 
 time julia --project -t 8 baroclinic_adjustment.jl --Nx $NX --Ny $NY --Nz $NZ \
-    --stop_time $STOP_TIME $EXTRA_ARGS 2>&1 | tee logs/${JOB_NAME}.out
+    --stop_time $STOP_TIME "${NAME_SUFFIX_FLAG[@]}" $EXTRA_ARGS 2>&1 | tee logs/${JOB_NAME}.out
 
 qstat -f $PBS_JOBID >> logs/${JOB_NAME}.log
 qstat -f $PBS_JOBID >> logs/${JOB_NAME}.out

@@ -23,7 +23,10 @@ NZ=${NZ:-32}
 # the simulation's own recorded filter_scales_m attribute (matching the online diagnostics automatically).
 # Set explicitly only to deliberately use different offline scales than the simulation's online ones.
 FILTER_SCALES_M=${FILTER_SCALES_M:-}
-SIM=bci_Nx${NX}_Ny${NY}_Nz${NZ}
+# NAME_SUFFIX: must match whatever --name_suffix the simulation itself was run with (baroclinic_adjustment.jl),
+# so this job points at the right (suffixed) output file -- unset/empty by default, matching a plain run.
+NAME_SUFFIX=${NAME_SUFFIX:-}
+SIM=bci_Nx${NX}_Ny${NY}_Nz${NZ}${NAME_SUFFIX:+_$NAME_SUFFIX}
 JOB_NAME="${SIM}_budgeting_filter"
 qalter -N "$JOB_NAME" "$PBS_JOBID"
 
