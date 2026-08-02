@@ -534,6 +534,34 @@ quantity get plotted across this pipeline, and only one of them was actually mis
 
 ## Notes
 
+- **The raw simulation time axis is pairs, not independent samples -- matters for any offline script that
+  pools/averages over a time range.** `baroclinic_adjustment.jl`'s `:fields` writer (and `:bottom`, when
+  `--bottom_drag`) uses `schedule = ConsecutiveIterations(TimeInterval(output_interval))`, which writes TWO
+  consecutive model iterations -- the nominal output time, then the very next iteration (~seconds to ~15
+  minutes later, depending on the adaptive Δt at that point in the run) -- at every nominal output time.
+  This is deliberate: `aux02_ke_functions.py`'s `calculate_sfs_ke_tendency()` needs a close pair straddling
+  each nominal output time to finite-difference an accurate ∂ₜ(SFS KE)/∂ₜ(SFS APE), rather than differencing
+  across the full output interval. Confirmed directly on real data: consecutive pairs' own internal gap plus
+  the following gap to the next pair always sums to exactly the nominal `output_interval` (e.g. `607.4s +
+  42592.6s = 43200s = 12h` exactly). `01_filter_fields.py` (and everything built on its output --
+  `filtered_velocities.nc`, and in turn `03`/`04`/`05`'s own outputs) inherits this raw paired structure
+  unchanged; it's never collapsed except where a script explicitly computes a tendency the way
+  `calculate_sfs_ke_tendency()` does (`.diff("time").sel(time=slice(None, None, 2))`, itself only valid
+  because of this pairing). Any *other* script that treats the time axis as independent, regularly-spaced
+  samples at the nominal output frequency -- e.g. pooling/averaging over a `--time-min`/`--time-max`-style
+  range -- will silently process roughly double the expected sample count, double-weighting each real
+  snapshot's near-identical pair partner rather than genuinely pooling that many independent samples.
+  Caught via a real report: `plot5_vorticity_strain_flux.py` printed "41 snapshots" for a 10-day window at a
+  12h output interval (expected 21). Fixed in `plot5_vorticity_strain_flux.py` and
+  `sweep3_plot_transfer_spectrum.py` (both pool/average over a time range) by keeping only the first member
+  of each pair -- `ds.isel(time=slice(0, None, 2))` -- applied to the *full*, unsliced time axis immediately
+  after loading, before any `--time-min`/`--time-max`/`--min-time-days` selection, so the pair parity stays
+  anchored to the simulation start regardless of the chosen window. `sweep1_filter_fields.py`'s
+  `--n-time-skip` already accounted for this correctly (`(i // 2) % n_time_skip == 0`, dividing the raw
+  index by 2 before the skip logic) -- if extending this fix to more scripts, that's the existing precedent
+  to match. `plot3_budgets.py` (each raw point plotted as its own point on a line) and `anim3_panels.py`
+  (each raw point is its own animation frame) show the same underlying duplication but only as a cosmetic
+  double-point/stutter, not a statistical pooling bias, and were left as-is.
 - **Oceanostics bug (fixed)**: `GaussianFilter(; dims=(1,2), σ)` used to crash (heap corruption -> SIGILL)
   on a grid with real `Ny>1` and periodic y -- filed as
   [tomchor/Oceanostics.jl#262](https://github.com/tomchor/Oceanostics.jl/issues/262), with a minimal

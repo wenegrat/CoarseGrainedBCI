@@ -49,6 +49,20 @@ def fix_orientation(da):
 print("Loading filtered velocities...")
 filt = xr.open_dataset(PP_OUTPUT / f"{stem}_filtered_velocities.nc", decode_times=False)
 
+# baroclinic_adjustment.jl's :fields writer (the one 01_filter_fields.py reads to build this file) uses
+# schedule=ConsecutiveIterations(TimeInterval(output_interval)) -- deliberately writing TWO consecutive
+# model iterations (nominal output time, then the next iteration ~seconds-minutes later) at every nominal
+# output time, so 04_sfs_ke_budget.py's calculate_sfs_ke_tendency() can finite-difference a close pair
+# instead of differencing across the full output interval. That means the raw time axis here is pairs
+# (t, t+ε), not independent samples at the nominal output frequency -- pooling both members over a
+# --time-min/--time-max range would silently double the reported/actual sample count and double-weight
+# ~20 real snapshots instead of pooling that many independent ones (confirmed directly: a 10-day window at
+# a 12h output interval reported 41 snapshots, not the expected 21). Keep only the first member of each
+# pair -- same ::2 pattern calculate_sfs_ke_tendency() already uses on this exact structure -- applied here
+# to the *full*, unsliced time axis so the pair parity stays anchored to the simulation start regardless of
+# whatever --time-min/--time-max window gets applied below.
+filt = filt.isel(time=slice(0, None, 2))
+
 ℓ_target = args.filter_scale if args.filter_scale is not None else float(filt.filter_scale.min())
 ℓ = float(filt.filter_scale.sel(filter_scale=ℓ_target, method="nearest"))
 ℓ_km = int(round(ℓ / 1000))

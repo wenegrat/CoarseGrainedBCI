@@ -28,6 +28,17 @@ print("Loading energy transfer data...")
 input_filename = str(PP_OUTPUT / (Path(filename).stem + f"_energy_transfer_sweep{ref_suffix}.nc"))
 et = xr.open_dataset(input_filename, decode_timedelta=False)
 
+# baroclinic_adjustment.jl's :fields writer uses schedule=ConsecutiveIterations(TimeInterval(...)), which
+# writes TWO consecutive model iterations (nominal output time, then the next iteration ~seconds-minutes
+# later) at every nominal output time -- see plot5_vorticity_strain_flux.py's comment on the same structure
+# for why (04_sfs_ke_budget.py's tendency finite-difference needs a close pair). sweep2_energy_transfer.py
+# doesn't compute any tendency term, so it never collapses this pairing -- et's raw time axis is still pairs
+# (t, t+ε), not independent samples at the nominal output frequency. Averaging/coloring by both members over
+# the --min-time-days-filtered range below would silently double-count near-identical snapshots. Keep only
+# the first member of each pair (same ::2 pattern already used for this exact structure elsewhere), on the
+# full time axis before any time-based selection so the pair parity stays anchored to the simulation start.
+et = et.isel(time=slice(0, None, 2))
+
 # Add 1/ℓ as a non-dimension coordinate so plot.line can use it as the x axis
 et = et.assign_coords(inv_scale=("filter_scale", 1.0 / et.filter_scale.values))
 et["inv_scale"].attrs = {"long_name": "1/ℓ", "units": "m⁻¹"}
