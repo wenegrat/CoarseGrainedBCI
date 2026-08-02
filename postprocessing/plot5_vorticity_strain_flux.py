@@ -13,12 +13,18 @@ from src.aux00_utils import load_dataset_and_grid
 #---
 
 #+++ Configuration
+# Default pooling window (days): late enough that eddies should be fully developed (matches the old
+# single-time default's own "eddies should be fully developed by then" rationale), fixed rather than
+# tied to each run's own length so repeated runs/comparisons default to the same physical window.
+DEFAULT_TIME_MIN_DAYS = 15.0
+DEFAULT_TIME_MAX_DAYS = 30.0
+
 import argparse
 parser = argparse.ArgumentParser(description="Conditional-mean and net-contribution maps of Πₖ, Π_A, and Πₖ+Π_A in filtered vorticity-strain space")
 parser.add_argument("--filename", default="output/bci_Nx48_Ny48_Nz8.nc", help="Path to simulation NetCDF file")
 parser.add_argument("--filter-scale", type=float, default=None, help="Target filter length scale in meters (nearest available; defaults to the smallest available)")
-parser.add_argument("--time-min", type=float, default=None, help="Start of the time range (days, inclusive; defaults to the earliest available time)")
-parser.add_argument("--time-max", type=float, default=None, help="End of the time range (days, inclusive; defaults to the latest available time)")
+parser.add_argument("--time-min", type=float, default=None, help=f"Start of the time range (days, inclusive; defaults to {DEFAULT_TIME_MIN_DAYS:g} days -- eddies should be fully developed by then)")
+parser.add_argument("--time-max", type=float, default=None, help=f"End of the time range (days, inclusive; defaults to {DEFAULT_TIME_MAX_DAYS:g} days)")
 parser.add_argument("--z", type=float, default=-500.0, help="Target depth in meters (nearest available cell center; default -500, mid-depth)")
 parser.add_argument("--n-bins", type=int, default=40, help="Number of bins per axis for the vorticity-strain JPDF (default 40)")
 parser.add_argument("--min-count", type=int, default=5, help="Bins with fewer than this many points are masked out in the conditional-mean/net panels (default 5)")
@@ -67,8 +73,25 @@ filt = filt.isel(time=slice(0, None, 2))
 ℓ = float(filt.filter_scale.sel(filter_scale=ℓ_target, method="nearest"))
 ℓ_km = int(round(ℓ / 1000))
 
-t_min_sec = args.time_min * 86400 if args.time_min is not None else float(filt.time.min())
-t_max_sec = args.time_max * 86400 if args.time_max is not None else float(filt.time.max())
+time_min_days = args.time_min if args.time_min is not None else DEFAULT_TIME_MIN_DAYS
+time_max_days = args.time_max if args.time_max is not None else DEFAULT_TIME_MAX_DAYS
+
+# Duration checks against this run's own actual length (not just the eventual empty-window check below):
+# < time_min_days is a hard error -- the requested/default window can't even start, and silently producing
+# an empty-ish plot from whatever scraps exist near the end would be more confusing than failing loudly
+# here. < time_max_days (but >= time_min_days) is survivable -- clip and warn rather than error, since a
+# shorter-than-requested-but-nonempty pooling window is still a meaningful result.
+available_max_days = float(filt.time.max()) / 86400
+if available_max_days < time_min_days:
+    raise ValueError(f"Requested time range starts at {time_min_days:g} days, but {stem} only has "
+                     f"{available_max_days:.2f} days of output -- pass --time-min/--time-max explicitly "
+                     f"for a shorter run.")
+if available_max_days < time_max_days:
+    print(f"  Warning: requested time range extends to {time_max_days:g} days, but {stem} only has "
+          f"{available_max_days:.2f} days of output -- clipping to [{time_min_days:g}, {available_max_days:.2f}] days.")
+
+t_min_sec = time_min_days * 86400
+t_max_sec = time_max_days * 86400  # clipped to whatever's available by .sel(slice(...)) below if too large
 filt_t = filt.sel(time=slice(t_min_sec, t_max_sec))
 n_times = filt_t.sizes["time"]
 if n_times == 0:

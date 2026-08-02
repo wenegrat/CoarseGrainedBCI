@@ -444,14 +444,26 @@ current frame). Two things worth knowing if extending it:
   (`fraction=0.046, pad=0.04`) instead of relying on the layout solver.
 
 `plot5_vorticity_strain_flux.py` is new: conditions Πₖ, Π_A, and Πₖ+Π_A on the *filtered*-field vorticity
-ζ̄/f0 and strain σ̄/|f0| (`--filename ...`, `--filter-scale` in meters, `--time` in days, `--z` in meters,
+ζ̄/f0 and strain σ̄/|f0| (`--filename ...`, `--filter-scale` in meters, `--time-min`/`--time-max` in days
+(default 15-30 days -- eddies should be fully developed by then; a fixed window rather than one tied to
+each run's own length, so repeated runs/comparisons default to the same physical window), `--z` in meters,
 `--n-bins`, `--min-count`, `--clim-percentile`), following the joint-PDF/conditional-mean method of
 [Balwada et al. (2021, JPO)](https://doi.org/10.1175/JPO-D-21-0016.1) but with our own cross-scale energy
-fluxes in place of their vertical tracer flux. Produces, per filter scale: the JPDF, a conditional-mean
-panel and a "net contribution" panel (conditional mean × JPDF) for each of the three flux quantities, plus
-the flux fraction attributable to strain-dominated (SD) vs. vorticity-dominated (AVD/CVD) regions (the
-σ=|ζ̄| partition from the paper). f0 is a single reference Coriolis value (evaluated at y=0), not local
-f(y), to keep the JPDF axes free of an implicit y-dependence. Two gotchas hit while building it:
+fluxes in place of their vertical tracer flux. All snapshots in the `--time-min`/`--time-max` window are
+pooled into one set of area-weighted samples for the JPDF/conditional-mean statistics (each snapshot
+weighted equally regardless of Δt), not evaluated at a single instant -- reduces noise in the SD/AVD/CVD
+flux fractions versus a single snapshot, at the cost of needing enough of a run's duration to actually reach
+the window. If the run doesn't reach `--time-min` (default 15 days) at all, this is a hard error (the
+window couldn't even start, and quietly plotting something from whatever scraps exist near the run's actual
+end would be more confusing than failing loudly); if it reaches `--time-min` but not `--time-max` (default
+30 days), the window is clipped to whatever's actually available and a warning is printed, rather than
+erroring, since a shorter-than-requested-but-nonempty pooling window is still meaningful. `plots.pbs` passes
+both explicitly (the run's own last 10 days, not the fixed 15-30 day default) rather than relying on either
+default. Produces, per filter scale: the JPDF, a conditional-mean panel and a "net contribution" panel
+(conditional mean × JPDF) for each of the three flux quantities, plus the flux fraction attributable to
+strain-dominated (SD) vs. vorticity-dominated (AVD/CVD) regions (the σ=|ζ̄| partition from the paper). f0 is
+a single reference Coriolis value (evaluated at y=0), not local f(y), to keep the JPDF axes free of an
+implicit y-dependence. Two gotchas hit while building it:
 - `ūᵢ` (the filtered-velocity file) is *also* stored with `(..., x_caa, y_aca)` instead of `(..., y_aca,
   x_caa)` -- the same orientation bug as `Π_A`/the exchange term (see above), just in a different file.
   Uses the same `fix_orientation()` pattern.
