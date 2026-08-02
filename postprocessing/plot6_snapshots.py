@@ -78,7 +78,7 @@ print(f"z = {z_sel:.1f} m")
 print("Building figure...")
 fig, axes = plt.subplots(2, 2, figsize=(11, 10), constrained_layout=True)
 
-def plot_field(ax, field, title, unit, cmap="RdBu_r"):
+def plot_field(ax, field, title, unit, cmap="RdBu_r", contour_field=None):
     vmax = np.nanpercentile(np.abs(field.values), args.clim_percentile)
     # set_edgecolor("face") avoids a known pcolormesh rendering artifact -- thin white seams between
     # adjacent quads in vector output (PDF) -- that a plain shading="auto" call leaves in. Deliberately NOT
@@ -88,6 +88,11 @@ def plot_field(ax, field, title, unit, cmap="RdBu_r"):
     # default) means edgecolor="face" actually paints a same-color-as-fill stroke directly over that gap.
     im = ax.pcolormesh(x_km, y_km, field.values, cmap=cmap, vmin=-vmax, vmax=vmax, shading="auto")
     im.set_edgecolor("face")
+    if contour_field is not None:
+        # Buoyancy contours on the flux panels, for visual reference to the front/eddy structure driving
+        # the flux (compare directly against the buoyancy panel above) -- b and the flux fields share the
+        # same native (x_caa, y_aca) grid, so no regridding is needed to overlay them.
+        ax.contour(x_km, y_km, contour_field.values, levels=8, colors="k", linewidths=0.6)
     ax.set_aspect("equal")
     ax.set_title(title, fontsize=12)
     ax.set_xlabel("x [km]")
@@ -99,8 +104,8 @@ def plot_field(ax, field, title, unit, cmap="RdBu_r"):
 # Boussinesq/per-unit-mass convention (see aux02_ke_functions.py's calculate_cross_scale_ke_flux()).
 plot_field(axes[0,0], b,         f"buoyancy b\nt={t_days:.1f}d, z={z_sel:.0f}m",                    "m s⁻²")
 plot_field(axes[0,1], zeta_norm, f"Rossby number ζ/f\nt={t_days:.1f}d, z={z_sel:.0f}m",              "")
-plot_field(axes[1,0], Pi_K,      f"cross-scale KE flux Πₖ (ℓ={ℓ_km}km)\nt={t_days:.1f}d, z={z_sel:.0f}m",  "m² s⁻³")
-plot_field(axes[1,1], Pi_A,      f"cross-scale APE flux Π_A (ℓ={ℓ_km}km)\nt={t_days:.1f}d, z={z_sel:.0f}m", "m² s⁻³")
+plot_field(axes[1,0], Pi_K,      f"cross-scale KE flux Πₖ (ℓ={ℓ_km}km)\nt={t_days:.1f}d, z={z_sel:.0f}m",  "m² s⁻³", contour_field=b)
+plot_field(axes[1,1], Pi_A,      f"cross-scale APE flux Π_A (ℓ={ℓ_km}km)\nt={t_days:.1f}d, z={z_sel:.0f}m", "m² s⁻³", contour_field=b)
 
 fig.suptitle(f"{stem}: z={z_sel:.0f}m snapshots", fontsize=14)
 
