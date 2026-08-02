@@ -15,7 +15,7 @@
 
 # Final figures and animations from the post-processed budgets (budgeting.pbs must have run first).
 #   plot3_budgets.py           -- combined 2x2 KE/APE budget panel across both filter scales
-#   plot5_vorticity_strain_flux.py, plot6_middepth_snapshots.py -- once per filter scale, at each depth in
+#   plot5_vorticity_strain_flux.py, plot6_snapshots.py -- once per filter scale, at each depth in
 #                                  Z_VALUES_M (mid-depth and surface by default; both scripts' own --z default
 #                                  is mid-depth alone, this loop adds the surface pass)
 #   anim2_surface_buoyancy.py  -- surface buoyancy GIF
@@ -74,7 +74,7 @@ TIME_MIN_DAYS=$($PYTHON -c "print(${TIME_MAX_DAYS} - 10)")
 for FS in $LOOP_SCALES; do
     for Z in $Z_VALUES_M; do
         time $PYTHON -u plot5_vorticity_strain_flux.py --filename output/${SIM}.nc --filter-scale $FS --z $Z --time-min $TIME_MIN_DAYS 2>&1 | tee -a $LOG
-        time $PYTHON -u plot6_middepth_snapshots.py    --filename output/${SIM}.nc --filter-scale $FS --z $Z 2>&1 | tee -a $LOG
+        time $PYTHON -u plot6_snapshots.py --filename output/${SIM}.nc --filter-scale $FS --z $Z 2>&1 | tee -a $LOG
     done
 done
 

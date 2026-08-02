@@ -192,7 +192,7 @@ offline without rerunning the simulation). The only thing that changed is what h
 specify it: previously a silent, independently-hardcoded guess; now derived from the one place that
 actually knows what was used.
 
-The `plots` stage runs `plot3_budgets.py`; `plot5_vorticity_strain_flux.py`/`plot6_middepth_snapshots.py`
+The `plots` stage runs `plot3_budgets.py`; `plot5_vorticity_strain_flux.py`/`plot6_snapshots.py`
 (once per filter scale -- `FILTER_SCALES_M` if set, else every scale in the budget file -- and, within
 that, once per depth in `Z_VALUES_M`, default `"-500 0"` i.e. mid-depth then surface; override with a
 different space-separated list of meters if those two aren't what you want); `anim2_surface_buoyancy.py`;
@@ -437,7 +437,7 @@ current frame). Two things worth knowing if extending it:
   against `(x_km, y_km)` renders them rotated 90° relative to everything else. `anim3_panels.py`'s
   `fix_orientation()` transposes any field to `(..., y_dim, x_dim)` before plotting regardless of its
   stored order, so this can't recur there -- but any *other* script plotting `Π_A` or an exchange term
-  directly (e.g. a future `plot_middepth`-style script) needs the same treatment.
+  directly (e.g. `plot6_snapshots.py`, which uses the same pattern) needs the same treatment.
 - `constrained_layout` cannot reconcile equal-aspect square map axes sharing one GridSpec with a wide,
   non-square row (it silently fails -- "axes sizes collapsed to zero" -- and produces uneven gaps).
   `anim3_panels.py` avoids this with explicit `wspace`/`hspace`/margins plus fixed-fraction colorbars
@@ -465,11 +465,14 @@ entire BCI time axis, since our time coordinate is raw seconds up to ~10⁶. Fix
 (days) and dropping the `xlim` call entirely; also updated the default `--filter-scales` from KH's `[7,
 1]` to BCI's `[50000.0, 100000.0]` (meters) and the per-panel `ℓ=` title to display km.
 
-`plot6_middepth_snapshots.py` is new: a permanent version of the ad hoc mid-depth snapshot scripts used
+`plot6_snapshots.py` is new: a permanent version of the ad hoc mid-depth snapshot scripts used
 earlier in this project's investigation (buoyancy, Rossby number ζ/f, cross-scale KE flux Πₖ, cross-scale
 APE flux Π_A, single time/depth/filter-scale, 2x2 panel). Uses the same `fix_orientation()` and
 `coriolis_f()` patterns as `anim3_panels.py`/`plot5_vorticity_strain_flux.py` (`--filename`,
-`--filter-scale` in meters, `--time` in days, `--z` in meters, `--clim-percentile`).
+`--filter-scale` in meters, `--time` in days, `--z` in meters, `--clim-percentile`). Originally named
+`plot6_middepth_snapshots.py`; renamed once `--z` made "mid-depth" no longer accurate (it can plot any
+depth, e.g. `plots.pbs`'s own surface pass). `pcolormesh` calls use `linewidth=0` + `set_edgecolor("face")`
+to avoid a known rendering artifact (thin white seams between adjacent quads) in vector (PDF) output.
 
 ### Key dependencies
 - **Python**: `numpy`, `xarray`, `scipy`, `matplotlib`, `dask`, `gcm_filters`, `netcdf4`

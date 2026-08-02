@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Mid-depth snapshot of buoyancy, Rossby number, and cross-scale KE/APE flux at one filter scale."""
+"""Snapshot of buoyancy, Rossby number, and cross-scale KE/APE flux at one filter scale."""
 
 #+++ Imports
 import os
@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 
 #+++ Configuration
 import argparse
-parser = argparse.ArgumentParser(description="Plot a 2x2 mid-depth snapshot: buoyancy, Rossby number ζ/f, cross-scale KE flux Πₖ, cross-scale APE flux Π_A")
+parser = argparse.ArgumentParser(description="Plot a 2x2 snapshot: buoyancy, Rossby number ζ/f, cross-scale KE flux Πₖ, cross-scale APE flux Π_A")
 parser.add_argument("--filename", default="output/bci_Nx48_Ny48_Nz8.nc", help="Path to simulation NetCDF file")
 parser.add_argument("--filter-scale", type=float, default=None, help="Target filter length scale in meters (nearest available; defaults to the smallest available)")
 parser.add_argument("--time", type=float, default=None, help="Target time in days (nearest available; defaults to the last available)")
@@ -80,7 +80,10 @@ fig, axes = plt.subplots(2, 2, figsize=(11, 10), constrained_layout=True)
 
 def plot_field(ax, field, title, cmap="RdBu_r"):
     vmax = np.nanpercentile(np.abs(field.values), args.clim_percentile)
-    im = ax.pcolormesh(x_km, y_km, field.values, cmap=cmap, vmin=-vmax, vmax=vmax, shading="auto")
+    # linewidth=0 + set_edgecolor("face") avoids a known pcolormesh rendering artifact -- thin white
+    # seams between adjacent quads in vector output (PDF) -- that a plain shading="auto" call leaves in.
+    im = ax.pcolormesh(x_km, y_km, field.values, cmap=cmap, vmin=-vmax, vmax=vmax, shading="auto", linewidth=0)
+    im.set_edgecolor("face")
     ax.set_aspect("equal")
     ax.set_title(title, fontsize=12)
     ax.set_xlabel("x [km]")
@@ -95,7 +98,7 @@ plot_field(axes[1,1], Pi_A,      f"cross-scale APE flux Π_A (ℓ={ℓ_km}km)\nt
 fig.suptitle(f"{stem}: z={z_sel:.0f}m snapshots", fontsize=14)
 
 z_m = int(round(z_sel))
-outfile = FIGURES / f"{stem}_middepth_snapshots_l{ℓ_km}km_z{z_m}m_t{t_days:.0f}d.pdf"
+outfile = FIGURES / f"{stem}_snapshots_l{ℓ_km}km_z{z_m}m_t{t_days:.0f}d.pdf"
 fig.savefig(outfile, dpi=150, bbox_inches="tight")
 print(f"Saved: {outfile}")
 #---
