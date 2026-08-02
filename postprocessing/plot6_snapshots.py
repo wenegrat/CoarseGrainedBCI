@@ -80,9 +80,13 @@ fig, axes = plt.subplots(2, 2, figsize=(11, 10), constrained_layout=True)
 
 def plot_field(ax, field, title, unit, cmap="RdBu_r"):
     vmax = np.nanpercentile(np.abs(field.values), args.clim_percentile)
-    # linewidth=0 + set_edgecolor("face") avoids a known pcolormesh rendering artifact -- thin white
-    # seams between adjacent quads in vector output (PDF) -- that a plain shading="auto" call leaves in.
-    im = ax.pcolormesh(x_km, y_km, field.values, cmap=cmap, vmin=-vmax, vmax=vmax, shading="auto", linewidth=0)
+    # set_edgecolor("face") avoids a known pcolormesh rendering artifact -- thin white seams between
+    # adjacent quads in vector output (PDF) -- that a plain shading="auto" call leaves in. Deliberately NOT
+    # passing linewidth=0: verified empirically (throwaway test, not committed) that linewidth=0 does NOT
+    # fix the seams -- 0 collapses to a hairline stroke rather than disabling the stroke, leaving the
+    # antialiasing gap between quads exposed. Leaving linewidth untouched (matplotlib's own nonzero
+    # default) means edgecolor="face" actually paints a same-color-as-fill stroke directly over that gap.
+    im = ax.pcolormesh(x_km, y_km, field.values, cmap=cmap, vmin=-vmax, vmax=vmax, shading="auto")
     im.set_edgecolor("face")
     ax.set_aspect("equal")
     ax.set_title(title, fontsize=12)

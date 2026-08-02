@@ -471,8 +471,14 @@ APE flux Π_A, single time/depth/filter-scale, 2x2 panel). Uses the same `fix_or
 `coriolis_f()` patterns as `anim3_panels.py`/`plot5_vorticity_strain_flux.py` (`--filename`,
 `--filter-scale` in meters, `--time` in days, `--z` in meters, `--clim-percentile`). Originally named
 `plot6_middepth_snapshots.py`; renamed once `--z` made "mid-depth" no longer accurate (it can plot any
-depth, e.g. `plots.pbs`'s own surface pass). `pcolormesh` calls use `linewidth=0` + `set_edgecolor("face")`
-to avoid a known rendering artifact (thin white seams between adjacent quads) in vector (PDF) output.
+depth, e.g. `plots.pbs`'s own surface pass). All `pcolormesh` calls across the pipeline (`plot5`, `plot6`,
+`anim3_panels.py`) call `im.set_edgecolor("face")` to avoid a known rendering artifact (thin white seams
+between adjacent quads, from each quad being antialiased against its neighbors independently). Deliberately
+**not** also passing `linewidth=0`, despite that being the commonly-suggested pairing: verified empirically
+(zoomed-in raster comparison, real data) that `linewidth=0` alone does nothing here -- 0 collapses to a
+hairline stroke rather than truly disabling it, leaving the antialiasing gap exposed regardless of edge
+color. Leaving `linewidth` untouched (matplotlib's own nonzero default) is what makes `edgecolor="face"`
+actually work: the stroke it paints is nonzero-width and same-color-as-fill, so it paints over the gap.
 
 **Plot units audited: everything energy-related is per-unit-mass (Boussinesq), m² s⁻² for energy densities
 and m² s⁻³ for transfer/dissipation rates -- there is no ρ₀ factor anywhere in the actual KE-side

@@ -208,6 +208,9 @@ def add_jpdf_contours(ax):
 for ax, (name, mean, _) in zip(axes_mean, flux_panels):
     vmax = np.nanpercentile(np.abs(mean), args.clim_percentile)
     im = ax.pcolormesh(zeta_edges, sigma_edges, mean.T, cmap="RdBu_r", vmin=-vmax, vmax=vmax, shading="flat")
+    # set_edgecolor("face") avoids visible seams between adjacent quads (see plot6_snapshots.py's comment
+    # for why linewidth=0 doesn't work here -- it collapses to a hairline rather than disabling the stroke).
+    im.set_edgecolor("face")
     add_sd_lines(ax)
     add_jpdf_contours(ax)
     ax.set_title(f"{name} conditional mean\nSD={fractions[name]['SD']:.0f}% AVD={fractions[name]['AVD']:.0f}% CVD={fractions[name]['CVD']:.0f}%", fontsize=10)
@@ -218,6 +221,7 @@ for ax, (name, mean, _) in zip(axes_mean, flux_panels):
 for ax, (name, _, net) in zip(axes_net, flux_panels):
     vmax = np.nanpercentile(np.abs(net), args.clim_percentile)
     im = ax.pcolormesh(zeta_edges, sigma_edges, net.T, cmap="RdBu_r", vmin=-vmax, vmax=vmax, shading="flat")
+    im.set_edgecolor("face")
     add_sd_lines(ax)
     add_jpdf_contours(ax)
     ax.set_title(f"{name} net contribution", fontsize=10)

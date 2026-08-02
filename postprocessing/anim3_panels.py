@@ -119,6 +119,10 @@ ax_ts_ke, ax_ts_ape = fig.add_subplot(gs[2,0:3]), fig.add_subplot(gs[2,3:6])
 
 def setup_map(ax, data0, vmax, title, unit):
     im = ax.pcolormesh(x_km, y_km, data0, cmap="RdBu_r", vmin=-vmax, vmax=vmax, shading="auto")
+    # set_edgecolor("face") avoids visible seams between adjacent quads (see plot6_snapshots.py's comment
+    # for why linewidth=0 doesn't work here). A one-time style property on the QuadMesh, unaffected by the
+    # per-frame set_array() calls in update() below, so setting it once here covers every animation frame.
+    im.set_edgecolor("face")
     ax.set_aspect("equal")
     ax.set_title(title, fontsize=11)
     ax.set_xlabel("x [km]")
