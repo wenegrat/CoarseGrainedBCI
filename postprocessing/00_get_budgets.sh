@@ -21,4 +21,6 @@ python 02_sort_density.py     --filename "$FILENAME" $FIXED_REF_FLAG --n-workers
 python 03_energy_transfer.py  --filename "$FILENAME" $FIXED_REF_FLAG --n-workers "${N_WORKERS:-1}"
 python 04_sfs_ke_budget.py    --filename "$FILENAME" $FIXED_REF_FLAG
 python 05_sfs_ape_budget.py   --filename "$FILENAME" $FIXED_REF_FLAG --n-workers "${N_WORKERS:-1}"
-python 06_plot_budgets.py     --filename "$FILENAME" $FIXED_REF_FLAG
+# 06_plot_budgets.py disabled: its per-filter-scale PNGs (one per scale, so two by default) are redundant
+# with plot3_budgets.py's combined 2x2 PDF panel -- uncomment to regenerate them.
+#python 06_plot_budgets.py     --filename "$FILENAME" $FIXED_REF_FLAG

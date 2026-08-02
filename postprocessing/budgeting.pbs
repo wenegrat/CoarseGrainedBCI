@@ -39,6 +39,8 @@ time $PYTHON -u 02_sort_density.py    --filename output/${SIM}.nc --n-workers 8 
 time $PYTHON -u 03_energy_transfer.py --filename output/${SIM}.nc --n-workers 8 --write-mode $WRITE_MODE $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
 time $PYTHON -u 04_sfs_ke_budget.py   --filename output/${SIM}.nc               --write-mode $WRITE_MODE $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
 time $PYTHON -u 05_sfs_ape_budget.py  --filename output/${SIM}.nc --n-workers 8 --write-mode $WRITE_MODE $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
-time $PYTHON -u 06_plot_budgets.py    --filename output/${SIM}.nc               $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
+# 06_plot_budgets.py disabled: its per-filter-scale PNGs (one per scale, so two by default) are redundant
+# with plot3_budgets.py's combined 2x2 PDF panel (run later, in plots.pbs) -- uncomment to regenerate them.
+#time $PYTHON -u 06_plot_budgets.py    --filename output/${SIM}.nc               $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
 
 qstat -f $PBS_JOBID >> logs/${JOB_NAME}.out
