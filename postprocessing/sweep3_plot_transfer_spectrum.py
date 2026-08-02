@@ -48,12 +48,20 @@ print(f"  Deformation radius Ld = {Ld/1e3:.2f} km")
 #+++ Plot: Hovmöller (time vs. scale) on top, time-averaged spectrum (vs. scale) below
 fig, axes = plt.subplots(2, 2, figsize=(12, 9), constrained_layout=True)
 
-vmax = float(max(abs(et["∫Π_K dV"]).max(), abs(et["∫Π_A dV"]).max()))
+# et's own ∫Π_K dV/∫Π_A dV are raw domain integrals of already-specific (per-unit-mass) fields, so they come
+# out in m^5 s^-3, not m^2 s^-3 -- not comparable to the raw Πₖ/Π_A fields plotted elsewhere in the
+# pipeline. Same fix as plot3_budgets.py/anim3_panels.py: divide by domain volume for a genuine
+# domain-averaged rate in m^2 s^-3.
+V_total = et.attrs["Lx"] * et.attrs["Ly"] * et.attrs["Lz"]
+print(f"  Domain volume V = {V_total:.4e} m^3 (normalizing ∫Π dV terms to domain-averaged m² s⁻³)")
+
+vmax = float(max(abs(et["∫Π_K dV"] / V_total).max(), abs(et["∫Π_A dV"] / V_total).max()))
 linthresh = vmax * 1e-3  # scales with the data's own magnitude, rather than a fixed absolute value
 for ax, var in zip(axes[0], ["∫Π_K dV", "∫Π_A dV"]):
-    et[var].plot.pcolormesh(x="time", y="filter_scale", ax=ax,
+    (et[var] / V_total).plot.pcolormesh(x="time", y="filter_scale", ax=ax,
                             cmap="RdBu_r", vmin=-vmax, vmax=vmax,
-                            norm=plt.matplotlib.colors.SymLogNorm(linthresh=linthresh, vmin=-vmax, vmax=vmax))
+                            norm=plt.matplotlib.colors.SymLogNorm(linthresh=linthresh, vmin=-vmax, vmax=vmax),
+                            cbar_kwargs={"label": "m² s⁻³"})
     ax.set_yscale("log")
     ax.set_ylabel("ℓ  [m]")
 
@@ -62,9 +70,10 @@ axes[0,1].set_title("APE cross-scale transfer (Hovmöller)")
 
 # Time-averaged spectrum: mean (and ±1 std across time) of Π_K/Π_A vs. 1/ℓ, excluding the initial transient
 et_avg = et.sel(time=slice(args.min_time_days * 86400, None))
+var_labels = {"∫Π_K dV": r"$\langle\Pi_K\rangle$", "∫Π_A dV": r"$\langle\Pi_A\rangle$"}
 for ax, var, title in zip(axes[1], ["∫Π_K dV", "∫Π_A dV"], ["KE cross-scale transfer spectrum", "APE cross-scale transfer spectrum"]):
-    mean = et_avg[var].mean("time")
-    std = et_avg[var].std("time")
+    mean = et_avg[var].mean("time") / V_total
+    std = et_avg[var].std("time") / V_total
     ax.plot(et_avg.inv_scale, mean, marker="o", color="C0")
     ax.fill_between(et_avg.inv_scale, mean - std, mean + std, color="C0", alpha=0.25)
     ax.axhline(0, color="gray", lw=0.5)
@@ -72,7 +81,7 @@ for ax, var, title in zip(axes[1], ["∫Π_K dV", "∫Π_A dV"], ["KE cross-scal
     ax.legend(fontsize=9, loc="best")
     ax.set_xscale("log")
     ax.set_xlabel(r"$1/\ell$  [m$^{-1}$]")
-    ax.set_ylabel(var)
+    ax.set_ylabel(f"{var_labels[var]}  [m² s⁻³]")
     ax.set_title(title)
     ax.grid(True, alpha=0.3)
 

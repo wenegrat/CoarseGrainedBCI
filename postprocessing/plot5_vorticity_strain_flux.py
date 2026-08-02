@@ -213,7 +213,7 @@ for ax, (name, mean, _) in zip(axes_mean, flux_panels):
     ax.set_title(f"{name} conditional mean\nSD={fractions[name]['SD']:.0f}% AVD={fractions[name]['AVD']:.0f}% CVD={fractions[name]['CVD']:.0f}%", fontsize=10)
     ax.set_xlabel(r"$\bar\zeta / f_0$")
     ax.set_ylabel(r"$\bar\sigma / |f_0|$")
-    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label="m² s⁻³")
 
 for ax, (name, _, net) in zip(axes_net, flux_panels):
     vmax = np.nanpercentile(np.abs(net), args.clim_percentile)
@@ -223,7 +223,7 @@ for ax, (name, _, net) in zip(axes_net, flux_panels):
     ax.set_title(f"{name} net contribution", fontsize=10)
     ax.set_xlabel(r"$\bar\zeta / f_0$")
     ax.set_ylabel(r"$\bar\sigma / |f_0|$")
-    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label="m² s⁻³")
 
 legend_handles = [Line2D([0], [0], color="0.25", lw=1.2, linestyle=_LINESTYLES[i % len(_LINESTYLES)],
                         label=f"JPDF {level_labels[lvl]} HDR") for i, lvl in enumerate(contour_levels)]

@@ -474,6 +474,32 @@ APE flux Π_A, single time/depth/filter-scale, 2x2 panel). Uses the same `fix_or
 depth, e.g. `plots.pbs`'s own surface pass). `pcolormesh` calls use `linewidth=0` + `set_edgecolor("face")`
 to avoid a known rendering artifact (thin white seams between adjacent quads) in vector (PDF) output.
 
+**Plot units audited: everything energy-related is per-unit-mass (Boussinesq), m² s⁻² for energy densities
+and m² s⁻³ for transfer/dissipation rates -- there is no ρ₀ factor anywhere in the actual KE-side
+computation (`aux02_ke_functions.py`), matching the APE side's own explicit `g·ρ·z/ρ0` convention
+(`aux01_pe_functions.py`).** `calculate_cross_scale_ke_flux()` had a stale docstring claiming a `Πℓ = -ρ₀
+S̄:τ̄` formula the code never actually implements (the real return statement, and its own `[m² s⁻³]`
+return-value docstring two lines below, already agreed with each other and had no ρ₀ factor) -- corrected
+the prose to match the code instead of the other way around, since introducing a real ρ₀ multiply would
+have been the wrong fix (it would produce kg m⁻¹ s⁻³, not m² s⁻³). Two genuinely different kinds of
+quantity get plotted across this pipeline, and only one of them was actually mislabeled/wrong:
+- Raw fields (Πₖ, Π_A, ε_Kˢ, ε_Aˢ, the SFS APE→KE conversion term, as plotted in `plot5`/`plot6`/`anim3`'s
+  map panels) are already genuinely m² s⁻³ -- these only needed colorbar `label=` kwargs added (previously
+  none of these colorbars had any unit label at all). Buoyancy panels (`plot6`/`anim3`) are `m s⁻²`
+  (an acceleration, not an energy quantity); Rossby number ζ/f panels are dimensionless (no label).
+- The *budget-panel* plots (`plot3_budgets.py`'s 2×2 KE/APE panel, `anim3_panels.py`'s bottom time-series
+  row, `sweep3_plot_transfer_spectrum.py`'s Hovmöller + spectrum) plot `∫...dV` terms from
+  `04_sfs_ke_budget.py`/`05_sfs_ape_budget.py` -- `integrate()` (`aux00_utils.py`) is a raw `(field *
+  dV).sum()`, so these come out in m⁵ s⁻³ (a per-unit-mass rate integrated over the domain's actual m³
+  volume), not m² s⁻³, and previously had no unit label either -- silently plotting numbers many orders of
+  magnitude off from what a "m² s⁻³" reader would expect. Fixed by dividing every term (including the
+  bottom-drag term, which is `∫...dA` not `∫...dV` -- see the CLI-args section above) by the domain volume
+  `V = Lx·Ly·Lz` (read from the budget file's own attrs) before plotting, giving a genuine domain-averaged
+  rate in m² s⁻³ that's now directly comparable to the raw-field plots above. Dividing the boundary
+  (area-integrated) term by the *volume* rather than its own area is deliberate, not an inconsistency: a
+  surface flux's contribution to a volume-averaged tendency is `(∮flux dA)/V` by the divergence theorem --
+  the same normalization every bulk (volume-integrated) term in the same budget equation gets.
+
 ### Key dependencies
 - **Python**: `numpy`, `xarray`, `scipy`, `matplotlib`, `dask`, `gcm_filters`, `netcdf4`
 - **Julia**: `Oceananigans` v0.110.8, `Oceanostics` v0.18.0 (pinned to the `tc/sfs-ke` branch -- see the

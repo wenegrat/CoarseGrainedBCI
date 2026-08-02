@@ -43,6 +43,17 @@ if args.filter_scales is not None:
 else:
     filter_scales = list(ke_budget.filter_scale.values[:2])
     print(f"  Filter scales (from budget file, --filter-scales not given): {filter_scales}")
+
+# Every term here is stored as a raw domain integral (∫...dV, or ∫...dA for the boundary-only bottom-drag
+# term -- see 04_sfs_ke_budget.py) of an already-specific (per-unit-mass, Boussinesq) field, so it comes out
+# in m^5 s^-3, not m^2 s^-3 -- not standard/interpretable, and not comparable to the raw Πₖ/Π_A/ε fields
+# plotted elsewhere in the pipeline (plot5/plot6/anim3), which are genuinely m^2 s^-3. Dividing by the total
+# domain volume here converts every term (dV- and dA-integrated alike) to a domain-averaged rate in
+# m^2 s^-3 -- dividing the boundary term by V rather than its own area A is deliberate, not an inconsistency:
+# a surface flux's contribution to a volume-averaged tendency is (∮flux dA)/V by the divergence theorem, the
+# same normalization as every bulk term it's added to in the same budget.
+V_total = ke_budget.attrs["Lx"] * ke_budget.attrs["Ly"] * ke_budget.attrs["Lz"]
+print(f"  Domain volume V = {V_total:.4e} m^3 (normalizing all budget terms to m^2 s^-3)")
 #---
 
 #+++ Define budget terms (shared colors across all panels)
@@ -76,8 +87,8 @@ print("Creating 2×2 budget panel plot...")
 fig, axes = plt.subplots(2, 2, figsize=(14, 7), constrained_layout=True)
 
 budget_configs = [
-    (0, ke_budget,  ke_terms,  "residual_K",  "SFS KE budget terms"),
-    (1, ape_budget, ape_terms, "residual_A", "SFS APE budget terms"),
+    (0, ke_budget,  ke_terms,  "residual_K",  "SFS KE budget terms [m² s⁻³]"),
+    (1, ape_budget, ape_terms, "residual_A", "SFS APE budget terms [m² s⁻³]"),
 ]
 
 for row, budget, terms, residual_var, row_title in budget_configs:
@@ -86,9 +97,9 @@ for row, budget, terms, residual_var, row_title in budget_configs:
         for label, (var, color) in terms.items():
             data = budget[var].sel(filter_scale=ℓ, method="nearest").dropna("time").isel(time=slice(1, None))
             sign = tendency_sign if var.startswith("∫-∂ₜ") else 1
-            ax.plot(data.time / 86400, sign * data.values, label=label, color=color, lw=1.5)
+            ax.plot(data.time / 86400, sign * data.values / V_total, label=label, color=color, lw=1.5)
         residual = budget[residual_var].sel(filter_scale=ℓ, method="nearest").dropna("time").isel(time=slice(1, None))
-        ax.plot(residual.time / 86400, residual.values, color="k", ls="--", lw=1.0, zorder=0)
+        ax.plot(residual.time / 86400, residual.values / V_total, color="k", ls="--", lw=1.0, zorder=0)
 
         if col == 0:
             ax.set_ylabel(row_title, fontsize=13)

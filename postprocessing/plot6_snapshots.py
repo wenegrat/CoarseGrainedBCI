@@ -78,7 +78,7 @@ print(f"z = {z_sel:.1f} m")
 print("Building figure...")
 fig, axes = plt.subplots(2, 2, figsize=(11, 10), constrained_layout=True)
 
-def plot_field(ax, field, title, cmap="RdBu_r"):
+def plot_field(ax, field, title, unit, cmap="RdBu_r"):
     vmax = np.nanpercentile(np.abs(field.values), args.clim_percentile)
     # linewidth=0 + set_edgecolor("face") avoids a known pcolormesh rendering artifact -- thin white
     # seams between adjacent quads in vector output (PDF) -- that a plain shading="auto" call leaves in.
@@ -88,12 +88,15 @@ def plot_field(ax, field, title, cmap="RdBu_r"):
     ax.set_title(title, fontsize=12)
     ax.set_xlabel("x [km]")
     ax.set_ylabel("y [km]")
-    fig.colorbar(im, ax=ax, shrink=0.85)
+    fig.colorbar(im, ax=ax, shrink=0.85, label=unit)
 
-plot_field(axes[0,0], b,         f"buoyancy b\nt={t_days:.1f}d, z={z_sel:.0f}m")
-plot_field(axes[0,1], zeta_norm, f"Rossby number ζ/f\nt={t_days:.1f}d, z={z_sel:.0f}m")
-plot_field(axes[1,0], Pi_K,      f"cross-scale KE flux Πₖ (ℓ={ℓ_km}km)\nt={t_days:.1f}d, z={z_sel:.0f}m")
-plot_field(axes[1,1], Pi_A,      f"cross-scale APE flux Π_A (ℓ={ℓ_km}km)\nt={t_days:.1f}d, z={z_sel:.0f}m")
+# Units: b is a Boussinesq buoyancy (acceleration, m s⁻²); ζ/f is dimensionless by construction; Πₖ/Π_A are
+# raw (unintegrated) specific cross-scale fluxes, m² s⁻³ -- no ρ₀ factor anywhere in this codebase's fully
+# Boussinesq/per-unit-mass convention (see aux02_ke_functions.py's calculate_cross_scale_ke_flux()).
+plot_field(axes[0,0], b,         f"buoyancy b\nt={t_days:.1f}d, z={z_sel:.0f}m",                    "m s⁻²")
+plot_field(axes[0,1], zeta_norm, f"Rossby number ζ/f\nt={t_days:.1f}d, z={z_sel:.0f}m",              "")
+plot_field(axes[1,0], Pi_K,      f"cross-scale KE flux Πₖ (ℓ={ℓ_km}km)\nt={t_days:.1f}d, z={z_sel:.0f}m",  "m² s⁻³")
+plot_field(axes[1,1], Pi_A,      f"cross-scale APE flux Π_A (ℓ={ℓ_km}km)\nt={t_days:.1f}d, z={z_sel:.0f}m", "m² s⁻³")
 
 fig.suptitle(f"{stem}: z={z_sel:.0f}m snapshots", fontsize=14)
 

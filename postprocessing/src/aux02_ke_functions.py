@@ -227,9 +227,12 @@ def calculate_sfs_ke_tendency(sfs_ke_density):
 #+++ Cross-scale KE flux
 def calculate_cross_scale_ke_flux(τ, S̄, index_dims=("i", "j")):
     """
-    Compute the cross-scale KE flux Πℓ = -ρ₀ S̄ℓ : τ̄ℓ
+    Compute the cross-scale KE flux Πℓ = -S̄ℓ : τ̄ℓ
 
-    Following Aluie et al. (2018, JPO) Eq. (7).  Πℓ > 0 means forward
+    Following Aluie et al. (2018, JPO) Eq. (7), but per unit mass (no ρ₀
+    factor) -- consistent with this codebase's fully Boussinesq/specific
+    convention throughout (KE, APE, etc. are all per-unit-mass, e.g. TPE
+    density g·ρ·z/ρ0 in aux01_pe_functions.py). Πℓ > 0 means forward
     (downscale) KE transfer; Πℓ < 0 means inverse (upscale) transfer.
 
     The double contraction of two symmetric 3×3 tensors is
@@ -243,7 +246,7 @@ def calculate_cross_scale_ke_flux(τ, S̄, index_dims=("i", "j")):
     (the off-diagonal factor-of-2 arises automatically from the (i,j) + (j,i)
     entries):
 
-        Πℓ = -ρ₀ * (S * τ).sum(["i", "j"])
+        Πℓ = -(S * τ).sum(["i", "j"])
 
     Parameters
     ----------
