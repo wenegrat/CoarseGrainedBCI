@@ -92,7 +92,7 @@ def plot_field(ax, field, title, unit, cmap="RdBu_r", contour_field=None):
         # Buoyancy contours on the flux panels, for visual reference to the front/eddy structure driving
         # the flux (compare directly against the buoyancy panel above) -- b and the flux fields share the
         # same native (x_caa, y_aca) grid, so no regridding is needed to overlay them.
-        ax.contour(x_km, y_km, contour_field.values, levels=8, colors="k", linewidths=0.6)
+        ax.contour(x_km, y_km, contour_field.values, levels=5, colors="0.4", linewidths=0.4)
     ax.set_aspect("equal")
     ax.set_title(title, fontsize=12)
     ax.set_xlabel("x [km]")
