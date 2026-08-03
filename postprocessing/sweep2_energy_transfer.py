@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import time
 import dask
+import numpy as np
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
 from src.aux00_utils import load_dataset_and_grid, write_dataset
@@ -91,9 +92,29 @@ for i, ℓ in enumerate(filter_scales):
     checkpoint_files.append(checkpoint_path)
 
     if checkpoint_path.exists():
-        print(f"\n--- filter {i+1}/{n_scales}: scale = {ℓ:.4f} (loading from checkpoint) ---")
-        transfer_list.append(xr.open_dataset(str(checkpoint_path), decode_times=False).chunk(chunks))
-        continue
+        cached = xr.open_dataset(str(checkpoint_path), decode_times=False).chunk(chunks)
+        # A checkpoint is keyed only by filter scale, not by which timesteps went into it -- if a *different*
+        # run (a different --n-time-skip, an input that's since changed, or a pre-dedup-fix run) left a
+        # checkpoint behind for this same scale without ever reaching the cleanup at the end of a successful
+        # run, this run would otherwise trust it by filename alone. Confirmed as a real production issue:
+        # mixing a stale full-resolution checkpoint with freshly-computed reduced-resolution ones produced an
+        # xr.concat time-axis size mismatch (join='outer' silently unioned them) that inflated the final
+        # output's time dimension well past what was actually requested, with no error, just a FutureWarning.
+        # Validate the time axis actually matches this run's expected one (ds_filt.time) before trusting a
+        # cached checkpoint; recompute (and overwrite) it otherwise.
+        stale = cached.sizes["time"] != ds_filt.sizes["time"] or not np.array_equal(cached.time.values, ds_filt.time.values)
+        if not stale:
+            print(f"\n--- filter {i+1}/{n_scales}: scale = {ℓ:.4f} (loading from checkpoint) ---")
+            transfer_list.append(cached)
+            continue
+        print(f"\n--- filter {i+1}/{n_scales}: scale = {ℓ:.4f}: checkpoint has {cached.sizes['time']} timesteps, "
+              f"this run expects {ds_filt.sizes['time']} -- stale checkpoint from a different run, recomputing ---")
+        cached.close()
+        # Delete rather than just closing and letting write_dataset() overwrite it in place -- closing a
+        # just-read netCDF4 handle doesn't reliably evict it from xarray's global file-handle cache before
+        # the same path is immediately reopened for writing (confirmed directly: reusing the handle this way
+        # raised a PermissionError from a stale cache entry). Removing the file first guarantees a clean open.
+        checkpoint_path.unlink()
 
     # Printed here (not inside calculate_energy_transfer(), which only knows the single-element list this
     # scale's call gets) so progress through the whole sweep is visible -- otherwise the "--- filter_scale =

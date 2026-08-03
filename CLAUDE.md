@@ -347,6 +347,26 @@ deleted once the script's own final output is written successfully; each script 
 scale whose checkpoint already exists on disk (resume-after-partial-failure, at the cost of silently reusing
 a stale checkpoint if the input data changed underneath it without the checkpoint being cleaned up first).
 
+That risk was real, not just theoretical: `sweep2_energy_transfer.py` hit it in production. Checkpoints are
+keyed only by filter scale, not by which timesteps went into them -- a run that didn't reach the final
+cleanup (crashed, hit a walltime limit, or predates a later fix like the `--n-time-skip` dedup one) leaves
+scale-keyed checkpoints behind that a *later* run, expecting a different time axis, will still find and
+trust by filename alone. `submit_sweep.sh` doesn't help here even for a fully "fresh" resubmission -- it
+only regenerates `sweep1`'s filtered-velocities output, and has no knowledge of `sweep2`'s separate
+checkpoint cache. Symptom: mixing a stale full-length checkpoint with freshly-computed reduced-length ones
+produced an `xr.concat` time-axis size mismatch across `filter_scale` (a `FutureWarning`, not an error --
+`join='outer'`, the current default, silently unions the mismatched axes), inflating the final output's time
+dimension well past what was actually requested (161 vs. the 21 actually computed, on a real report).
+`sweep2_energy_transfer.py` now validates a cached checkpoint's time axis against the current run's expected
+one (`ds_filt.time`) before trusting it -- both size and exact values via `np.array_equal` -- and deletes +
+recomputes it if they don't match, printing why. Deleting rather than just closing the stale file matters:
+closing a just-read netCDF4 handle and immediately reopening the same path for writing raised a
+`PermissionError` from a stale entry in xarray's global file-handle cache (confirmed directly) -- removing
+the file first guarantees a clean open. `03_energy_transfer.py`/`04_sfs_ke_budget.py`/`05_sfs_ape_budget.py`
+don't have this specific failure mode (no `--n-time-skip`-equivalent knob that changes their time axis
+between runs against the same input) and weren't changed, but carry the same generic risk described above
+if their own inputs ever change out from under a stale checkpoint.
+
 `03_energy_transfer.py`'s `calculate_energy_transfer()` (`aux02_ke_functions.py`) already computes the
 filtered-density local potential-energy fields (z₀(ρ̄), Υˡ, Dˡ, Ea(ρ̄,z), via
 `local_potential_energies_timeseries()` on `ds_filt_ℓ`) per scale, purely as an intermediate for Π_A --
