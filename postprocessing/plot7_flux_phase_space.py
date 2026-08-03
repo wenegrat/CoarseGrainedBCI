@@ -8,6 +8,7 @@ import numpy as np
 import xarray as xr
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
+from matplotlib.ticker import ScalarFormatter, MaxNLocator
 from scipy.stats import binned_statistic_2d
 from src.aux00_utils import load_dataset_and_grid
 #---
@@ -207,23 +208,36 @@ def add_jpdf_contours(ax, x_centers, y_centers, jpdf, level_by_percentile):
         ax.contour(x_centers, y_centers, jpdf.T, levels=[level_by_percentile[p]], colors="0.25",
                    linewidths=1.0, linestyles=_LINESTYLES[i % len(_LINESTYLES)])
 
-# Colorbar as an inset in the panel's upper-right corner rather than a separate axes alongside it -- both
-# rows' JPDFs are concentrated near ζ=0 and taper off toward the axes corners, and the upper-right corner is
-# reliably the sparsest of the four (verified by rendering and inspecting -- the lower corners overlap real
-# data too much to use). An opaque backing patch (added first, so it sits behind the colorbar) keeps the
-# tick labels legible regardless of whatever data would otherwise sit underneath.
+# Colorbar as a thin horizontal inset in the panel's upper-right corner rather than a separate axes
+# alongside it -- both rows' JPDFs are concentrated near ζ=0 and taper off toward the axes corners, and the
+# upper-right corner is reliably the sparsest of the four (verified by rendering and inspecting -- the lower
+# corners overlap real data too much to use). An opaque backing patch (added first, so it sits behind the
+# colorbar) keeps the tick labels legible regardless of whatever data would otherwise sit underneath.
+#
+# Tick formatting is forced to scientific notation unconditionally (set_powerlimits((0, 0)), which means
+# "always", not a real exponent range) rather than left to matplotlib's default ScalarFormatter, which
+# switches between plain decimals (e.g. "0.0004") and an offset-multiplier "1e-5" style depending on each
+# panel's own data magnitude -- fine individually, but inconsistent-looking side by side across six panels
+# spanning several different magnitudes. Forcing it means every panel gets the same style, only the
+# exponent itself (unavoidably) differs.
 def add_inset_colorbar(ax, im):
-    x0, y0, w, h = 0.80, 0.58, 0.06, 0.36
+    x0, y0, w, h = 0.46, 0.85, 0.50, 0.055
     pad = 0.018
-    backing = ax.inset_axes([x0 - 2.5*pad, y0 - pad, w + 5*pad, h + 2*pad])
+    backing = ax.inset_axes([x0 - pad, y0 - 2.6*pad, w + 2*pad, h + 4*pad])
     backing.set_facecolor("white")
     backing.set_xticks([]); backing.set_yticks([])
     for spine in backing.spines.values():
         spine.set_visible(False)
     cax = ax.inset_axes([x0, y0, w, h])
-    cbar = fig.colorbar(im, cax=cax)
-    cbar.ax.tick_params(labelsize=6.5, length=2)
-    cbar.set_label("m² s⁻³", fontsize=7, labelpad=2)
+    cbar = fig.colorbar(im, cax=cax, orientation="horizontal")
+    cbar.locator = MaxNLocator(nbins=3)
+    fmt = ScalarFormatter(useMathText=True)
+    fmt.set_powerlimits((0, 0))
+    cbar.formatter = fmt
+    cbar.update_ticks()
+    cbar.ax.tick_params(labelsize=6, length=2, pad=1)
+    cbar.ax.xaxis.get_offset_text().set_fontsize(6)
+    cbar.set_label("m² s⁻³", fontsize=6.5, labelpad=1)
     return cbar
 
 for col, name in enumerate(names):
@@ -240,7 +254,12 @@ for col, name in enumerate(names):
     ax.set_title(name, fontsize=12)
     # Shares the x-axis with the panel below (same ζ/f0 bins) -- label/ticks live on the bottom row only.
     ax.tick_params(labelbottom=False)
-    ax.set_ylabel(r"$\bar\sigma / |f_0|$")
+    if col == 0:
+        ax.set_ylabel(r"$\bar\sigma / |f_0|$")
+    else:
+        # Shares the y-axis with the leftmost panel in this row (same σ/|f0| bins) -- label/ticks live
+        # there only.
+        ax.tick_params(labelleft=False)
 
 for col, name in enumerate(names):
     ax = axes[1, col]
@@ -253,7 +272,10 @@ for col, name in enumerate(names):
     add_inset_colorbar(ax, im)
     ax.set_title(name, fontsize=12)
     ax.set_xlabel(r"$\bar\zeta / f_0$")
-    ax.set_ylabel(r"$\bar\delta / |f_0|$")
+    if col == 0:
+        ax.set_ylabel(r"$\bar\delta / |f_0|$")
+    else:
+        ax.tick_params(labelleft=False)
 
 # Row labels in the left margin, since "net contribution" + phase-space axes already say what each row is
 # once labeled -- repeating a full title on every one of the 6 panels would be redundant.
