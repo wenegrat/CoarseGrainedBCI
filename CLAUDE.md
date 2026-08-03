@@ -199,9 +199,12 @@ surface; override with a different space-separated list of meters if those two a
 `anim2_surface_buoyancy.py`; and `anim3_panels.py` (once per filter scale) -- the latter depends
 specifically on the `FIXED_REF=0` budgeting output (no `--fixed-reference` support in the plotting scripts
 themselves), so `submit_budgeting.sh` skips plots automatically if only `FIXED_REF=1` was requested.
-`plot5`/`plot7` also share the same `--time-min`/`--time-max` pooling (see their own Architecture entries)
--- `plots.pbs` passes both explicitly (last 10 days of the run) to each rather than relying on their
-identical 15-30 day defaults. All three of `plot5`/`plot6`/`plot7` take `--z` (meters, nearest available
+`plot5`/`plot7` also share the same `--time-min`/`--time-max` pooling (see their own Architecture entries),
+left unpassed here deliberately -- `plots.pbs` used to override both to the run's own last 10 days, but that
+meant the window silently shifted with each run's length instead of every run being plotted over the same
+fixed 15-30 day window; removed once that turned out to be the more confusing behavior in practice (a real
+run came back plotted over days 30-40, not the 15-30 a reader would expect from the scripts' own default).
+All three of `plot5`/`plot6`/`plot7` take `--z` (meters, nearest available
 cell center; each script's own default is mid-depth, `-500`) and bake the *resolved* depth into their output
 filename (`z{z_m}m`, from the actual nearest-cell value, not the raw `--z` request) so running the same
 filter scale at two different depths doesn't silently overwrite the
@@ -460,9 +463,10 @@ the window. If the run doesn't reach `--time-min` (default 15 days) at all, this
 window couldn't even start, and quietly plotting something from whatever scraps exist near the run's actual
 end would be more confusing than failing loudly); if it reaches `--time-min` but not `--time-max` (default
 30 days), the window is clipped to whatever's actually available and a warning is printed, rather than
-erroring, since a shorter-than-requested-but-nonempty pooling window is still meaningful. `plots.pbs` passes
-both explicitly (the run's own last 10 days, not the fixed 15-30 day default) rather than relying on either
-default. Produces, per filter scale: the JPDF, a conditional-mean panel and a "net contribution" panel
+erroring, since a shorter-than-requested-but-nonempty pooling window is still meaningful. `plots.pbs` leaves
+both unset, using the fixed 15-30 day default for every run (see the "plots" stage entry above for why --
+it used to override both to the run's own last 10 days instead, which turned out to be the more confusing
+choice in practice). Produces, per filter scale: the JPDF, a conditional-mean panel and a "net contribution" panel
 (conditional mean × JPDF) for each of the three flux quantities, plus the flux fraction attributable to
 strain-dominated (SD) vs. vorticity-dominated (AVD/CVD) regions (the σ=|ζ̄| partition from the paper). f0 is
 a single reference Coriolis value (evaluated at y=0), not local f(y), to keep the JPDF axes free of an
