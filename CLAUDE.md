@@ -192,16 +192,19 @@ offline without rerunning the simulation). The only thing that changed is what h
 specify it: previously a silent, independently-hardcoded guess; now derived from the one place that
 actually knows what was used.
 
-The `plots` stage runs `plot3_budgets.py`; `plot5_vorticity_strain_flux.py`/`plot6_snapshots.py`
-(once per filter scale -- `FILTER_SCALES_M` if set, else every scale in the budget file -- and, within
-that, once per depth in `Z_VALUES_M`, default `"-500 0"` i.e. mid-depth then surface; override with a
-different space-separated list of meters if those two aren't what you want); `anim2_surface_buoyancy.py`;
-and `anim3_panels.py` (once per filter scale) -- the latter depends specifically on the `FIXED_REF=0`
-budgeting output (no `--fixed-reference` support in the plotting scripts themselves), so
-`submit_budgeting.sh` skips plots automatically if only `FIXED_REF=1` was requested. Both `plot5`/`plot6`
-take `--z` (meters, nearest available cell center; each script's own default is mid-depth, `-500`) and bake
-the *resolved* depth into their output filename (`z{z_m}m`, from the actual nearest-cell value, not the raw
-`--z` request) so running the same filter scale at two different depths doesn't silently overwrite the
+The `plots` stage runs `plot3_budgets.py`; `plot5_vorticity_strain_flux.py`/`plot6_snapshots.py`/
+`plot7_flux_phase_space.py` (once per filter scale -- `FILTER_SCALES_M` if set, else every scale in the
+budget file -- and, within that, once per depth in `Z_VALUES_M`, default `"-500 0"` i.e. mid-depth then
+surface; override with a different space-separated list of meters if those two aren't what you want);
+`anim2_surface_buoyancy.py`; and `anim3_panels.py` (once per filter scale) -- the latter depends
+specifically on the `FIXED_REF=0` budgeting output (no `--fixed-reference` support in the plotting scripts
+themselves), so `submit_budgeting.sh` skips plots automatically if only `FIXED_REF=1` was requested.
+`plot5`/`plot7` also share the same `--time-min`/`--time-max` pooling (see their own Architecture entries)
+-- `plots.pbs` passes both explicitly (last 10 days of the run) to each rather than relying on their
+identical 15-30 day defaults. All three of `plot5`/`plot6`/`plot7` take `--z` (meters, nearest available
+cell center; each script's own default is mid-depth, `-500`) and bake the *resolved* depth into their output
+filename (`z{z_m}m`, from the actual nearest-cell value, not the raw `--z` request) so running the same
+filter scale at two different depths doesn't silently overwrite the
 first file with the second -- neither filename included depth at all before this.
 
 **Post-processing memory sizing.** Every `*.pbs` file's `#PBS -l select=...mem=...` is a *static* resource
