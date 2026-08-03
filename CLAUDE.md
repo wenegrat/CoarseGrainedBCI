@@ -105,7 +105,8 @@ exists by the time it's needed. `--implicit` alone (no bottom drag) is unaffecte
 is itself gated on `bottom_drag`.
 
 **Post-processing write mode (`--write-mode`, `01_filter_fields.py`/`03_energy_transfer.py`/
-`04_sfs_ke_budget.py`/`05_sfs_ape_budget.py`):** `{load,synchronous}`, default `load`. Both avoid the same
+`04_sfs_ke_budget.py`/`05_sfs_ape_budget.py`/`sweep2_energy_transfer.py`):** `{load,synchronous}`, default
+`load`. Both avoid the same
 underlying bug: writing a Dataset that still has unevaluated dask arrays computes them via dask's default
 *threaded* scheduler *during* the `.to_netcdf()` call, with multiple threads writing into the same HDF5 file
 handle -- a real, observed hang (a checkpoint write once sat at 0% progress for 38+ minutes with near-zero
@@ -409,19 +410,33 @@ rather than the old hardcoded KH range in different units), `sweep2`'s log messa
 "x and z", and `sweep3`'s `SymLogNorm(linthresh=...)` scales with the data's own magnitude (`vmax*1e-3`)
 instead of a fixed absolute value tuned for KH's much smaller Πₖ/Π_A magnitudes.
 
-Correction to a stale earlier note here: `sweep2` calls `calculate_energy_transfer()` **once**, passing the
-*entire* `filter_scales` array (unlike `03_energy_transfer.py`, which now loops one scale at a time -- see
-"Checkpointing and cross-script reuse" below). Without `--fixed-reference`, `rho_sorted`/`dz_sorted` start
-as `None`, so `calculate_energy_transfer()` runs `sorted_timeseries()` itself -- but that call sits *before*
-its own `for ℓ in filter_scales:` loop, so the sort happens once per `calculate_energy_transfer()` call, not
-once per filter scale (confirmed directly by reading the current code). What *is* still true and expensive
-for a 30-scale sweep: `calculate_energy_transfer()`'s per-scale loop has no checkpointing (deliberately left
-alone when `03` got it, specifically so `sweep2` -- the loop's other caller -- wouldn't be affected), so
-every scale's `filt_local_pes` reference stays alive via the lazy `Π_A` graph until the whole multi-scale
-result is concatenated at the end -- confirmed as the cause of a real OOM on a 384x384x64, n_scales=30
-sweep run (see the `filt_local_pes` comment in `aux02_ke_functions.py`). Parallelizing `sweep2` across
-scales would need this restructured first (pull the per-scale loop out to the script level, the way `03`'s
-now is) -- there's currently no natural per-scale seam to submit as separate concurrent jobs.
+`sweep2` used to call `calculate_energy_transfer()` **once**, passing the *entire* `filter_scales` array
+(unlike `03_energy_transfer.py`, which loops one scale at a time -- see "Checkpointing and cross-script
+reuse" below). Without `--fixed-reference`, `rho_sorted`/`dz_sorted` start as `None`, so
+`calculate_energy_transfer()` runs `sorted_timeseries()` itself -- but that call sits *before* its own `for
+ℓ in filter_scales:` loop, so the sort happens once per `calculate_energy_transfer()` call, not once per
+filter scale (correcting a stale claim this note used to make, confirmed directly by reading the code).
+What *was* still true and expensive for a many-scale sweep: `calculate_energy_transfer()`'s per-scale loop
+had no checkpointing (deliberately left alone when `03` got it, specifically so `sweep2` -- the loop's other
+caller -- wouldn't be affected), so every scale's not-yet-computed `ape_to_ke_exchange`/`w̄·b̄ᵣ` (still lazy
+even though `Π_A` itself is `.load()`ed and `filt_local_pes` freed per scale -- an earlier, narrower fix)
+stayed reachable via the growing list `calculate_energy_transfer()` builds internally before its own single
+`xr.concat()` at the end -- confirmed as the cause of a real OOM on a 384x384x64, n_scales=30 sweep run (see
+the `filt_local_pes` comment in `aux02_ke_functions.py`), and again, worse, on a 512x512x64, 40-day run
+(died mid-loop, at "Calculating cross-scale APE flux").
+
+**Fixed**: `sweep2_energy_transfer.py` now loops over filter scales one at a time *at the script level*
+(mirroring `03_energy_transfer.py`'s exact pattern) instead of delegating the whole array to
+`calculate_energy_transfer()` in one call, checkpointing each scale's fully-computed result to disk via
+`write_dataset()` (new `--write-mode load|synchronous` flag, same semantics as `03`'s) before freeing it and
+moving to the next -- bounding peak memory to ~1 scale regardless of scale count. `calculate_energy_transfer()`
+itself is still unchanged (both callers now use it identically: once per scale, with a single-element
+`filter_scales` list), so this doesn't touch the function both scripts share. `sweep_transfer.pbs` defaults
+`WRITE_MODE=synchronous` for the same reason `budgeting.pbs`/`budgeting_filter.pbs` do. Verified against
+real local data: old and new code produce bit-identical output from the same input (all 8 variables, exact
+`np.array_equal`), and the checkpoint-resume path (pre-seeding one scale's checkpoint) correctly skips
+recomputing it. Parallelizing `sweep2` across scales -- still not done -- now has the natural per-scale seam
+to submit as separate concurrent jobs that this restructuring was a prerequisite for.
 
 `sweep3` also gained a second row of panels that was previously missing: it already computed a `1/ℓ`
 coordinate (`inv_scale`) specifically so a proper spectrum line plot could use it as the x-axis, but the
