@@ -492,6 +492,29 @@ hairline stroke rather than truly disabling it, leaving the antialiasing gap exp
 color. Leaving `linewidth` untouched (matplotlib's own nonzero default) is what makes `edgecolor="face"`
 actually work: the stroke it paints is nonzero-width and same-color-as-fill, so it paints over the gap.
 
+`plot7_flux_phase_space.py` is new: a 2x3 panel of net cross-scale flux contribution (conditional mean ×
+JPDF, same concept as `plot5_vorticity_strain_flux.py`'s net-contribution row) for Πₖ, Π_A, Πₖ+Π_A
+(columns), shown in two different filtered-field phase spaces (rows) -- vorticity-strain (ζ̄/f0, σ̄/|f0|,
+row 1) and vorticity-divergence (ζ̄/f0, δ̄/|f0|, row 2, δ̄ = ∂ū/∂x + ∂v̄/∂y). Shares `plot5`'s data-loading
+pipeline verbatim (`fix_orientation()`, the `ConsecutiveIterations` pair dedup, `--time-min`/`--time-max`
+pooling with the same 15-30 day default and duration error-checking) rather than importing from it --
+matches this pipeline's existing convention of small helper duplication across sibling `plot5`/`plot6`/
+`anim3_panels.py` scripts (e.g. `fix_orientation()` itself) rather than centralizing everything in
+`aux03_plotting.py`. The JPDF/conditional-mean/net-contribution machinery is generalized into local
+functions (`compute_jpdf()`, `cond_mean_and_net()`, `percentile_levels()`) parameterized over an arbitrary
+(x, y) phase-space pair, since this script -- unlike `plot5` -- applies that machinery twice per flux
+quantity, once per row, each with its own JPDF (row 1 and row 2 are genuinely different distributions, not
+just different aggregations of the same one). Two things follow from that: δ̄'s bin edges are symmetric
+about zero (`-div_max` to `+div_max`), unlike σ̄'s one-sided `0` to `sigma_max` -- divergence can be negative
+(convergence), unlike a strain magnitude -- and row 2 gets a `δ=0` reference line instead of row 1's `σ=|ζ|`
+SD/AVD/CVD boundary (that specific partition is a vorticity-strain-space concept from Balwada et al. with no
+obvious equivalent in vorticity-divergence space, so row 2 doesn't attempt one). Both rows' JPDF contour
+legend is unified into a single figure-level legend keyed by *percentile position* in `--percentiles`
+(matching linestyle to list position, not to sorted contour value) -- "50% HDR" means the same thing
+(the region containing 50% of that row's own probability mass) in both rows even though the two rows' actual
+density thresholds for that percentile differ, the same way percentile-based color limits already stay
+meaningful across different filter scales elsewhere in this pipeline.
+
 **Plot units audited: everything energy-related is per-unit-mass (Boussinesq), m² s⁻² for energy densities
 and m² s⁻³ for transfer/dissipation rates -- there is no ρ₀ factor anywhere in the actual KE-side
 computation (`aux02_ke_functions.py`), matching the APE side's own explicit `g·ρ·z/ρ0` convention
