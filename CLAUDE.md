@@ -613,12 +613,26 @@ quantity get plotted across this pipeline, and only one of them was actually mis
   `sweep3_plot_transfer_spectrum.py` (both pool/average over a time range) by keeping only the first member
   of each pair -- `ds.isel(time=slice(0, None, 2))` -- applied to the *full*, unsliced time axis immediately
   after loading, before any `--time-min`/`--time-max`/`--min-time-days` selection, so the pair parity stays
-  anchored to the simulation start regardless of the chosen window. `sweep1_filter_fields.py`'s
-  `--n-time-skip` already accounted for this correctly (`(i // 2) % n_time_skip == 0`, dividing the raw
-  index by 2 before the skip logic) -- if extending this fix to more scripts, that's the existing precedent
-  to match. `plot3_budgets.py` (each raw point plotted as its own point on a line) and `anim3_panels.py`
-  (each raw point is its own animation frame) show the same underlying duplication but only as a cosmetic
-  double-point/stutter, not a statistical pooling bias, and were left as-is.
+  anchored to the simulation start regardless of the chosen window. `plot3_budgets.py` (each raw point
+  plotted as its own point on a line) and `anim3_panels.py` (each raw point is its own animation frame) show
+  the same underlying duplication but only as a cosmetic double-point/stutter, not a statistical pooling
+  bias, and were left as-is.
+
+  `sweep1_filter_fields.py`'s `--n-time-skip` (`(i // 2) % n_time_skip == 0`, dividing the raw index by 2
+  before the skip logic) looked like it already accounted for this, but didn't: at the default
+  `n_time_skip=1`, `(i // 2) % 1` is always `0`, so it kept *every* raw row -- a no-op, not a dedup. The
+  `i // 2` structure only ever skipped whole *real* output times (e.g. `n_time_skip=2` skips every other
+  real output, but still keeps both pair members of whichever ones it keeps) -- it never collapsed the
+  pairing itself. `sweep2_energy_transfer.py` does no deduplication of its own either, so this meant the
+  entire sweep pipeline processed every real output time *twice* by default -- confirmed directly: a 40-day,
+  12h-output run reported 181 time steps here, not the ~81 a reader would expect -- doubling compute cost
+  and memory pressure for exactly the step that OOM'd (see the `sweep2_energy_transfer.py` checkpointing
+  entry below). Fixed the same way as `plot5`/`sweep3`: `ds.isel(time=slice(0, None, 2))` before the
+  `--n-time-skip` logic, which then simplifies from the `i // 2` trick to a plain `ds.isel(time=slice(0,
+  None, n_time_skip))` -- there's no more pairing left for it to account for. Verified directly: a 33-raw-
+  row dataset (16 pairs + 1 unpaired final point, see above) now reports 17 time steps at the default
+  `n_time_skip=1` (matching `⌈33/2⌉`) and 9 at `n_time_skip=2`, with the actual retained timestamps landing
+  on clean, non-fractional nominal days (`0, 1, 2, ..., 8`), not the fractional companion offsets.
 - **Oceanostics bug (fixed)**: `GaussianFilter(; dims=(1,2), σ)` used to crash (heap corruption -> SIGILL)
   on a grid with real `Ny>1` and periodic y -- filed as
   [tomchor/Oceanostics.jl#262](https://github.com/tomchor/Oceanostics.jl/issues/262), with a minimal

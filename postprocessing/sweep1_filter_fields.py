@@ -31,9 +31,19 @@ print("Loading data and grid...")
 ds = load_dataset_and_grid(filename)
 ds = ds.chunk(dict(time=1))
 
-i = np.arange(ds.sizes["time"])
+# baroclinic_adjustment.jl's :fields writer uses schedule=ConsecutiveIterations(TimeInterval(...)), writing
+# TWO consecutive model iterations (nominal output time, then the next iteration ~seconds-minutes later) at
+# every nominal output time -- see plot5_vorticity_strain_flux.py's comment on this exact structure for why
+# (04_sfs_ke_budget.py's tendency finite-difference needs a close pair). This sweep has no tendency term to
+# compute, so it never needed the pairing, but never dropped it either -- every downstream filter/transfer
+# step ran twice per real output time for no additional information (confirmed directly: a 40-day, 12h-
+# output run processed 181 time steps here, not the ~81 a reader would expect). Keep only the first member
+# of each pair -- same ::2 pattern already used for this exact structure elsewhere -- before the existing
+# --n-time-skip logic, which can now be a plain slice instead of the i//2 trick previously needed to skip
+# whole real output times while still keeping both members of whichever pairs it kept.
+ds = ds.isel(time=slice(0, None, 2))
 n_time_skip = args.n_time_skip
-ds = ds.isel(time=(i // 2) % n_time_skip == 0)
+ds = ds.isel(time=slice(0, None, n_time_skip))
 print(f"Dataset loaded: {len(ds.time)} time steps")
 
 # Filter scales (FWHM, meters): log-spaced between a data-driven min/max unless overridden on the CLI, so
