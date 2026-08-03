@@ -85,15 +85,21 @@ print("Calculating cross-scale transfer terms...")
 # before moving to the next scale, same as it already does for calculate_energy_transfer()'s eager Π_A.
 transfer_list = []
 checkpoint_files = []
-for ℓ in filter_scales:
+n_scales = len(filter_scales)
+for i, ℓ in enumerate(filter_scales):
     checkpoint_path = PP_OUTPUT / (Path(filename).stem + f"_energy_transfer_sweep_checkpoint_l{ℓ:.4f}{ref_suffix}.nc")
     checkpoint_files.append(checkpoint_path)
 
     if checkpoint_path.exists():
-        print(f"\n--- filter_scale = {ℓ:.4f} (loading from checkpoint) ---")
+        print(f"\n--- filter {i+1}/{n_scales}: scale = {ℓ:.4f} (loading from checkpoint) ---")
         transfer_list.append(xr.open_dataset(str(checkpoint_path), decode_times=False).chunk(chunks))
         continue
 
+    # Printed here (not inside calculate_energy_transfer(), which only knows the single-element list this
+    # scale's call gets) so progress through the whole sweep is visible -- otherwise the "--- filter_scale =
+    # ... ---" line the shared function itself prints right after gives no sense of how many scales remain,
+    # which matters for a 30-scale sweep where each one can take minutes.
+    print(f"\n=== Filter {i+1}/{n_scales} ===")
     transfer_ℓ = calculate_energy_transfer(ds, [ℓ],
                                            ds_filt=ds_filt,
                                            rho_sorted=rho_sorted,
