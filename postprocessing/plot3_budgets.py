@@ -78,8 +78,14 @@ ape_terms = {
     r"$\Pi_A$":              ("∫Π_A dV",            budget_colors["flux"]),
     r"$-\varepsilon_A^s$":   ("∫-ε_Aˢ dV",          budget_colors["dissipation"]),
     r"$E_K^s \to E_A^s$":    ("∫(SFS KE->APE) dV",  budget_colors["exchange"]),
-    r"$R^s$":                ("∫Rˢ dV",             "C4"),
 }
+if not fixed_reference:
+    # Rˢ corrects for the sorted reference profile's own time-dependence -- under --fixed-reference the
+    # profile is sorted once at t=0 and broadcast to every timestep (sorted_timeseries(),
+    # aux01_pe_functions.py), so its time-derivative -- and hence Rˢ -- is identically zero by
+    # construction (confirmed directly against real output: max|∫Rˢ dV| = 0.0 exactly, every timestep).
+    # Plotting an always-zero line/legend entry would just be clutter.
+    ape_terms[r"$R^s$"] = ("∫Rˢ dV", "C4")
 #---
 
 #+++ Plot 2×2 figure
@@ -130,14 +136,19 @@ for col in range(2):
 ke_handles, ke_labels = axes[0, 1].get_legend_handles_labels()
 ape_handles, ape_labels = axes[1, 1].get_legend_handles_labels()
 axes[0, 1].legend(ke_handles, ke_labels, fontsize=13, loc="upper right", frameon=True, fancybox=True, framealpha=0.1)
-rs_idx = ape_labels.index(r"$R^s$")
-rs_handle = ape_handles.pop(rs_idx)
-rs_label  = ape_labels.pop(rs_idx)
-blank = Line2D([], [], linestyle="None")
-n_pad = len(ape_handles) - 1
-ape_handles = [rs_handle] + [blank] * n_pad + ape_handles
-ape_labels  = [rs_label]  + [""]    * n_pad + ape_labels
-axes[1, 1].legend(ape_handles, ape_labels, fontsize=13, loc="upper right", frameon=True, fancybox=True, framealpha=0.1, ncol=2)
+if r"$R^s$" in ape_labels:
+    rs_idx = ape_labels.index(r"$R^s$")
+    rs_handle = ape_handles.pop(rs_idx)
+    rs_label  = ape_labels.pop(rs_idx)
+    blank = Line2D([], [], linestyle="None")
+    n_pad = len(ape_handles) - 1
+    ape_handles = [rs_handle] + [blank] * n_pad + ape_handles
+    ape_labels  = [rs_label]  + [""]    * n_pad + ape_labels
+    axes[1, 1].legend(ape_handles, ape_labels, fontsize=13, loc="upper right", frameon=True, fancybox=True, framealpha=0.1, ncol=2)
+else:
+    # No Rˢ to isolate into its own column (dropped under --fixed-reference, see ape_terms above) --
+    # a plain single-column legend, same as the KE panel's.
+    axes[1, 1].legend(ape_handles, ape_labels, fontsize=13, loc="upper right", frameon=True, fancybox=True, framealpha=0.1)
 
 for ax, letter in zip(axes.flat, "abcd"):
     ax.text(0.02, 0.97, f"({letter})", transform=ax.transAxes,

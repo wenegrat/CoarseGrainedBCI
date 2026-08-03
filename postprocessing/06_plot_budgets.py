@@ -51,9 +51,13 @@ ape_vars = {
     "∫Π_A dV":           budget_colors["flux"],
     "∫-ε_Aˢ dV":         budget_colors["dissipation"],
     "∫(SFS KE->APE) dV": budget_colors["exchange"],
-    "∫Rˢ dV":            "C4",
     "residual_A":         budget_colors["residual"],
 }
+if not fixed_reference:
+    # Rˢ corrects for the sorted reference profile's own time-dependence -- identically zero under
+    # --fixed-reference, since the profile is sorted once at t=0 and broadcast to every timestep
+    # (sorted_timeseries(), aux01_pe_functions.py). See plot3_budgets.py's comment on the same term.
+    ape_vars["∫Rˢ dV"] = "C4"
 #---
 
 #+++ Plot one figure per filter scale (KE on top, APE on bottom)
