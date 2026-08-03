@@ -194,7 +194,7 @@ print(f"  Vorticity-divergence JPDF percentile levels -> {levels_zd}")
 
 #+++ Plot: 2 rows (vorticity-strain, vorticity-divergence) x 3 columns (Πₖ, Π_A, Πₖ+Π_A), net contribution only
 print("Building figure...")
-fig, axes = plt.subplots(2, 3, figsize=(14, 9), constrained_layout=True)
+fig, axes = plt.subplots(2, 3, figsize=(13, 7.5), constrained_layout=True)
 
 _LINESTYLES = ["dotted", "dashed", "solid", "dashdot"]
 names = ["Πₖ", "Π_A", "Πₖ+Π_A"]
@@ -207,6 +207,25 @@ def add_jpdf_contours(ax, x_centers, y_centers, jpdf, level_by_percentile):
         ax.contour(x_centers, y_centers, jpdf.T, levels=[level_by_percentile[p]], colors="0.25",
                    linewidths=1.0, linestyles=_LINESTYLES[i % len(_LINESTYLES)])
 
+# Colorbar as an inset in the panel's upper-right corner rather than a separate axes alongside it -- both
+# rows' JPDFs are concentrated near ζ=0 and taper off toward the axes corners, and the upper-right corner is
+# reliably the sparsest of the four (verified by rendering and inspecting -- the lower corners overlap real
+# data too much to use). An opaque backing patch (added first, so it sits behind the colorbar) keeps the
+# tick labels legible regardless of whatever data would otherwise sit underneath.
+def add_inset_colorbar(ax, im):
+    x0, y0, w, h = 0.80, 0.58, 0.06, 0.36
+    pad = 0.018
+    backing = ax.inset_axes([x0 - 2.5*pad, y0 - pad, w + 5*pad, h + 2*pad])
+    backing.set_facecolor("white")
+    backing.set_xticks([]); backing.set_yticks([])
+    for spine in backing.spines.values():
+        spine.set_visible(False)
+    cax = ax.inset_axes([x0, y0, w, h])
+    cbar = fig.colorbar(im, cax=cax)
+    cbar.ax.tick_params(labelsize=6.5, length=2)
+    cbar.set_label("m² s⁻³", fontsize=7, labelpad=2)
+    return cbar
+
 for col, name in enumerate(names):
     ax = axes[0, col]
     net = net_zs[name]
@@ -217,10 +236,11 @@ for col, name in enumerate(names):
     z = np.linspace(-zmax, zmax, 200)
     ax.plot(z, np.abs(z), "--", color="gray", lw=1)  # σ=|ζ| strain/vorticity-dominated boundary
     add_jpdf_contours(ax, zeta_centers, sigma_centers, jpdf_zs, levels_zs)
+    add_inset_colorbar(ax, im)
     ax.set_title(name, fontsize=12)
-    ax.set_xlabel(r"$\bar\zeta / f_0$")
+    # Shares the x-axis with the panel below (same ζ/f0 bins) -- label/ticks live on the bottom row only.
+    ax.tick_params(labelbottom=False)
     ax.set_ylabel(r"$\bar\sigma / |f_0|$")
-    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label="m² s⁻³")
 
 for col, name in enumerate(names):
     ax = axes[1, col]
@@ -230,15 +250,15 @@ for col, name in enumerate(names):
     im.set_edgecolor("face")
     ax.axhline(0, color="gray", lw=1, ls="--")  # convergence/divergence boundary
     add_jpdf_contours(ax, zeta_centers, div_centers, jpdf_zd, levels_zd)
+    add_inset_colorbar(ax, im)
     ax.set_title(name, fontsize=12)
     ax.set_xlabel(r"$\bar\zeta / f_0$")
     ax.set_ylabel(r"$\bar\delta / |f_0|$")
-    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label="m² s⁻³")
 
 # Row labels in the left margin, since "net contribution" + phase-space axes already say what each row is
 # once labeled -- repeating a full title on every one of the 6 panels would be redundant.
-fig.text(-0.01, 0.77, "vorticity–strain", rotation=90, va="center", ha="center", fontsize=12, fontweight="bold")
-fig.text(-0.01, 0.27, "vorticity–divergence", rotation=90, va="center", ha="center", fontsize=12, fontweight="bold")
+fig.text(-0.01, 0.76, "vorticity–strain", rotation=90, va="center", ha="center", fontsize=12, fontweight="bold")
+fig.text(-0.01, 0.26, "vorticity–divergence", rotation=90, va="center", ha="center", fontsize=12, fontweight="bold")
 
 legend_handles = [Line2D([0], [0], color="0.25", lw=1.2, linestyle=_LINESTYLES[i % len(_LINESTYLES)],
                         label=f"JPDF {p:g}% HDR") for i, p in enumerate(args.percentiles)]
