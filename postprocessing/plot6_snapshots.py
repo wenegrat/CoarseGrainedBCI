@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Snapshot of buoyancy, Rossby number, and cross-scale KE/APE flux at one filter scale."""
+"""Snapshot of buoyancy, Rossby number, buoyancy conversion, and cross-scale KE/APE flux at one filter scale."""
 
 #+++ Imports
 import os
@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 
 #+++ Configuration
 import argparse
-parser = argparse.ArgumentParser(description="Plot a 2x2 snapshot: buoyancy, Rossby number ζ/f, cross-scale KE flux Πₖ, cross-scale APE flux Π_A")
+parser = argparse.ArgumentParser(description="Plot a 2x3 snapshot: buoyancy, Rossby number ζ/f, buoyancy conversion (SFS APE->KE), cross-scale KE flux Πₖ, cross-scale APE flux Π_A, and their sum Πₖ+Π_A")
 parser.add_argument("--filename", default="output/bci_Nx48_Ny48_Nz8.nc", help="Path to simulation NetCDF file")
 parser.add_argument("--filter-scale", type=float, default=None, help="Target filter length scale in meters (nearest available; defaults to the smallest available)")
 parser.add_argument("--time", type=float, default=None, help="Target time in days (nearest available; defaults to the last available)")
@@ -71,12 +71,18 @@ z_sel = float(b.z_aac)
 
 Pi_K = fix_orientation(ke_fields["Π_K"].sel(filter_scale=ℓ, time=t_sel, method="nearest")).sel(z_aac=args.z, method="nearest")
 Pi_A = fix_orientation(ape_fields["Π_A"].sel(filter_scale=ℓ, time=t_sel, method="nearest")).sel(z_aac=args.z, method="nearest")
+Pi_total = Pi_K + Pi_A
+
+# Buoyancy conversion: the SFS APE->KE exchange term, filter(w·b_r) - filter(w)·filter(b_r) -- the
+# sub-filter-scale covariance of w and reference buoyancy (aux02_ke_functions.py). Same variable
+# anim3_panels.py already plots as its "conversion" panel; lives in the same ke_fields file as Πₖ.
+conv = fix_orientation(ke_fields["SFS APE->KE exchange"].sel(filter_scale=ℓ, time=t_sel, method="nearest")).sel(z_aac=args.z, method="nearest")
 print(f"z = {z_sel:.1f} m")
 #---
 
 #+++ Plot
 print("Building figure...")
-fig, axes = plt.subplots(2, 2, figsize=(11, 10), constrained_layout=True)
+fig, axes = plt.subplots(2, 3, figsize=(16, 10), constrained_layout=True)
 
 def plot_field(ax, field, title, unit, cmap="RdBu_r", contour_field=None):
     vmax = np.nanpercentile(np.abs(field.values), args.clim_percentile)
@@ -99,13 +105,16 @@ def plot_field(ax, field, title, unit, cmap="RdBu_r", contour_field=None):
     ax.set_ylabel("y [km]")
     fig.colorbar(im, ax=ax, shrink=0.85, label=unit)
 
-# Units: b is a Boussinesq buoyancy (acceleration, m s⁻²); ζ/f is dimensionless by construction; Πₖ/Π_A are
-# raw (unintegrated) specific cross-scale fluxes, m² s⁻³ -- no ρ₀ factor anywhere in this codebase's fully
-# Boussinesq/per-unit-mass convention (see aux02_ke_functions.py's calculate_cross_scale_ke_flux()).
+# Units: b is a Boussinesq buoyancy (acceleration, m s⁻²); ζ/f is dimensionless by construction; conv/Πₖ/
+# Π_A/their sum are all raw (unintegrated) specific cross-scale fluxes, m² s⁻³ -- no ρ₀ factor anywhere in
+# this codebase's fully Boussinesq/per-unit-mass convention (see aux02_ke_functions.py's
+# calculate_cross_scale_ke_flux()).
 plot_field(axes[0,0], b,         f"buoyancy b\nt={t_days:.1f}d, z={z_sel:.0f}m",                    "m s⁻²")
 plot_field(axes[0,1], zeta_norm, f"Rossby number ζ/f\nt={t_days:.1f}d, z={z_sel:.0f}m",              "")
+plot_field(axes[0,2], conv,      f"buoyancy conversion (SFS APE→KE, ℓ={ℓ_km}km)\nt={t_days:.1f}d, z={z_sel:.0f}m", "m² s⁻³", contour_field=b)
 plot_field(axes[1,0], Pi_K,      f"cross-scale KE flux Πₖ (ℓ={ℓ_km}km)\nt={t_days:.1f}d, z={z_sel:.0f}m",  "m² s⁻³", contour_field=b)
 plot_field(axes[1,1], Pi_A,      f"cross-scale APE flux Π_A (ℓ={ℓ_km}km)\nt={t_days:.1f}d, z={z_sel:.0f}m", "m² s⁻³", contour_field=b)
+plot_field(axes[1,2], Pi_total,  f"total cross-scale flux Πₖ+Π_A (ℓ={ℓ_km}km)\nt={t_days:.1f}d, z={z_sel:.0f}m", "m² s⁻³", contour_field=b)
 
 fig.suptitle(f"{stem}: z={z_sel:.0f}m snapshots", fontsize=14)
 
