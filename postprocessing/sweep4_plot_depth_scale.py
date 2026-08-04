@@ -68,19 +68,31 @@ def horiz_time_mean(da):
 
 Pi_K_zl = horiz_time_mean(et_avg["Π_K"])
 Pi_A_zl = horiz_time_mean(et_avg["Π_A"])
+conv_zl = horiz_time_mean(et_avg["SFS APE->KE exchange"])
 Pi_total_zl = Pi_K_zl + Pi_A_zl
+
+# conv_zl(z, ℓ) is a *cumulative*-in-scale diagnostic (like Π_K/Π_A) -- its value at a given ℓ reflects
+# exchange at all scales below ℓ, not the exchange happening *at* scale ℓ. d/dℓ recovers that scale-local
+# transfer density (see sweep3_plot_transfer_spectrum.py's own comment on this, and the inherited
+# postprocessing/S3_plot_sweep.py, for the same technique). Horizontal/time averaging (above) and this
+# derivative act on independent axes so the order doesn't change the result -- differentiating the smaller,
+# already-reduced (z, filter_scale) array here is cheaper than differentiating the full field beforehand.
+dconv_zl = conv_zl.differentiate("filter_scale")
 print("Done!")
 #---
 
-#+++ Plot: depth vs. 1/ℓ, one panel each for Π_K, Π_A, and their sum -- each with its own colorscale
-# (rather than one shared vmax) since Π_K and Π_A can differ by an order of magnitude or more, and a
-# shared scale would wash out whichever term is smaller.
+#+++ Plot: depth vs. 1/ℓ, one panel each for Π_K, Π_A, the ℓ-derivative of the buoyancy conversion term
+# (SFS APE->KE exchange -- d/dℓ divides out an extra factor of length, so this panel is m s⁻³, not the
+# other three's m² s⁻³, and gets its own vmax below like they already do), and Π_K+Π_A -- each with its own
+# colorscale (rather than one shared vmax) since these terms can differ by an order of magnitude or more,
+# and a shared scale would wash out whichever term is smaller.
 inv_scale = 1.0 / et.filter_scale.values
-fig, axes = plt.subplots(1, 3, figsize=(16, 5), constrained_layout=True, sharey=True)
+fig, axes = plt.subplots(1, 4, figsize=(20, 5), constrained_layout=True, sharey=True)
 
 panels = [
     (Pi_K_zl,     "KE cross-scale transfer  Π_K(z, ℓ)"),
     (Pi_A_zl,     "APE cross-scale transfer  Π_A(z, ℓ)"),
+    (dconv_zl,    "Buoyancy conversion ℓ-derivative  (z, ℓ)"),
     (Pi_total_zl, "Total cross-scale transfer  Π_K+Π_A(z, ℓ)"),
 ]
 for ax, (da, title) in zip(axes, panels):

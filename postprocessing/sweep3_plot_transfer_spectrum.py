@@ -65,19 +65,35 @@ inv_Ld = 1.0 / Ld
 print(f"  Deformation radius Ld = {Ld/1e3:.2f} km")
 #---
 
-#+++ Plot: Hovmöller (time vs. scale) on top, time-averaged spectrum (vs. scale) below
-fig, axes = plt.subplots(2, 2, figsize=(12, 9), constrained_layout=True)
+#+++ Plot: Hovmöller (time vs. scale) on top, time-averaged spectrum (vs. scale) below -- one column each
+# for Πₖ, Π_A, and the ℓ-derivative of the buoyancy conversion term (SFS APE->KE exchange). Πₖ(ℓ)/Π_A(ℓ)/
+# the raw conversion term ∫(SFS APE->KE) dV are all *cumulative*-in-scale diagnostics -- their value at a
+# given ℓ reflects exchange happening at all scales below ℓ, not the exchange happening *at* scale ℓ.
+# d/dℓ recovers that scale-local transfer density (a spectral-transfer-function-style reconstruction from
+# a cumulative flux). See postprocessing/S3_plot_sweep.py (an inherited, unadapted KH-era script, not part
+# of this pipeline) for the same technique via xr.DataArray.differentiate("filter_scale"), which this
+# mirrors -- including keeping 1/ℓ as the x-axis even though the derivative itself is w.r.t. plain ℓ.
+fig, axes = plt.subplots(2, 3, figsize=(17, 9), constrained_layout=True)
 
-# et's own ∫Π_K dV/∫Π_A dV are raw domain integrals of already-specific (per-unit-mass) fields, so they come
-# out in m^5 s^-3, not m^2 s^-3 -- not comparable to the raw Πₖ/Π_A fields plotted elsewhere in the
-# pipeline. Same fix as plot3_budgets.py/anim3_panels.py: divide by domain volume for a genuine
-# domain-averaged rate in m^2 s^-3.
+# et's own ∫Π_K dV/∫Π_A dV/∫(SFS APE->KE) dV are raw domain integrals of already-specific (per-unit-mass)
+# fields, so they come out in m^5 s^-3, not m^2 s^-3 -- not comparable to the raw Πₖ/Π_A/conversion fields
+# plotted elsewhere in the pipeline. Same fix as plot3_budgets.py/anim3_panels.py: divide by domain volume
+# for a genuine domain-averaged rate in m^2 s^-3.
 V_total = et.attrs["Lx"] * et.attrs["Ly"] * et.attrs["Lz"]
 print(f"  Domain volume V = {V_total:.4e} m^3 (normalizing ∫Π dV terms to domain-averaged m² s⁻³)")
 
-vmax = float(max(abs(et["∫Π_K dV"] / V_total).max(), abs(et["∫Π_A dV"] / V_total).max()))
+# d/dℓ divides out an extra factor of length -- m² s⁻³ becomes m s⁻³, no longer comparable to Πₖ/Π_A's own
+# units, so this gets its own color scale/vmax below rather than sharing hovmoller_vars'/var_labels' loop.
+# Differentiated here, before any time-reduction: differentiation (along filter_scale) and the mean/std
+# reduction (along time) used below for the spectrum panel are independent axes and would commute for the
+# mean, but NOT for std (a nonlinear, quadratic-based reduction) -- computing the derivative first keeps
+# the eventual std band the genuine temporal spread of the exact quantity being plotted.
+d_conv = (et["∫(SFS APE->KE) dV"] / V_total).differentiate("filter_scale")
+
+hovmoller_vars = ["∫Π_K dV", "∫Π_A dV"]
+vmax = float(max(abs(et[var] / V_total).max() for var in hovmoller_vars))
 linthresh = vmax * 1e-3  # scales with the data's own magnitude, rather than a fixed absolute value
-for ax, var in zip(axes[0], ["∫Π_K dV", "∫Π_A dV"]):
+for ax, var in zip(axes[0, :2], hovmoller_vars):
     (et[var] / V_total).plot.pcolormesh(x="time", y="filter_scale", ax=ax,
                             cmap="RdBu_r", vmin=-vmax, vmax=vmax,
                             norm=plt.matplotlib.colors.SymLogNorm(linthresh=linthresh, vmin=-vmax, vmax=vmax),
@@ -85,13 +101,24 @@ for ax, var in zip(axes[0], ["∫Π_K dV", "∫Π_A dV"]):
     ax.set_yscale("log")
     ax.set_ylabel("ℓ  [m]")
 
+vmax_conv = float(abs(d_conv).max())
+linthresh_conv = vmax_conv * 1e-3
+d_conv.plot.pcolormesh(x="time", y="filter_scale", ax=axes[0, 2],
+                        cmap="RdBu_r", vmin=-vmax_conv, vmax=vmax_conv,
+                        norm=plt.matplotlib.colors.SymLogNorm(linthresh=linthresh_conv, vmin=-vmax_conv, vmax=vmax_conv),
+                        cbar_kwargs={"label": "m s⁻³"})
+axes[0, 2].set_yscale("log")
+axes[0, 2].set_ylabel("ℓ  [m]")
+
 axes[0,0].set_title("KE cross-scale transfer (Hovmöller)")
 axes[0,1].set_title("APE cross-scale transfer (Hovmöller)")
+axes[0,2].set_title("Buoyancy conversion ℓ-derivative (Hovmöller)")
 
 # Time-averaged spectrum: mean (and ±1 std across time) of Π_K/Π_A vs. 1/ℓ, over the [--min-time-days,
 # --max-time-days] window already applied to et above.
 var_labels = {"∫Π_K dV": r"$\langle\Pi_K\rangle$", "∫Π_A dV": r"$\langle\Pi_A\rangle$"}
-for ax, var, title in zip(axes[1], ["∫Π_K dV", "∫Π_A dV"], ["KE cross-scale transfer spectrum", "APE cross-scale transfer spectrum"]):
+spectrum_titles = ["KE cross-scale transfer spectrum", "APE cross-scale transfer spectrum"]
+for ax, var, title in zip(axes[1, :2], hovmoller_vars, spectrum_titles):
     mean = et[var].mean("time") / V_total
     std = et[var].std("time") / V_total
     ax.plot(et.inv_scale, mean, marker="o", color="C0")
@@ -104,6 +131,20 @@ for ax, var, title in zip(axes[1], ["∫Π_K dV", "∫Π_A dV"], ["KE cross-scal
     ax.set_ylabel(f"{var_labels[var]}  [m² s⁻³]")
     ax.set_title(title)
     ax.grid(True, alpha=0.3)
+
+ax = axes[1, 2]
+mean_conv = d_conv.mean("time")
+std_conv = d_conv.std("time")
+ax.plot(et.inv_scale, mean_conv, marker="o", color="C0")
+ax.fill_between(et.inv_scale, mean_conv - std_conv, mean_conv + std_conv, color="C0", alpha=0.25)
+ax.axhline(0, color="gray", lw=0.5)
+ax.axvline(inv_Ld, color="k", ls="--", lw=1.2, label=f"$L_d$={Ld/1e3:.1f}km")
+ax.legend(fontsize=9, loc="best")
+ax.set_xscale("log")
+ax.set_xlabel(r"$1/\ell$  [m$^{-1}$]")
+ax.set_ylabel(r"$\partial_\ell\langle E_A^s\to E_K^s\rangle$  [m s⁻³]")
+ax.set_title("Buoyancy conversion ℓ-derivative spectrum")
+ax.grid(True, alpha=0.3)
 
 label = run_label(et.attrs)
 if label:
