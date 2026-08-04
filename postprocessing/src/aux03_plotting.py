@@ -7,14 +7,13 @@ This module contains visualization functions for energy timeseries data.
 import matplotlib.pyplot as plt
 
 def run_label(attrs):
-    """Return a formatted string with Re, Ri, Pr from dataset attributes."""
+    """Return a formatted string with Re, Ri from dataset attributes (Pr deliberately omitted -- every
+    BCI run uses the same fixed Pr, so labeling it on every plot was just noise)."""
     parts = []
     if "Re" in attrs:
         parts.append(f"Re = {int(attrs['Re'])}")
     if "Ri" in attrs:
         parts.append(f"Ri = {float(attrs['Ri']):.2f}")
-    if "Pr" in attrs:
-        parts.append(f"Pr = {float(attrs['Pr']):.0f}")
     return ",  ".join(parts)
 
 budget_colors = {
