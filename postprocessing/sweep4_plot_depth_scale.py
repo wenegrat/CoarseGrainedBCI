@@ -17,6 +17,7 @@ parser = argparse.ArgumentParser(description="Plot depth vs. filter-scale struct
 parser.add_argument("--filename", default="output/bci_Nx48_Ny48_Nz8.nc", help="Path to simulation NetCDF file (used to derive energy transfer filename)")
 parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load output produced with the fixed-in-time reference profile")
 parser.add_argument("--min-time-days", type=float, default=5.0, help="Exclude time samples before this (in days) from the time average -- the first several saved samples are dominated by a large initial transient unrelated to the ongoing cascade (default 5.0)")
+parser.add_argument("--max-time-days", type=float, default=None, help="Exclude time samples after this (in days) from the time average. Defaults to the latest available time (no upper restriction) -- e.g. pass 30 to see what the plot would look like using only the first 30 days of a longer run.")
 args = parser.parse_args()
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
@@ -35,6 +36,15 @@ ref_suffix = "_fixed_ref" if args.fixed_reference else ""
 print("Loading energy transfer data...")
 input_filename = str(PP_OUTPUT / (Path(filename).stem + f"_energy_transfer_sweep{ref_suffix}.nc"))
 et = xr.open_dataset(input_filename, decode_timedelta=False).chunk({"time": 1})
+
+# baroclinic_adjustment.jl's :fields writer uses schedule=ConsecutiveIterations(TimeInterval(...)), which
+# writes TWO consecutive model iterations (nominal output time, then the next iteration ~seconds-minutes
+# later) at every nominal output time -- see plot5_vorticity_strain_flux.py's/sweep3_plot_transfer_spectrum.py's
+# comments on this same structure. This script's time average was missing the corresponding dedup (sweep3
+# already has it) -- silently double-weighting near-identical snapshot pairs. Keep only the first member of
+# each pair, on the full time axis before any time-based selection, so the pair parity stays anchored to the
+# simulation start.
+et = et.isel(time=slice(0, None, 2))
 print(f"  Loaded: {input_filename}")
 print(f"  Time steps: {len(et.time)}   Filter scales: {len(et.filter_scale)}   Depths: {len(et.z_aac)}")
 
@@ -44,10 +54,13 @@ ds_grid = load_dataset_and_grid(filename)
 dA = ds_grid.Δx_caa * ds_grid.Δy_aca
 #---
 
-#+++ Exclude initial transient, then horizontally- and time-average Π_K/Π_A at each (filter_scale, z)
-et_avg = et.sel(time=slice(args.min_time_days * 86400, None))
+#+++ Restrict to [--min-time-days, --max-time-days] (default: full available range), then horizontally- and
+# time-average Π_K/Π_A at each (filter_scale, z)
+t_max_sec = args.max_time_days * 86400 if args.max_time_days is not None else float(et.time.max())
+et_avg = et.sel(time=slice(args.min_time_days * 86400, t_max_sec))
 n_times_used = len(et_avg.time)
-print(f"  Excluding t < {args.min_time_days} days -- averaging over x, y, and the remaining {n_times_used}/{len(et.time)} time samples...")
+print(f"  Restricting to [{args.min_time_days}, {args.max_time_days if args.max_time_days is not None else 'end'}] days -- "
+      f"averaging over x, y, and the remaining {n_times_used}/{len(et.time)} time samples...")
 
 def horiz_time_mean(da):
     horiz_mean = (da * dA).sum(("x_caa", "y_aca")) / dA.sum(("x_caa", "y_aca"))
@@ -81,7 +94,8 @@ for ax, (da, title) in zip(axes, panels):
 axes[0].set_ylabel("Depth  [m]")
 
 label = run_label(et.attrs)
-suptitle = f"Time-mean over t > {args.min_time_days}d  ({n_times_used} samples)"
+max_label = f"{args.max_time_days}d" if args.max_time_days is not None else "end"
+suptitle = f"Time-mean over t = {args.min_time_days}d–{max_label}  ({n_times_used} samples)"
 if label:
     suptitle = f"{label}\n{suptitle}"
 fig.suptitle(suptitle, fontsize=11)

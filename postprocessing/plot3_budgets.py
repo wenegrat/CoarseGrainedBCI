@@ -43,6 +43,17 @@ if args.filter_scales is not None:
 else:
     filter_scales = list(ke_budget.filter_scale.values[:2])
     print(f"  Filter scales (from budget file, --filter-scales not given): {filter_scales}")
+
+# Every term here is stored as a raw domain integral (∫...dV, or ∫...dA for the boundary-only bottom-drag
+# term -- see 04_sfs_ke_budget.py) of an already-specific (per-unit-mass, Boussinesq) field, so it comes out
+# in m^5 s^-3, not m^2 s^-3 -- not standard/interpretable, and not comparable to the raw Πₖ/Π_A/ε fields
+# plotted elsewhere in the pipeline (plot5/plot6/anim3), which are genuinely m^2 s^-3. Dividing by the total
+# domain volume here converts every term (dV- and dA-integrated alike) to a domain-averaged rate in
+# m^2 s^-3 -- dividing the boundary term by V rather than its own area A is deliberate, not an inconsistency:
+# a surface flux's contribution to a volume-averaged tendency is (∮flux dA)/V by the divergence theorem, the
+# same normalization as every bulk term it's added to in the same budget.
+V_total = ke_budget.attrs["Lx"] * ke_budget.attrs["Ly"] * ke_budget.attrs["Lz"]
+print(f"  Domain volume V = {V_total:.4e} m^3 (normalizing all budget terms to m^2 s^-3)")
 #---
 
 #+++ Define budget terms (shared colors across all panels)
@@ -67,8 +78,14 @@ ape_terms = {
     r"$\Pi_A$":              ("∫Π_A dV",            budget_colors["flux"]),
     r"$-\varepsilon_A^s$":   ("∫-ε_Aˢ dV",          budget_colors["dissipation"]),
     r"$E_K^s \to E_A^s$":    ("∫(SFS KE->APE) dV",  budget_colors["exchange"]),
-    r"$R^s$":                ("∫Rˢ dV",             "C4"),
 }
+if not fixed_reference:
+    # Rˢ corrects for the sorted reference profile's own time-dependence -- under --fixed-reference the
+    # profile is sorted once at t=0 and broadcast to every timestep (sorted_timeseries(),
+    # aux01_pe_functions.py), so its time-derivative -- and hence Rˢ -- is identically zero by
+    # construction (confirmed directly against real output: max|∫Rˢ dV| = 0.0 exactly, every timestep).
+    # Plotting an always-zero line/legend entry would just be clutter.
+    ape_terms[r"$R^s$"] = ("∫Rˢ dV", "C4")
 #---
 
 #+++ Plot 2×2 figure
@@ -76,8 +93,8 @@ print("Creating 2×2 budget panel plot...")
 fig, axes = plt.subplots(2, 2, figsize=(14, 7), constrained_layout=True)
 
 budget_configs = [
-    (0, ke_budget,  ke_terms,  "residual_K",  "SFS KE budget terms"),
-    (1, ape_budget, ape_terms, "residual_A", "SFS APE budget terms"),
+    (0, ke_budget,  ke_terms,  "residual_K",  "SFS KE budget terms [m² s⁻³]"),
+    (1, ape_budget, ape_terms, "residual_A", "SFS APE budget terms [m² s⁻³]"),
 ]
 
 for row, budget, terms, residual_var, row_title in budget_configs:
@@ -86,9 +103,9 @@ for row, budget, terms, residual_var, row_title in budget_configs:
         for label, (var, color) in terms.items():
             data = budget[var].sel(filter_scale=ℓ, method="nearest").dropna("time").isel(time=slice(1, None))
             sign = tendency_sign if var.startswith("∫-∂ₜ") else 1
-            ax.plot(data.time / 86400, sign * data.values, label=label, color=color, lw=1.5)
+            ax.plot(data.time / 86400, sign * data.values / V_total, label=label, color=color, lw=1.5)
         residual = budget[residual_var].sel(filter_scale=ℓ, method="nearest").dropna("time").isel(time=slice(1, None))
-        ax.plot(residual.time / 86400, residual.values, color="k", ls="--", lw=1.0, zorder=0)
+        ax.plot(residual.time / 86400, residual.values / V_total, color="k", ls="--", lw=1.0, zorder=0)
 
         if col == 0:
             ax.set_ylabel(row_title, fontsize=13)
@@ -119,14 +136,19 @@ for col in range(2):
 ke_handles, ke_labels = axes[0, 1].get_legend_handles_labels()
 ape_handles, ape_labels = axes[1, 1].get_legend_handles_labels()
 axes[0, 1].legend(ke_handles, ke_labels, fontsize=13, loc="upper right", frameon=True, fancybox=True, framealpha=0.1)
-rs_idx = ape_labels.index(r"$R^s$")
-rs_handle = ape_handles.pop(rs_idx)
-rs_label  = ape_labels.pop(rs_idx)
-blank = Line2D([], [], linestyle="None")
-n_pad = len(ape_handles) - 1
-ape_handles = [rs_handle] + [blank] * n_pad + ape_handles
-ape_labels  = [rs_label]  + [""]    * n_pad + ape_labels
-axes[1, 1].legend(ape_handles, ape_labels, fontsize=13, loc="upper right", frameon=True, fancybox=True, framealpha=0.1, ncol=2)
+if r"$R^s$" in ape_labels:
+    rs_idx = ape_labels.index(r"$R^s$")
+    rs_handle = ape_handles.pop(rs_idx)
+    rs_label  = ape_labels.pop(rs_idx)
+    blank = Line2D([], [], linestyle="None")
+    n_pad = len(ape_handles) - 1
+    ape_handles = [rs_handle] + [blank] * n_pad + ape_handles
+    ape_labels  = [rs_label]  + [""]    * n_pad + ape_labels
+    axes[1, 1].legend(ape_handles, ape_labels, fontsize=13, loc="upper right", frameon=True, fancybox=True, framealpha=0.1, ncol=2)
+else:
+    # No Rˢ to isolate into its own column (dropped under --fixed-reference, see ape_terms above) --
+    # a plain single-column legend, same as the KE panel's.
+    axes[1, 1].legend(ape_handles, ape_labels, fontsize=13, loc="upper right", frameon=True, fancybox=True, framealpha=0.1)
 
 for ax, letter in zip(axes.flat, "abcd"):
     ax.text(0.02, 0.97, f"({letter})", transform=ax.transAxes,

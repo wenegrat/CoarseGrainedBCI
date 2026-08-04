@@ -87,6 +87,13 @@ print("Loading KE/APE budget timeseries...")
 ke_int  = xr.open_dataset(PP_OUTPUT / f"{stem}_sfs_ke_budget_integrated.nc",  decode_times=False).sel(filter_scale=ℓ, method="nearest")
 ape_int = xr.open_dataset(PP_OUTPUT / f"{stem}_sfs_ape_budget_integrated.nc", decode_times=False).sel(filter_scale=ℓ, method="nearest")
 t_budget_days = ke_int.time.values / 86400
+
+# ke_int/ape_int's own terms are raw domain integrals (∫...dV, or ∫...dA for the boundary-only bottom-drag
+# term) of already-specific (per-unit-mass) fields, so they come out in m^5 s^-3 -- not m^2 s^-3, and not
+# comparable to the raw Πₖ/Π_A/conversion maps plotted above. Same fix and reasoning as plot3_budgets.py:
+# divide by domain volume to get a genuine domain-averaged rate in m^2 s^-3 (dividing the boundary term by V
+# rather than its own area is deliberate -- see plot3_budgets.py's comment on this).
+V_total = ke_int.attrs["Lx"] * ke_int.attrs["Ly"] * ke_int.attrs["Lz"]
 #---
 
 def nearest_idx(arr, val):
@@ -110,21 +117,28 @@ ax_b, ax_z, ax_conv = fig.add_subplot(gs[0,0:2]), fig.add_subplot(gs[0,2:4]), fi
 ax_pik, ax_pia, ax_tot = fig.add_subplot(gs[1,0:2]), fig.add_subplot(gs[1,2:4]), fig.add_subplot(gs[1,4:6])
 ax_ts_ke, ax_ts_ape = fig.add_subplot(gs[2,0:3]), fig.add_subplot(gs[2,3:6])
 
-def setup_map(ax, data0, vmax, title):
+def setup_map(ax, data0, vmax, title, unit):
     im = ax.pcolormesh(x_km, y_km, data0, cmap="RdBu_r", vmin=-vmax, vmax=vmax, shading="auto")
+    # set_edgecolor("face") avoids visible seams between adjacent quads (see plot6_snapshots.py's comment
+    # for why linewidth=0 doesn't work here). A one-time style property on the QuadMesh, unaffected by the
+    # per-frame set_array() calls in update() below, so setting it once here covers every animation frame.
+    im.set_edgecolor("face")
     ax.set_aspect("equal")
     ax.set_title(title, fontsize=11)
     ax.set_xlabel("x [km]")
     ax.set_ylabel("y [km]")
-    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label=unit)
     return im
 
-im_b    = setup_map(ax_b,    b.isel(time=0).values,         vmax_b,    "surface buoyancy b")
-im_z    = setup_map(ax_z,    zeta_norm.isel(time=0).values, vmax_z,    "surface Rossby number ζ/f")
-im_conv = setup_map(ax_conv, conv_top.isel(time=0).values,  vmax_conv, f"conversion (SFS APE→KE, ℓ={ℓ_km}km)")
-im_pik  = setup_map(ax_pik,  Pi_K_top.isel(time=0).values,  vmax_pik,  f"cross-scale KE flux Πₖ (ℓ={ℓ_km}km)")
-im_pia  = setup_map(ax_pia,  Pi_A_top.isel(time=0).values,  vmax_pia,  f"cross-scale APE flux Π_A (ℓ={ℓ_km}km)")
-im_tot  = setup_map(ax_tot,  Pi_total.isel(time=0).values,  vmax_tot,  f"total cross-scale flux Πₖ+Π_A (ℓ={ℓ_km}km)")
+# Units: b is a Boussinesq buoyancy (acceleration, m s⁻²); ζ/f is dimensionless by construction; conv/Πₖ/
+# Π_A/their sum are all raw (unintegrated) specific cross-scale fluxes, m² s⁻³ -- no ρ₀ factor anywhere in
+# this codebase's fully Boussinesq/per-unit-mass convention (see aux02_ke_functions.py).
+im_b    = setup_map(ax_b,    b.isel(time=0).values,         vmax_b,    "surface buoyancy b",                        "m s⁻²")
+im_z    = setup_map(ax_z,    zeta_norm.isel(time=0).values, vmax_z,    "surface Rossby number ζ/f",                 "")
+im_conv = setup_map(ax_conv, conv_top.isel(time=0).values,  vmax_conv, f"conversion (SFS APE→KE, ℓ={ℓ_km}km)",      "m² s⁻³")
+im_pik  = setup_map(ax_pik,  Pi_K_top.isel(time=0).values,  vmax_pik,  f"cross-scale KE flux Πₖ (ℓ={ℓ_km}km)",      "m² s⁻³")
+im_pia  = setup_map(ax_pia,  Pi_A_top.isel(time=0).values,  vmax_pia,  f"cross-scale APE flux Π_A (ℓ={ℓ_km}km)",    "m² s⁻³")
+im_tot  = setup_map(ax_tot,  Pi_total.isel(time=0).values,  vmax_tot,  f"total cross-scale flux Πₖ+Π_A (ℓ={ℓ_km}km)", "m² s⁻³")
 
 ke_terms = [
     ("∫-∂ₜ SFS KE dV",    "C0", r"$\partial_t E_K^s$"),
@@ -146,12 +160,12 @@ ape_terms = [
 ]
 
 for ax, ds_int, terms, resid_var, title in [
-    (ax_ts_ke,  ke_int,  ke_terms,  "residual_K", "SFS KE budget (volume-integrated)"),
-    (ax_ts_ape, ape_int, ape_terms, "residual_A", "SFS APE budget (volume-integrated)"),
+    (ax_ts_ke,  ke_int,  ke_terms,  "residual_K", "SFS KE budget [m² s⁻³]"),
+    (ax_ts_ape, ape_int, ape_terms, "residual_A", "SFS APE budget [m² s⁻³]"),
 ]:
     for var, color, label in terms:
-        ax.plot(t_budget_days, ds_int[var].values, color=color, lw=1.5, label=label)
-    ax.plot(t_budget_days, ds_int[resid_var].values, color="k", ls="--", lw=1.0, label="residual")
+        ax.plot(t_budget_days, ds_int[var].values / V_total, color=color, lw=1.5, label=label)
+    ax.plot(t_budget_days, ds_int[resid_var].values / V_total, color="k", ls="--", lw=1.0, label="residual")
     ax.legend(fontsize=8, loc="upper left", ncol=2)
     ax.set_xlabel("Time (days)")
     ax.set_title(title, fontsize=11)

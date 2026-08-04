@@ -105,7 +105,8 @@ exists by the time it's needed. `--implicit` alone (no bottom drag) is unaffecte
 is itself gated on `bottom_drag`.
 
 **Post-processing write mode (`--write-mode`, `01_filter_fields.py`/`03_energy_transfer.py`/
-`04_sfs_ke_budget.py`/`05_sfs_ape_budget.py`):** `{load,synchronous}`, default `load`. Both avoid the same
+`04_sfs_ke_budget.py`/`05_sfs_ape_budget.py`/`sweep2_energy_transfer.py`):** `{load,synchronous}`, default
+`load`. Both avoid the same
 underlying bug: writing a Dataset that still has unevaluated dask arrays computes them via dask's default
 *threaded* scheduler *during* the `.to_netcdf()` call, with multiple threads writing into the same HDF5 file
 handle -- a real, observed hang (a checkpoint write once sat at 0% progress for 38+ minutes with near-zero
@@ -192,16 +193,22 @@ offline without rerunning the simulation). The only thing that changed is what h
 specify it: previously a silent, independently-hardcoded guess; now derived from the one place that
 actually knows what was used.
 
-The `plots` stage runs `plot3_budgets.py`; `plot5_vorticity_strain_flux.py`/`plot6_middepth_snapshots.py`
-(once per filter scale -- `FILTER_SCALES_M` if set, else every scale in the budget file -- and, within
-that, once per depth in `Z_VALUES_M`, default `"-500 0"` i.e. mid-depth then surface; override with a
-different space-separated list of meters if those two aren't what you want); `anim2_surface_buoyancy.py`;
-and `anim3_panels.py` (once per filter scale) -- the latter depends specifically on the `FIXED_REF=0`
-budgeting output (no `--fixed-reference` support in the plotting scripts themselves), so
-`submit_budgeting.sh` skips plots automatically if only `FIXED_REF=1` was requested. Both `plot5`/`plot6`
-take `--z` (meters, nearest available cell center; each script's own default is mid-depth, `-500`) and bake
-the *resolved* depth into their output filename (`z{z_m}m`, from the actual nearest-cell value, not the raw
-`--z` request) so running the same filter scale at two different depths doesn't silently overwrite the
+The `plots` stage runs `plot3_budgets.py`; `plot5_vorticity_strain_flux.py`/`plot6_snapshots.py`/
+`plot7_flux_phase_space.py` (once per filter scale -- `FILTER_SCALES_M` if set, else every scale in the
+budget file -- and, within that, once per depth in `Z_VALUES_M`, default `"-500 0"` i.e. mid-depth then
+surface; override with a different space-separated list of meters if those two aren't what you want);
+`anim2_surface_buoyancy.py`; and `anim3_panels.py` (once per filter scale) -- the latter depends
+specifically on the `FIXED_REF=0` budgeting output (no `--fixed-reference` support in the plotting scripts
+themselves), so `submit_budgeting.sh` skips plots automatically if only `FIXED_REF=1` was requested.
+`plot5`/`plot7` also share the same `--time-min`/`--time-max` pooling (see their own Architecture entries),
+left unpassed here deliberately -- `plots.pbs` used to override both to the run's own last 10 days, but that
+meant the window silently shifted with each run's length instead of every run being plotted over the same
+fixed 15-30 day window; removed once that turned out to be the more confusing behavior in practice (a real
+run came back plotted over days 30-40, not the 15-30 a reader would expect from the scripts' own default).
+All three of `plot5`/`plot6`/`plot7` take `--z` (meters, nearest available
+cell center; each script's own default is mid-depth, `-500`) and bake the *resolved* depth into their output
+filename (`z{z_m}m`, from the actual nearest-cell value, not the raw `--z` request) so running the same
+filter scale at two different depths doesn't silently overwrite the
 first file with the second -- neither filename included depth at all before this.
 
 **Post-processing memory sizing.** Every `*.pbs` file's `#PBS -l select=...mem=...` is a *static* resource
@@ -340,6 +347,39 @@ deleted once the script's own final output is written successfully; each script 
 scale whose checkpoint already exists on disk (resume-after-partial-failure, at the cost of silently reusing
 a stale checkpoint if the input data changed underneath it without the checkpoint being cleaned up first).
 
+That risk was real, not just theoretical: `sweep2_energy_transfer.py` hit it in production. Checkpoints are
+keyed only by filter scale, not by which timesteps went into them -- a run that didn't reach the final
+cleanup (crashed, hit a walltime limit, or predates a later fix like the `--n-time-skip` dedup one) leaves
+scale-keyed checkpoints behind that a *later* run, expecting a different time axis, will still find and
+trust by filename alone. `submit_sweep.sh` doesn't help here even for a fully "fresh" resubmission -- it
+only regenerates `sweep1`'s filtered-velocities output, and has no knowledge of `sweep2`'s separate
+checkpoint cache. Symptom: mixing a stale full-length checkpoint with freshly-computed reduced-length ones
+produced an `xr.concat` time-axis size mismatch across `filter_scale` (a `FutureWarning`, not an error --
+`join='outer'`, the current default, silently unions the mismatched axes), inflating the final output's time
+dimension well past what was actually requested (161 vs. the 21 actually computed, on a real report).
+`sweep2_energy_transfer.py` now validates a cached checkpoint's time axis against the current run's expected
+one (`ds_filt.time`) before trusting it -- both size and exact values via `np.array_equal` -- and deletes +
+recomputes it if they don't match, printing why. Deleting rather than just closing the stale file matters:
+closing a just-read netCDF4 handle and immediately reopening the same path for writing raised a
+`PermissionError` from a stale entry in xarray's global file-handle cache (confirmed directly) -- removing
+the file first guarantees a clean open. `03_energy_transfer.py`/`04_sfs_ke_budget.py`/`05_sfs_ape_budget.py`
+don't have this specific failure mode (no `--n-time-skip`-equivalent knob that changes their time axis
+between runs against the same input) and weren't changed, but carry the same generic risk described above
+if their own inputs ever change out from under a stale checkpoint.
+
+The same class of bug hit `sweep2_energy_transfer.py`'s *other* transient-file directory too, one layer
+further down: the per-timestep `_tmp/` directory its final merge-write step uses (see `01_filter_fields.py`'s
+analogous per-scale tmp files) used to be created with `mkdir(exist_ok=True)` and cleaned up at the end by
+removing only the files *this run itself* wrote (`tmp_files`) before `rmdir()`-ing the now-supposedly-empty
+directory. A run that left stale `t{i:04d}.nc` files behind (crashed, killed, walltime limit -- especially
+one with *more* timesteps than a later run) meant `rmdir()` failed with "Directory not empty" on an
+otherwise-successful run, confirmed directly in production -- and since `sweep_transfer.pbs` runs under `set
+-eo pipefail`, that uncaught error aborted `sweep3`/`sweep4` even though `sweep2`'s own actual output file had
+already been written correctly (the crash is the very last line, after the real work is done). Fixed the same
+way as the checkpoint issue: `shutil.rmtree(tmp_dir, ignore_errors=True)` before `mkdir()`, guaranteeing a
+clean slate up front rather than trusting this run's own bookkeeping to fully account for the directory's
+actual contents at cleanup time.
+
 `03_energy_transfer.py`'s `calculate_energy_transfer()` (`aux02_ke_functions.py`) already computes the
 filtered-density local potential-energy fields (z₀(ρ̄), Υˡ, Dˡ, Ea(ρ̄,z), via
 `local_potential_energies_timeseries()` on `ds_filt_ℓ`) per scale, purely as an intermediate for Π_A --
@@ -403,28 +443,52 @@ rather than the old hardcoded KH range in different units), `sweep2`'s log messa
 "x and z", and `sweep3`'s `SymLogNorm(linthresh=...)` scales with the data's own magnitude (`vmax*1e-3`)
 instead of a fixed absolute value tuned for KH's much smaller Πₖ/Π_A magnitudes.
 
-Correction to a stale earlier note here: `sweep2` calls `calculate_energy_transfer()` **once**, passing the
-*entire* `filter_scales` array (unlike `03_energy_transfer.py`, which now loops one scale at a time -- see
-"Checkpointing and cross-script reuse" below). Without `--fixed-reference`, `rho_sorted`/`dz_sorted` start
-as `None`, so `calculate_energy_transfer()` runs `sorted_timeseries()` itself -- but that call sits *before*
-its own `for ℓ in filter_scales:` loop, so the sort happens once per `calculate_energy_transfer()` call, not
-once per filter scale (confirmed directly by reading the current code). What *is* still true and expensive
-for a 30-scale sweep: `calculate_energy_transfer()`'s per-scale loop has no checkpointing (deliberately left
-alone when `03` got it, specifically so `sweep2` -- the loop's other caller -- wouldn't be affected), so
-every scale's `filt_local_pes` reference stays alive via the lazy `Π_A` graph until the whole multi-scale
-result is concatenated at the end -- confirmed as the cause of a real OOM on a 384x384x64, n_scales=30
-sweep run (see the `filt_local_pes` comment in `aux02_ke_functions.py`). Parallelizing `sweep2` across
-scales would need this restructured first (pull the per-scale loop out to the script level, the way `03`'s
-now is) -- there's currently no natural per-scale seam to submit as separate concurrent jobs.
+`sweep2` used to call `calculate_energy_transfer()` **once**, passing the *entire* `filter_scales` array
+(unlike `03_energy_transfer.py`, which loops one scale at a time -- see "Checkpointing and cross-script
+reuse" below). Without `--fixed-reference`, `rho_sorted`/`dz_sorted` start as `None`, so
+`calculate_energy_transfer()` runs `sorted_timeseries()` itself -- but that call sits *before* its own `for
+ℓ in filter_scales:` loop, so the sort happens once per `calculate_energy_transfer()` call, not once per
+filter scale (correcting a stale claim this note used to make, confirmed directly by reading the code).
+What *was* still true and expensive for a many-scale sweep: `calculate_energy_transfer()`'s per-scale loop
+had no checkpointing (deliberately left alone when `03` got it, specifically so `sweep2` -- the loop's other
+caller -- wouldn't be affected), so every scale's not-yet-computed `ape_to_ke_exchange`/`w̄·b̄ᵣ` (still lazy
+even though `Π_A` itself is `.load()`ed and `filt_local_pes` freed per scale -- an earlier, narrower fix)
+stayed reachable via the growing list `calculate_energy_transfer()` builds internally before its own single
+`xr.concat()` at the end -- confirmed as the cause of a real OOM on a 384x384x64, n_scales=30 sweep run (see
+the `filt_local_pes` comment in `aux02_ke_functions.py`), and again, worse, on a 512x512x64, 40-day run
+(died mid-loop, at "Calculating cross-scale APE flux").
+
+**Fixed**: `sweep2_energy_transfer.py` now loops over filter scales one at a time *at the script level*
+(mirroring `03_energy_transfer.py`'s exact pattern) instead of delegating the whole array to
+`calculate_energy_transfer()` in one call, checkpointing each scale's fully-computed result to disk via
+`write_dataset()` (new `--write-mode load|synchronous` flag, same semantics as `03`'s) before freeing it and
+moving to the next -- bounding peak memory to ~1 scale regardless of scale count. `calculate_energy_transfer()`
+itself is still unchanged (both callers now use it identically: once per scale, with a single-element
+`filter_scales` list), so this doesn't touch the function both scripts share. `sweep_transfer.pbs` defaults
+`WRITE_MODE=synchronous` for the same reason `budgeting.pbs`/`budgeting_filter.pbs` do. Verified against
+real local data: old and new code produce bit-identical output from the same input (all 8 variables, exact
+`np.array_equal`), and the checkpoint-resume path (pre-seeding one scale's checkpoint) correctly skips
+recomputing it. Parallelizing `sweep2` across scales -- still not done -- now has the natural per-scale seam
+to submit as separate concurrent jobs that this restructuring was a prerequisite for.
 
 `sweep3` also gained a second row of panels that was previously missing: it already computed a `1/ℓ`
 coordinate (`inv_scale`) specifically so a proper spectrum line plot could use it as the x-axis, but the
 plotting code only ever drew the Hovmöllers -- the spectrum itself was never implemented. Now it also plots
-the time-mean (±1 std across time, excluding the first `--min-time-days` as an initial-transient cutoff)
-of ∫Π_K dV/∫Π_A dV vs. 1/ℓ, with a dashed vertical line at the theoretical Eady deformation radius
-`Ld = N·Lz/|f0|` (computed from the run's own `N2`/`Lz`/`latitude` attrs). The shaded band is temporal
+the time-mean (±1 std across time, restricted to `[--min-time-days, --max-time-days]`, default the full
+available range) of ∫Π_K dV/∫Π_A dV vs. 1/ℓ, with a dashed vertical line at the theoretical Eady deformation
+radius `Ld = N·Lz/|f0|` (computed from the run's own `N2`/`Lz`/`latitude` attrs). The shaded band is temporal
 spread of the diagnostic itself, not a statistical confidence interval -- there's only one simulation
-realization, so don't read it as sampling uncertainty on the mean.
+realization, so don't read it as sampling uncertainty on the mean. `--max-time-days` (default `None`, i.e.
+the latest available time) applies to the Hovmöller panels too, not just the spectrum average -- e.g. pass
+`--max-time-days 30` to see what the whole figure would look like using only the first 30 days of a longer
+run, not just the spectrum's own time-mean over that window while the Hovmöller still shows everything.
+
+`sweep4_plot_depth_scale.py` (depth vs. `1/ℓ` structure of the horizontally- and time-averaged Πₖ/Π_A/Πₖ+Π_A,
+one panel each) gained the equivalent `--max-time-days` alongside its existing `--min-time-days` (default 5
+days, a longer initial-transient cutoff than `sweep3`'s 1 day -- this plot averages over depth *and* time,
+so needs the flow more settled). It was also missing the `ConsecutiveIterations` pair dedup `sweep3` already
+had (see the time-axis-pairs Note below) -- its time average was silently double-weighting near-identical
+snapshot pairs before this fix.
 
 `anim3_panels.py` is also new: a 6-panel GIF animation (`--filename ...`, `--filter-scale` in meters,
 `--fps`, `--dpi`, `--clim-percentile`) combining surface buoyancy, surface Rossby number ζ/f, the SFS
@@ -437,21 +501,34 @@ current frame). Two things worth knowing if extending it:
   against `(x_km, y_km)` renders them rotated 90° relative to everything else. `anim3_panels.py`'s
   `fix_orientation()` transposes any field to `(..., y_dim, x_dim)` before plotting regardless of its
   stored order, so this can't recur there -- but any *other* script plotting `Π_A` or an exchange term
-  directly (e.g. a future `plot_middepth`-style script) needs the same treatment.
+  directly (e.g. `plot6_snapshots.py`, which uses the same pattern) needs the same treatment.
 - `constrained_layout` cannot reconcile equal-aspect square map axes sharing one GridSpec with a wide,
   non-square row (it silently fails -- "axes sizes collapsed to zero" -- and produces uneven gaps).
   `anim3_panels.py` avoids this with explicit `wspace`/`hspace`/margins plus fixed-fraction colorbars
   (`fraction=0.046, pad=0.04`) instead of relying on the layout solver.
 
 `plot5_vorticity_strain_flux.py` is new: conditions Πₖ, Π_A, and Πₖ+Π_A on the *filtered*-field vorticity
-ζ̄/f0 and strain σ̄/|f0| (`--filename ...`, `--filter-scale` in meters, `--time` in days, `--z` in meters,
+ζ̄/f0 and strain σ̄/|f0| (`--filename ...`, `--filter-scale` in meters, `--time-min`/`--time-max` in days
+(default 15-30 days -- eddies should be fully developed by then; a fixed window rather than one tied to
+each run's own length, so repeated runs/comparisons default to the same physical window), `--z` in meters,
 `--n-bins`, `--min-count`, `--clim-percentile`), following the joint-PDF/conditional-mean method of
 [Balwada et al. (2021, JPO)](https://doi.org/10.1175/JPO-D-21-0016.1) but with our own cross-scale energy
-fluxes in place of their vertical tracer flux. Produces, per filter scale: the JPDF, a conditional-mean
-panel and a "net contribution" panel (conditional mean × JPDF) for each of the three flux quantities, plus
-the flux fraction attributable to strain-dominated (SD) vs. vorticity-dominated (AVD/CVD) regions (the
-σ=|ζ̄| partition from the paper). f0 is a single reference Coriolis value (evaluated at y=0), not local
-f(y), to keep the JPDF axes free of an implicit y-dependence. Two gotchas hit while building it:
+fluxes in place of their vertical tracer flux. All snapshots in the `--time-min`/`--time-max` window are
+pooled into one set of area-weighted samples for the JPDF/conditional-mean statistics (each snapshot
+weighted equally regardless of Δt), not evaluated at a single instant -- reduces noise in the SD/AVD/CVD
+flux fractions versus a single snapshot, at the cost of needing enough of a run's duration to actually reach
+the window. If the run doesn't reach `--time-min` (default 15 days) at all, this is a hard error (the
+window couldn't even start, and quietly plotting something from whatever scraps exist near the run's actual
+end would be more confusing than failing loudly); if it reaches `--time-min` but not `--time-max` (default
+30 days), the window is clipped to whatever's actually available and a warning is printed, rather than
+erroring, since a shorter-than-requested-but-nonempty pooling window is still meaningful. `plots.pbs` leaves
+both unset, using the fixed 15-30 day default for every run (see the "plots" stage entry above for why --
+it used to override both to the run's own last 10 days instead, which turned out to be the more confusing
+choice in practice). Produces, per filter scale: the JPDF, a conditional-mean panel and a "net contribution" panel
+(conditional mean × JPDF) for each of the three flux quantities, plus the flux fraction attributable to
+strain-dominated (SD) vs. vorticity-dominated (AVD/CVD) regions (the σ=|ζ̄| partition from the paper). f0 is
+a single reference Coriolis value (evaluated at y=0), not local f(y), to keep the JPDF axes free of an
+implicit y-dependence. Two gotchas hit while building it:
 - `ūᵢ` (the filtered-velocity file) is *also* stored with `(..., x_caa, y_aca)` instead of `(..., y_aca,
   x_caa)` -- the same orientation bug as `Π_A`/the exchange term (see above), just in a different file.
   Uses the same `fix_orientation()` pattern.
@@ -465,11 +542,69 @@ entire BCI time axis, since our time coordinate is raw seconds up to ~10⁶. Fix
 (days) and dropping the `xlim` call entirely; also updated the default `--filter-scales` from KH's `[7,
 1]` to BCI's `[50000.0, 100000.0]` (meters) and the per-panel `ℓ=` title to display km.
 
-`plot6_middepth_snapshots.py` is new: a permanent version of the ad hoc mid-depth snapshot scripts used
+`plot6_snapshots.py` is new: a permanent version of the ad hoc mid-depth snapshot scripts used
 earlier in this project's investigation (buoyancy, Rossby number ζ/f, cross-scale KE flux Πₖ, cross-scale
 APE flux Π_A, single time/depth/filter-scale, 2x2 panel). Uses the same `fix_orientation()` and
 `coriolis_f()` patterns as `anim3_panels.py`/`plot5_vorticity_strain_flux.py` (`--filename`,
-`--filter-scale` in meters, `--time` in days, `--z` in meters, `--clim-percentile`).
+`--filter-scale` in meters, `--time` in days, `--z` in meters, `--clim-percentile`). Originally named
+`plot6_middepth_snapshots.py`; renamed once `--z` made "mid-depth" no longer accurate (it can plot any
+depth, e.g. `plots.pbs`'s own surface pass). All `pcolormesh` calls across the pipeline (`plot5`, `plot6`,
+`anim3_panels.py`) call `im.set_edgecolor("face")` to avoid a known rendering artifact (thin white seams
+between adjacent quads, from each quad being antialiased against its neighbors independently). Deliberately
+**not** also passing `linewidth=0`, despite that being the commonly-suggested pairing: verified empirically
+(zoomed-in raster comparison, real data) that `linewidth=0` alone does nothing here -- 0 collapses to a
+hairline stroke rather than truly disabling it, leaving the antialiasing gap exposed regardless of edge
+color. Leaving `linewidth` untouched (matplotlib's own nonzero default) is what makes `edgecolor="face"`
+actually work: the stroke it paints is nonzero-width and same-color-as-fill, so it paints over the gap.
+
+`plot7_flux_phase_space.py` is new: a 2x3 panel of net cross-scale flux contribution (conditional mean ×
+JPDF, same concept as `plot5_vorticity_strain_flux.py`'s net-contribution row) for Πₖ, Π_A, Πₖ+Π_A
+(columns), shown in two different filtered-field phase spaces (rows) -- vorticity-strain (ζ̄/f0, σ̄/|f0|,
+row 1) and vorticity-divergence (ζ̄/f0, δ̄/|f0|, row 2, δ̄ = ∂ū/∂x + ∂v̄/∂y). Shares `plot5`'s data-loading
+pipeline verbatim (`fix_orientation()`, the `ConsecutiveIterations` pair dedup, `--time-min`/`--time-max`
+pooling with the same 15-30 day default and duration error-checking) rather than importing from it --
+matches this pipeline's existing convention of small helper duplication across sibling `plot5`/`plot6`/
+`anim3_panels.py` scripts (e.g. `fix_orientation()` itself) rather than centralizing everything in
+`aux03_plotting.py`. The JPDF/conditional-mean/net-contribution machinery is generalized into local
+functions (`compute_jpdf()`, `cond_mean_and_net()`, `percentile_levels()`) parameterized over an arbitrary
+(x, y) phase-space pair, since this script -- unlike `plot5` -- applies that machinery twice per flux
+quantity, once per row, each with its own JPDF (row 1 and row 2 are genuinely different distributions, not
+just different aggregations of the same one). Two things follow from that: δ̄'s bin edges are symmetric
+about zero (`-div_max` to `+div_max`), unlike σ̄'s one-sided `0` to `sigma_max` -- divergence can be negative
+(convergence), unlike a strain magnitude -- and row 2 gets a `δ=0` reference line instead of row 1's `σ=|ζ|`
+SD/AVD/CVD boundary (that specific partition is a vorticity-strain-space concept from Balwada et al. with no
+obvious equivalent in vorticity-divergence space, so row 2 doesn't attempt one). Both rows' JPDF contour
+legend is unified into a single figure-level legend keyed by *percentile position* in `--percentiles`
+(matching linestyle to list position, not to sorted contour value) -- "50% HDR" means the same thing
+(the region containing 50% of that row's own probability mass) in both rows even though the two rows' actual
+density thresholds for that percentile differ, the same way percentile-based color limits already stay
+meaningful across different filter scales elsewhere in this pipeline.
+
+**Plot units audited: everything energy-related is per-unit-mass (Boussinesq), m² s⁻² for energy densities
+and m² s⁻³ for transfer/dissipation rates -- there is no ρ₀ factor anywhere in the actual KE-side
+computation (`aux02_ke_functions.py`), matching the APE side's own explicit `g·ρ·z/ρ0` convention
+(`aux01_pe_functions.py`).** `calculate_cross_scale_ke_flux()` had a stale docstring claiming a `Πℓ = -ρ₀
+S̄:τ̄` formula the code never actually implements (the real return statement, and its own `[m² s⁻³]`
+return-value docstring two lines below, already agreed with each other and had no ρ₀ factor) -- corrected
+the prose to match the code instead of the other way around, since introducing a real ρ₀ multiply would
+have been the wrong fix (it would produce kg m⁻¹ s⁻³, not m² s⁻³). Two genuinely different kinds of
+quantity get plotted across this pipeline, and only one of them was actually mislabeled/wrong:
+- Raw fields (Πₖ, Π_A, ε_Kˢ, ε_Aˢ, the SFS APE→KE conversion term, as plotted in `plot5`/`plot6`/`anim3`'s
+  map panels) are already genuinely m² s⁻³ -- these only needed colorbar `label=` kwargs added (previously
+  none of these colorbars had any unit label at all). Buoyancy panels (`plot6`/`anim3`) are `m s⁻²`
+  (an acceleration, not an energy quantity); Rossby number ζ/f panels are dimensionless (no label).
+- The *budget-panel* plots (`plot3_budgets.py`'s 2×2 KE/APE panel, `anim3_panels.py`'s bottom time-series
+  row, `sweep3_plot_transfer_spectrum.py`'s Hovmöller + spectrum) plot `∫...dV` terms from
+  `04_sfs_ke_budget.py`/`05_sfs_ape_budget.py` -- `integrate()` (`aux00_utils.py`) is a raw `(field *
+  dV).sum()`, so these come out in m⁵ s⁻³ (a per-unit-mass rate integrated over the domain's actual m³
+  volume), not m² s⁻³, and previously had no unit label either -- silently plotting numbers many orders of
+  magnitude off from what a "m² s⁻³" reader would expect. Fixed by dividing every term (including the
+  bottom-drag term, which is `∫...dA` not `∫...dV` -- see the CLI-args section above) by the domain volume
+  `V = Lx·Ly·Lz` (read from the budget file's own attrs) before plotting, giving a genuine domain-averaged
+  rate in m² s⁻³ that's now directly comparable to the raw-field plots above. Dividing the boundary
+  (area-integrated) term by the *volume* rather than its own area is deliberate, not an inconsistency: a
+  surface flux's contribution to a volume-averaged tendency is `(∮flux dA)/V` by the divergence theorem --
+  the same normalization every bulk (volume-integrated) term in the same budget equation gets.
 
 ### Key dependencies
 - **Python**: `numpy`, `xarray`, `scipy`, `matplotlib`, `dask`, `gcm_filters`, `netcdf4`
@@ -499,6 +634,50 @@ APE flux Π_A, single time/depth/filter-scale, 2x2 panel). Uses the same `fix_or
 
 ## Notes
 
+- **The raw simulation time axis is pairs, not independent samples -- matters for any offline script that
+  pools/averages over a time range.** `baroclinic_adjustment.jl`'s `:fields` writer (and `:bottom`, when
+  `--bottom_drag`) uses `schedule = ConsecutiveIterations(TimeInterval(output_interval))`, which writes TWO
+  consecutive model iterations -- the nominal output time, then the very next iteration (~seconds to ~15
+  minutes later, depending on the adaptive Δt at that point in the run) -- at every nominal output time.
+  This is deliberate: `aux02_ke_functions.py`'s `calculate_sfs_ke_tendency()` needs a close pair straddling
+  each nominal output time to finite-difference an accurate ∂ₜ(SFS KE)/∂ₜ(SFS APE), rather than differencing
+  across the full output interval. Confirmed directly on real data: consecutive pairs' own internal gap plus
+  the following gap to the next pair always sums to exactly the nominal `output_interval` (e.g. `607.4s +
+  42592.6s = 43200s = 12h` exactly). `01_filter_fields.py` (and everything built on its output --
+  `filtered_velocities.nc`, and in turn `03`/`04`/`05`'s own outputs) inherits this raw paired structure
+  unchanged; it's never collapsed except where a script explicitly computes a tendency the way
+  `calculate_sfs_ke_tendency()` does (`.diff("time").sel(time=slice(None, None, 2))`, itself only valid
+  because of this pairing). Any *other* script that treats the time axis as independent, regularly-spaced
+  samples at the nominal output frequency -- e.g. pooling/averaging over a `--time-min`/`--time-max`-style
+  range -- will silently process roughly double the expected sample count, double-weighting each real
+  snapshot's near-identical pair partner rather than genuinely pooling that many independent samples.
+  Caught via a real report: `plot5_vorticity_strain_flux.py` printed "41 snapshots" for a 10-day window at a
+  12h output interval (expected 21). Fixed in `plot5_vorticity_strain_flux.py`,
+  `sweep3_plot_transfer_spectrum.py`, and `sweep4_plot_depth_scale.py` (all pool/average over a time range)
+  by keeping only the first member of each pair -- `ds.isel(time=slice(0, None, 2))` -- applied to the
+  *full*, unsliced time axis immediately after loading, before any `--time-min`/`--time-max`/
+  `--min-time-days`/`--max-time-days` selection, so the pair parity stays anchored to the simulation start
+  regardless of the chosen window. `sweep4` was missing this fix entirely until caught alongside adding its
+  `--max-time-days` (same commit) -- it had no dedup at all, not even a broken one. `plot3_budgets.py` (each
+  raw point plotted as its own point on a line) and `anim3_panels.py` (each raw point is its own animation
+  frame) show the same underlying duplication but only as a cosmetic double-point/stutter, not a statistical
+  pooling bias, and were left as-is.
+
+  `sweep1_filter_fields.py`'s `--n-time-skip` (`(i // 2) % n_time_skip == 0`, dividing the raw index by 2
+  before the skip logic) looked like it already accounted for this, but didn't: at the default
+  `n_time_skip=1`, `(i // 2) % 1` is always `0`, so it kept *every* raw row -- a no-op, not a dedup. The
+  `i // 2` structure only ever skipped whole *real* output times (e.g. `n_time_skip=2` skips every other
+  real output, but still keeps both pair members of whichever ones it keeps) -- it never collapsed the
+  pairing itself. `sweep2_energy_transfer.py` does no deduplication of its own either, so this meant the
+  entire sweep pipeline processed every real output time *twice* by default -- confirmed directly: a 40-day,
+  12h-output run reported 181 time steps here, not the ~81 a reader would expect -- doubling compute cost
+  and memory pressure for exactly the step that OOM'd (see the `sweep2_energy_transfer.py` checkpointing
+  entry below). Fixed the same way as `plot5`/`sweep3`: `ds.isel(time=slice(0, None, 2))` before the
+  `--n-time-skip` logic, which then simplifies from the `i // 2` trick to a plain `ds.isel(time=slice(0,
+  None, n_time_skip))` -- there's no more pairing left for it to account for. Verified directly: a 33-raw-
+  row dataset (16 pairs + 1 unpaired final point, see above) now reports 17 time steps at the default
+  `n_time_skip=1` (matching `⌈33/2⌉`) and 9 at `n_time_skip=2`, with the actual retained timestamps landing
+  on clean, non-fractional nominal days (`0, 1, 2, ..., 8`), not the fractional companion offsets.
 - **Oceanostics bug (fixed)**: `GaussianFilter(; dims=(1,2), σ)` used to crash (heap corruption -> SIGILL)
   on a grid with real `Ny>1` and periodic y -- filed as
   [tomchor/Oceanostics.jl#262](https://github.com/tomchor/Oceanostics.jl/issues/262), with a minimal

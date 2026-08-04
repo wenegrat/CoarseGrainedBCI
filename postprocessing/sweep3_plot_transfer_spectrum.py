@@ -13,7 +13,8 @@ import argparse
 parser = argparse.ArgumentParser(description="Plot cross-scale KE and APE transfer spectra")
 parser.add_argument("--filename", default="output/bci_Nx48_Ny48_Nz8.nc", help="Path to simulation NetCDF file (used to derive energy transfer filename)")
 parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load output produced with the fixed-in-time reference profile")
-parser.add_argument("--min-time-days", type=float, default=1.0, help="Exclude time samples before this (in days) from the time-averaged spectrum panel -- the first ~1-2 saved samples are dominated by a large initial transient unrelated to the ongoing cascade (default 1.0)")
+parser.add_argument("--min-time-days", type=float, default=1.0, help="Exclude time samples before this (in days) -- the first ~1-2 saved samples are dominated by a large initial transient unrelated to the ongoing cascade (default 1.0). Applies to both the Hovmöller and the time-averaged spectrum panel.")
+parser.add_argument("--max-time-days", type=float, default=None, help="Exclude time samples after this (in days). Defaults to the latest available time (no upper restriction) -- e.g. pass 30 to see what the plots would look like using only the first 30 days of a longer run.")
 args = parser.parse_args()
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
@@ -27,6 +28,25 @@ ref_suffix = "_fixed_ref" if args.fixed_reference else ""
 print("Loading energy transfer data...")
 input_filename = str(PP_OUTPUT / (Path(filename).stem + f"_energy_transfer_sweep{ref_suffix}.nc"))
 et = xr.open_dataset(input_filename, decode_timedelta=False)
+
+# baroclinic_adjustment.jl's :fields writer uses schedule=ConsecutiveIterations(TimeInterval(...)), which
+# writes TWO consecutive model iterations (nominal output time, then the next iteration ~seconds-minutes
+# later) at every nominal output time -- see plot5_vorticity_strain_flux.py's comment on the same structure
+# for why (04_sfs_ke_budget.py's tendency finite-difference needs a close pair). sweep2_energy_transfer.py
+# doesn't compute any tendency term, so it never collapses this pairing -- et's raw time axis is still pairs
+# (t, t+ε), not independent samples at the nominal output frequency. Averaging/coloring by both members over
+# the --min-time-days-filtered range below would silently double-count near-identical snapshots. Keep only
+# the first member of each pair (same ::2 pattern already used for this exact structure elsewhere), on the
+# full time axis before any time-based selection so the pair parity stays anchored to the simulation start.
+et = et.isel(time=slice(0, None, 2))
+
+# Restrict to the requested [--min-time-days, --max-time-days] window -- default is the full available
+# range (no restriction). Applied once, here, to the shared et used by both the Hovmöller and the
+# time-averaged spectrum panel below, so --max-time-days genuinely shows "what the plots would look like"
+# over a shorter window rather than only affecting the spectrum average while the Hovmöller still shows
+# the full run.
+t_max_sec = args.max_time_days * 86400 if args.max_time_days is not None else float(et.time.max())
+et = et.sel(time=slice(args.min_time_days * 86400, t_max_sec))
 
 # Add 1/ℓ as a non-dimension coordinate so plot.line can use it as the x axis
 et = et.assign_coords(inv_scale=("filter_scale", 1.0 / et.filter_scale.values))
@@ -48,31 +68,40 @@ print(f"  Deformation radius Ld = {Ld/1e3:.2f} km")
 #+++ Plot: Hovmöller (time vs. scale) on top, time-averaged spectrum (vs. scale) below
 fig, axes = plt.subplots(2, 2, figsize=(12, 9), constrained_layout=True)
 
-vmax = float(max(abs(et["∫Π_K dV"]).max(), abs(et["∫Π_A dV"]).max()))
+# et's own ∫Π_K dV/∫Π_A dV are raw domain integrals of already-specific (per-unit-mass) fields, so they come
+# out in m^5 s^-3, not m^2 s^-3 -- not comparable to the raw Πₖ/Π_A fields plotted elsewhere in the
+# pipeline. Same fix as plot3_budgets.py/anim3_panels.py: divide by domain volume for a genuine
+# domain-averaged rate in m^2 s^-3.
+V_total = et.attrs["Lx"] * et.attrs["Ly"] * et.attrs["Lz"]
+print(f"  Domain volume V = {V_total:.4e} m^3 (normalizing ∫Π dV terms to domain-averaged m² s⁻³)")
+
+vmax = float(max(abs(et["∫Π_K dV"] / V_total).max(), abs(et["∫Π_A dV"] / V_total).max()))
 linthresh = vmax * 1e-3  # scales with the data's own magnitude, rather than a fixed absolute value
 for ax, var in zip(axes[0], ["∫Π_K dV", "∫Π_A dV"]):
-    et[var].plot.pcolormesh(x="time", y="filter_scale", ax=ax,
+    (et[var] / V_total).plot.pcolormesh(x="time", y="filter_scale", ax=ax,
                             cmap="RdBu_r", vmin=-vmax, vmax=vmax,
-                            norm=plt.matplotlib.colors.SymLogNorm(linthresh=linthresh, vmin=-vmax, vmax=vmax))
+                            norm=plt.matplotlib.colors.SymLogNorm(linthresh=linthresh, vmin=-vmax, vmax=vmax),
+                            cbar_kwargs={"label": "m² s⁻³"})
     ax.set_yscale("log")
     ax.set_ylabel("ℓ  [m]")
 
 axes[0,0].set_title("KE cross-scale transfer (Hovmöller)")
 axes[0,1].set_title("APE cross-scale transfer (Hovmöller)")
 
-# Time-averaged spectrum: mean (and ±1 std across time) of Π_K/Π_A vs. 1/ℓ, excluding the initial transient
-et_avg = et.sel(time=slice(args.min_time_days * 86400, None))
+# Time-averaged spectrum: mean (and ±1 std across time) of Π_K/Π_A vs. 1/ℓ, over the [--min-time-days,
+# --max-time-days] window already applied to et above.
+var_labels = {"∫Π_K dV": r"$\langle\Pi_K\rangle$", "∫Π_A dV": r"$\langle\Pi_A\rangle$"}
 for ax, var, title in zip(axes[1], ["∫Π_K dV", "∫Π_A dV"], ["KE cross-scale transfer spectrum", "APE cross-scale transfer spectrum"]):
-    mean = et_avg[var].mean("time")
-    std = et_avg[var].std("time")
-    ax.plot(et_avg.inv_scale, mean, marker="o", color="C0")
-    ax.fill_between(et_avg.inv_scale, mean - std, mean + std, color="C0", alpha=0.25)
+    mean = et[var].mean("time") / V_total
+    std = et[var].std("time") / V_total
+    ax.plot(et.inv_scale, mean, marker="o", color="C0")
+    ax.fill_between(et.inv_scale, mean - std, mean + std, color="C0", alpha=0.25)
     ax.axhline(0, color="gray", lw=0.5)
     ax.axvline(inv_Ld, color="k", ls="--", lw=1.2, label=f"$L_d$={Ld/1e3:.1f}km")
     ax.legend(fontsize=9, loc="best")
     ax.set_xscale("log")
     ax.set_xlabel(r"$1/\ell$  [m$^{-1}$]")
-    ax.set_ylabel(var)
+    ax.set_ylabel(f"{var_labels[var]}  [m² s⁻³]")
     ax.set_title(title)
     ax.grid(True, alpha=0.3)
 

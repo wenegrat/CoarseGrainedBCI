@@ -13,11 +13,18 @@ from src.aux00_utils import load_dataset_and_grid
 #---
 
 #+++ Configuration
+# Default pooling window (days): late enough that eddies should be fully developed (matches the old
+# single-time default's own "eddies should be fully developed by then" rationale), fixed rather than
+# tied to each run's own length so repeated runs/comparisons default to the same physical window.
+DEFAULT_TIME_MIN_DAYS = 15.0
+DEFAULT_TIME_MAX_DAYS = 30.0
+
 import argparse
 parser = argparse.ArgumentParser(description="Conditional-mean and net-contribution maps of Πₖ, Π_A, and Πₖ+Π_A in filtered vorticity-strain space")
 parser.add_argument("--filename", default="output/bci_Nx48_Ny48_Nz8.nc", help="Path to simulation NetCDF file")
 parser.add_argument("--filter-scale", type=float, default=None, help="Target filter length scale in meters (nearest available; defaults to the smallest available)")
-parser.add_argument("--time", type=float, default=None, help="Target time in days (nearest available; defaults to the last available -- eddies should be fully developed by then)")
+parser.add_argument("--time-min", type=float, default=None, help=f"Start of the time range (days, inclusive; defaults to {DEFAULT_TIME_MIN_DAYS:g} days -- eddies should be fully developed by then)")
+parser.add_argument("--time-max", type=float, default=None, help=f"End of the time range (days, inclusive; defaults to {DEFAULT_TIME_MAX_DAYS:g} days)")
 parser.add_argument("--z", type=float, default=-500.0, help="Target depth in meters (nearest available cell center; default -500, mid-depth)")
 parser.add_argument("--n-bins", type=int, default=40, help="Number of bins per axis for the vorticity-strain JPDF (default 40)")
 parser.add_argument("--min-count", type=int, default=5, help="Bins with fewer than this many points are masked out in the conditional-mean/net panels (default 5)")
@@ -48,19 +55,54 @@ def fix_orientation(da):
 print("Loading filtered velocities...")
 filt = xr.open_dataset(PP_OUTPUT / f"{stem}_filtered_velocities.nc", decode_times=False)
 
+# baroclinic_adjustment.jl's :fields writer (the one 01_filter_fields.py reads to build this file) uses
+# schedule=ConsecutiveIterations(TimeInterval(output_interval)) -- deliberately writing TWO consecutive
+# model iterations (nominal output time, then the next iteration ~seconds-minutes later) at every nominal
+# output time, so 04_sfs_ke_budget.py's calculate_sfs_ke_tendency() can finite-difference a close pair
+# instead of differencing across the full output interval. That means the raw time axis here is pairs
+# (t, t+ε), not independent samples at the nominal output frequency -- pooling both members over a
+# --time-min/--time-max range would silently double the reported/actual sample count and double-weight
+# ~20 real snapshots instead of pooling that many independent ones (confirmed directly: a 10-day window at
+# a 12h output interval reported 41 snapshots, not the expected 21). Keep only the first member of each
+# pair -- same ::2 pattern calculate_sfs_ke_tendency() already uses on this exact structure -- applied here
+# to the *full*, unsliced time axis so the pair parity stays anchored to the simulation start regardless of
+# whatever --time-min/--time-max window gets applied below.
+filt = filt.isel(time=slice(0, None, 2))
+
 ℓ_target = args.filter_scale if args.filter_scale is not None else float(filt.filter_scale.min())
 ℓ = float(filt.filter_scale.sel(filter_scale=ℓ_target, method="nearest"))
 ℓ_km = int(round(ℓ / 1000))
 
-t_target = args.time * 86400 if args.time is not None else float(filt.time.max())
-t_sel = float(filt.time.sel(time=t_target, method="nearest"))
-t_days = t_sel / 86400
+time_min_days = args.time_min if args.time_min is not None else DEFAULT_TIME_MIN_DAYS
+time_max_days = args.time_max if args.time_max is not None else DEFAULT_TIME_MAX_DAYS
 
-sel = dict(filter_scale=ℓ, time=t_sel, method="nearest")
-ubar = fix_orientation(filt["ūᵢ"].sel(i=1, **sel, drop=True)).sel(z_aac=args.z, method="nearest")
-vbar = fix_orientation(filt["ūᵢ"].sel(i=2, **sel, drop=True)).sel(z_aac=args.z, method="nearest")
+# Duration checks against this run's own actual length (not just the eventual empty-window check below):
+# < time_min_days is a hard error -- the requested/default window can't even start, and silently producing
+# an empty-ish plot from whatever scraps exist near the end would be more confusing than failing loudly
+# here. < time_max_days (but >= time_min_days) is survivable -- clip and warn rather than error, since a
+# shorter-than-requested-but-nonempty pooling window is still a meaningful result.
+available_max_days = float(filt.time.max()) / 86400
+if available_max_days < time_min_days:
+    raise ValueError(f"Requested time range starts at {time_min_days:g} days, but {stem} only has "
+                     f"{available_max_days:.2f} days of output -- pass --time-min/--time-max explicitly "
+                     f"for a shorter run.")
+if available_max_days < time_max_days:
+    print(f"  Warning: requested time range extends to {time_max_days:g} days, but {stem} only has "
+          f"{available_max_days:.2f} days of output -- clipping to [{time_min_days:g}, {available_max_days:.2f}] days.")
+
+t_min_sec = time_min_days * 86400
+t_max_sec = time_max_days * 86400  # clipped to whatever's available by .sel(slice(...)) below if too large
+filt_t = filt.sel(time=slice(t_min_sec, t_max_sec))
+n_times = filt_t.sizes["time"]
+if n_times == 0:
+    raise ValueError(f"No available times in [{t_min_sec/86400:.2f}, {t_max_sec/86400:.2f}] days")
+t_days_actual = filt_t.time.values / 86400
+t_min_days, t_max_days = float(t_days_actual.min()), float(t_days_actual.max())
+
+ubar = fix_orientation(filt_t["ūᵢ"].sel(i=1, filter_scale=ℓ, method="nearest", drop=True)).sel(z_aac=args.z, method="nearest")
+vbar = fix_orientation(filt_t["ūᵢ"].sel(i=2, filter_scale=ℓ, method="nearest", drop=True)).sel(z_aac=args.z, method="nearest")
 z_sel = float(ubar.z_aac)
-print(f"ℓ = {ℓ:.4f} m ({ℓ_km} km), t = {t_days:.2f} days, z = {z_sel:.1f} m")
+print(f"ℓ = {ℓ:.4f} m ({ℓ_km} km), t = {t_min_days:.2f}-{t_max_days:.2f} days ({n_times} snapshots), z = {z_sel:.1f} m")
 
 sigma_n  = ubar.differentiate("x_caa") - vbar.differentiate("y_aca")
 sigma_s  = vbar.differentiate("x_caa") + ubar.differentiate("y_aca")
@@ -79,9 +121,11 @@ print("Loading Πₖ, Π_A...")
 ke_fields  = xr.open_dataset(PP_OUTPUT / f"{stem}_sfs_ke_budget_fields.nc",  decode_times=False)
 ape_fields = xr.open_dataset(PP_OUTPUT / f"{stem}_sfs_ape_budget_fields.nc", decode_times=False)
 
-t_flux = float(ke_fields.time.sel(time=t_sel, method="nearest"))
-Pi_K = fix_orientation(ke_fields["Π_K"].sel(filter_scale=ℓ, time=t_flux, method="nearest")).sel(z_aac=args.z, method="nearest").values
-Pi_A = fix_orientation(ape_fields["Π_A"].sel(filter_scale=ℓ, time=t_flux, method="nearest")).sel(z_aac=args.z, method="nearest").values
+# Each of filt_t's own times is matched to its nearest neighbor in the flux files independently (vectorized
+# nearest-time selection, one match per snapshot) rather than a single shared lookup -- the three files can
+# have slightly different time grids/roundoff, same reasoning as sweep2's ds.reindex(time=ds_filt.time).
+Pi_K = fix_orientation(ke_fields["Π_K"].sel(filter_scale=ℓ, time=filt_t.time, method="nearest")).sel(z_aac=args.z, method="nearest").values
+Pi_A = fix_orientation(ape_fields["Π_A"].sel(filter_scale=ℓ, time=filt_t.time, method="nearest")).sel(z_aac=args.z, method="nearest").values
 Pi_total = Pi_K + Pi_A
 #---
 
@@ -91,11 +135,18 @@ ds_grid = load_dataset_and_grid(filename)
 dx_1d = ds_grid.Δx_caa.values
 dy_1d = ds_grid.Δy_aca.values
 area_2d = np.outer(dy_1d, dx_1d)  # matches (y_aca, x_caa) after fix_orientation
-A_total = area_2d.sum()
+
+# Broadcast the (time-independent) area weights across the time dimension so every included snapshot
+# contributes one full domain's worth of area-weighted samples to the JPDF/conditional means below --
+# snapshots are weighted equally regardless of the (possibly uneven) Δt between them, not by Δt itself,
+# consistent with how this codebase already treats multi-snapshot time series elsewhere (e.g. sweep3's
+# time-mean/std, which likewise treats each saved snapshot as one equally-weighted sample).
+area_3d = np.broadcast_to(area_2d, zeta_norm.shape)
+A_total = area_3d.sum()
 
 zeta_flat  = zeta_norm.ravel()
 sigma_flat = sigma_norm.ravel()
-area_flat  = area_2d.ravel()
+area_flat  = area_3d.ravel()
 Pi_K_flat, Pi_A_flat, Pi_total_flat = Pi_K.ravel(), Pi_A.ravel(), Pi_total.ravel()
 #---
 
@@ -194,32 +245,36 @@ def add_jpdf_contours(ax):
 for ax, (name, mean, _) in zip(axes_mean, flux_panels):
     vmax = np.nanpercentile(np.abs(mean), args.clim_percentile)
     im = ax.pcolormesh(zeta_edges, sigma_edges, mean.T, cmap="RdBu_r", vmin=-vmax, vmax=vmax, shading="flat")
+    # set_edgecolor("face") avoids visible seams between adjacent quads (see plot6_snapshots.py's comment
+    # for why linewidth=0 doesn't work here -- it collapses to a hairline rather than disabling the stroke).
+    im.set_edgecolor("face")
     add_sd_lines(ax)
     add_jpdf_contours(ax)
     ax.set_title(f"{name} conditional mean\nSD={fractions[name]['SD']:.0f}% AVD={fractions[name]['AVD']:.0f}% CVD={fractions[name]['CVD']:.0f}%", fontsize=10)
     ax.set_xlabel(r"$\bar\zeta / f_0$")
     ax.set_ylabel(r"$\bar\sigma / |f_0|$")
-    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label="m² s⁻³")
 
 for ax, (name, _, net) in zip(axes_net, flux_panels):
     vmax = np.nanpercentile(np.abs(net), args.clim_percentile)
     im = ax.pcolormesh(zeta_edges, sigma_edges, net.T, cmap="RdBu_r", vmin=-vmax, vmax=vmax, shading="flat")
+    im.set_edgecolor("face")
     add_sd_lines(ax)
     add_jpdf_contours(ax)
     ax.set_title(f"{name} net contribution", fontsize=10)
     ax.set_xlabel(r"$\bar\zeta / f_0$")
     ax.set_ylabel(r"$\bar\sigma / |f_0|$")
-    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label="m² s⁻³")
 
 legend_handles = [Line2D([0], [0], color="0.25", lw=1.2, linestyle=_LINESTYLES[i % len(_LINESTYLES)],
                         label=f"JPDF {level_labels[lvl]} HDR") for i, lvl in enumerate(contour_levels)]
 fig.legend(handles=legend_handles, loc="upper center", ncol=len(legend_handles), fontsize=9,
            frameon=False, bbox_to_anchor=(0.5, 1.06))
 
-fig.suptitle(f"{stem}, ℓ={ℓ_km}km, t={t_days:.1f}d, z={z_sel:.0f}m", fontsize=13, y=1.1)
+fig.suptitle(f"{stem}, ℓ={ℓ_km}km, t={t_min_days:.1f}-{t_max_days:.1f}d ({n_times} snapshots), z={z_sel:.0f}m", fontsize=13, y=1.1)
 
 z_m = int(round(z_sel))
-outfile = FIGURES / f"{stem}_vorticity_strain_flux_l{ℓ_km}km_z{z_m}m.pdf"
+outfile = FIGURES / f"{stem}_vorticity_strain_flux_l{ℓ_km}km_z{z_m}m_t{t_min_days:.0f}-{t_max_days:.0f}d.pdf"
 fig.savefig(outfile, dpi=150, bbox_inches="tight")
 print(f"Saved: {outfile}")
 #---

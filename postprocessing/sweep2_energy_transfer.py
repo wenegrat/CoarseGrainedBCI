@@ -1,12 +1,15 @@
 #!/usr/bin/env python
 #+++ Imports
+import gc
 import os
 from pathlib import Path
+import shutil
 import time
 import dask
+import numpy as np
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
-from src.aux00_utils import load_dataset_and_grid
+from src.aux00_utils import load_dataset_and_grid, write_dataset
 from src.aux02_ke_functions import calculate_energy_transfer
 #---
 
@@ -16,6 +19,10 @@ parser = argparse.ArgumentParser(description="Calculate cross-scale KE and APE t
 parser.add_argument("--filename", default="output/bci_Nx48_Ny48_Nz8.nc", help="Path to simulation NetCDF file")
 parser.add_argument("--n-workers", type=int, default=18, help="Number of CPU workers for APE sorting (ThreadPoolExecutor)")
 parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load the fixed-in-time reference profile (produced by 01 with --fixed-reference)")
+parser.add_argument("--write-mode", choices=["load", "synchronous"], default="load",
+    help="How to avoid the dask-lazy .to_netcdf() write hang for each filter scale's checkpoint -- see "
+         "write_dataset() in aux00_utils.py for what each mode does and the measured cost of 'synchronous' "
+         "relative to 'load'.")
 args = parser.parse_args()
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
@@ -62,14 +69,73 @@ if fixed_reference:
     print(f"  Sorted density loaded from: {sorted_density_filename}")
 #---
 
-#+++ Calculate cross-scale transfer terms
+#+++ Calculate cross-scale transfer terms (checkpointed per filter scale)
 print("\n" + "="*60)
 print("Calculating cross-scale transfer terms...")
-energy_transfer = calculate_energy_transfer(ds, filter_scales,
-                                            ds_filt=ds_filt,
-                                            rho_sorted=rho_sorted,
-                                            dz_sorted=dz_sorted,
-                                            n_workers=n_workers)
+# Looped one scale at a time and checkpointed to disk -- same pattern as 03_energy_transfer.py -- so a
+# scale's full lazy graph (and everything upstream of it: ds_filt_ℓ, w_full, b_r, ...) doesn't stay
+# reachable for the rest of the sweep. calculate_energy_transfer() itself is unchanged (still called once
+# per scale, just with a single-element filter_scales list) -- it's also used by 03_energy_transfer.py, so
+# its own internals are left alone here rather than adding checkpointing inside the shared function.
+#
+# Confirmed as the cause of a real OOM on a 512x512x64, 40-day run (died mid-loop, at "Calculating
+# cross-scale APE flux" -- calculate_energy_transfer() already .load()s Π_A and frees filt_local_pes per
+# scale (an earlier fix), but ape_to_ke_exchange/w̄·b̄ᵣ and their integrals stay lazy, so every previous
+# scale's not-yet-computed result -- and everything upstream of it -- stayed reachable via the growing
+# Python list calculate_energy_transfer() itself builds internally before its own single xr.concat at the
+# end). write_dataset() below forces all of that scale's remaining lazy pieces to compute and land on disk
+# before moving to the next scale, same as it already does for calculate_energy_transfer()'s eager Π_A.
+transfer_list = []
+checkpoint_files = []
+n_scales = len(filter_scales)
+for i, ℓ in enumerate(filter_scales):
+    checkpoint_path = PP_OUTPUT / (Path(filename).stem + f"_energy_transfer_sweep_checkpoint_l{ℓ:.4f}{ref_suffix}.nc")
+    checkpoint_files.append(checkpoint_path)
+
+    if checkpoint_path.exists():
+        cached = xr.open_dataset(str(checkpoint_path), decode_times=False).chunk(chunks)
+        # A checkpoint is keyed only by filter scale, not by which timesteps went into it -- if a *different*
+        # run (a different --n-time-skip, an input that's since changed, or a pre-dedup-fix run) left a
+        # checkpoint behind for this same scale without ever reaching the cleanup at the end of a successful
+        # run, this run would otherwise trust it by filename alone. Confirmed as a real production issue:
+        # mixing a stale full-resolution checkpoint with freshly-computed reduced-resolution ones produced an
+        # xr.concat time-axis size mismatch (join='outer' silently unioned them) that inflated the final
+        # output's time dimension well past what was actually requested, with no error, just a FutureWarning.
+        # Validate the time axis actually matches this run's expected one (ds_filt.time) before trusting a
+        # cached checkpoint; recompute (and overwrite) it otherwise.
+        stale = cached.sizes["time"] != ds_filt.sizes["time"] or not np.array_equal(cached.time.values, ds_filt.time.values)
+        if not stale:
+            print(f"\n--- filter {i+1}/{n_scales}: scale = {ℓ:.4f} (loading from checkpoint) ---")
+            transfer_list.append(cached)
+            continue
+        print(f"\n--- filter {i+1}/{n_scales}: scale = {ℓ:.4f}: checkpoint has {cached.sizes['time']} timesteps, "
+              f"this run expects {ds_filt.sizes['time']} -- stale checkpoint from a different run, recomputing ---")
+        cached.close()
+        # Delete rather than just closing and letting write_dataset() overwrite it in place -- closing a
+        # just-read netCDF4 handle doesn't reliably evict it from xarray's global file-handle cache before
+        # the same path is immediately reopened for writing (confirmed directly: reusing the handle this way
+        # raised a PermissionError from a stale cache entry). Removing the file first guarantees a clean open.
+        checkpoint_path.unlink()
+
+    # Printed here (not inside calculate_energy_transfer(), which only knows the single-element list this
+    # scale's call gets) so progress through the whole sweep is visible -- otherwise the "--- filter_scale =
+    # ... ---" line the shared function itself prints right after gives no sense of how many scales remain,
+    # which matters for a 30-scale sweep where each one can take minutes.
+    print(f"\n=== Filter {i+1}/{n_scales} ===")
+    transfer_ℓ = calculate_energy_transfer(ds, [ℓ],
+                                           ds_filt=ds_filt,
+                                           rho_sorted=rho_sorted,
+                                           dz_sorted=dz_sorted,
+                                           n_workers=n_workers)
+    print(f"  Computing and saving checkpoint (write-mode={args.write_mode})...")
+    t0 = time.time()
+    write_dataset(transfer_ℓ, str(checkpoint_path), write_mode=args.write_mode)
+    print(f"  Checkpoint computed and saved  ({time.time()-t0:.1f}s)")
+    del transfer_ℓ
+    gc.collect()
+    transfer_list.append(xr.open_dataset(str(checkpoint_path), decode_times=False).chunk(chunks))
+
+energy_transfer = xr.concat(transfer_list, dim="filter_scale")
 print("\nDone!")
 #---
 
@@ -79,14 +145,23 @@ print("Saving results...")
 energy_transfer.attrs.update(ds.attrs)
 output_filename = str(PP_OUTPUT / (Path(filename).stem + f"_energy_transfer_sweep{ref_suffix}.nc"))
 tmp_dir = PP_OUTPUT / (Path(output_filename).stem + "_tmp")
-tmp_dir.mkdir(exist_ok=True)
+# Same class of issue as the stale-checkpoint fix above: this run's own cleanup at the bottom only knows
+# about the files *it* wrote (tmp_files), so any leftovers from an earlier run against this same output
+# filename that didn't reach that cleanup (crashed, killed, walltime limit) -- especially a run with a
+# different number of timesteps -- silently persist here. Confirmed as a real production issue: tmp_dir.rmdir()
+# failed with "Directory not empty" after a successful write, because stale t{i:04d}.nc files from a prior,
+# larger run were still sitting alongside this run's own (fewer) files. Clearing the directory unconditionally
+# before this run writes anything guarantees a clean slate regardless of what an earlier run left behind.
+shutil.rmtree(tmp_dir, ignore_errors=True)
+tmp_dir.mkdir()
 tmp_files = []
-# energy_transfer is fully dask-lazy (calculate_energy_transfer() never .load()s its own output); writing a
-# lazy slice via .to_netcdf() computes it via dask's threaded scheduler *during* the write, with multiple
-# threads writing into the same HDF5 file handle -- the same hang risk fixed for
-# local_potential_energies_timeseries() in aux01_pe_functions.py. Loading one timestep at a time (not the
-# whole energy_transfer up front -- that's the "hundreds of GB" case the comment below is about) keeps this
-# bounded and makes each per-timestep write purely synchronous.
+# energy_transfer is dask-lazy here too -- each piece re-read from its own on-disk checkpoint above
+# (open_dataset(...).chunk() is always lazy regardless of the checkpoint's own data having been eager on
+# disk, same as 03_energy_transfer.py's identical re-read). Writing a lazy slice via .to_netcdf() computes it
+# via dask's threaded scheduler *during* the write, with multiple threads writing into the same HDF5 file
+# handle -- the same hang risk fixed for local_potential_energies_timeseries() in aux01_pe_functions.py.
+# Loading one timestep at a time (not the whole energy_transfer up front -- that's the "hundreds of GB" case
+# the comment below is about) keeps this bounded and makes each per-timestep write purely synchronous.
 with ProgressBar(minimum=5, dt=5):
     for i in range(energy_transfer.sizes["time"]):
         tmp_f = str(tmp_dir / f"t{i:04d}.nc")
@@ -111,4 +186,9 @@ for f in tmp_files:
     os.remove(f)
 tmp_dir.rmdir()
 print(f"Results saved to: {output_filename}")
+
+print("\nDeleting intermediate checkpoint files...")
+for f in checkpoint_files:
+    f.unlink(missing_ok=True)
+    print(f"  Deleted: {f.name}")
 #---

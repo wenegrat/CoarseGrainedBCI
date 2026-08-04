@@ -15,9 +15,10 @@
 
 # Final figures and animations from the post-processed budgets (budgeting.pbs must have run first).
 #   plot3_budgets.py           -- combined 2x2 KE/APE budget panel across both filter scales
-#   plot5_vorticity_strain_flux.py, plot6_middepth_snapshots.py -- once per filter scale, at each depth in
-#                                  Z_VALUES_M (mid-depth and surface by default; both scripts' own --z default
-#                                  is mid-depth alone, this loop adds the surface pass)
+#   plot5_vorticity_strain_flux.py, plot6_snapshots.py, plot7_flux_phase_space.py -- once per filter scale,
+#                                  at each depth in Z_VALUES_M (mid-depth and surface by default; all three
+#                                  scripts' own --z default is mid-depth alone, this loop adds the surface
+#                                  pass)
 #   anim2_surface_buoyancy.py  -- surface buoyancy GIF
 #   anim3_panels.py            -- once per filter scale (surface fields + budget time series GIF)
 set -eo pipefail
@@ -59,10 +60,15 @@ print(' '.join(str(float(x)) for x in ds.filter_scale.values))
 ")
 fi
 
+# plot5/plot7 pool snapshots over a time range and default to a fixed 15-30 day window (see their own
+# --time-min/--time-max) -- left unpassed here deliberately, so every run gets plotted over that same fixed
+# window rather than one that silently shifts with each run's own length. Pass --time-min/--time-max
+# explicitly (not via this script) for a run-length-relative window instead.
 for FS in $LOOP_SCALES; do
     for Z in $Z_VALUES_M; do
         time $PYTHON -u plot5_vorticity_strain_flux.py --filename output/${SIM}.nc --filter-scale $FS --z $Z 2>&1 | tee -a $LOG
-        time $PYTHON -u plot6_middepth_snapshots.py    --filename output/${SIM}.nc --filter-scale $FS --z $Z 2>&1 | tee -a $LOG
+        time $PYTHON -u plot6_snapshots.py --filename output/${SIM}.nc --filter-scale $FS --z $Z 2>&1 | tee -a $LOG
+        time $PYTHON -u plot7_flux_phase_space.py --filename output/${SIM}.nc --filter-scale $FS --z $Z 2>&1 | tee -a $LOG
     done
 done
 
