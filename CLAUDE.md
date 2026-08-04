@@ -285,9 +285,22 @@ invocation picks it up automatically.
 
 ### Physical setup (`baroclinic_adjustment.jl`)
 - Model: `NonhydrostaticModel` (no free surface at all -- see Notes for why this replaced the earlier
-  `HydrostaticFreeSurfaceModel`+`ImplicitFreeSurface` setup), `BetaPlane` Coriolis, `BuoyancyTracer`,
-  `Centered(order=4)` advection, `ScalarDiffusivity(ν, κ)` closure. w is a genuine prognostic variable
+  `HydrostaticFreeSurfaceModel`+`ImplicitFreeSurface` setup), `FPlane` Coriolis (`BuoyancyTracer`,
+  `Centered(order=4)` advection, `ScalarDiffusivity(ν, κ)` closure). w is a genuine prognostic variable
   here, with its own momentum equation and dissipative dynamics.
+- **`FPlane`, not `BetaPlane` -- this branch's own change, see below.** The domain is doubly-periodic in x
+  *and* y (next bullet), and a linear-in-y β term is fundamentally inconsistent with periodicity in y: the
+  two edges of a periodic y-domain are the same physical point after wraparound, so f(y) must agree there,
+  but `f₀+βy` gives `f(-Ly/2) ≠ f(+Ly/2)` whenever β≠0 -- a jump of exactly `β·Ly` right at the seam, ~16%
+  of f₀ at this domain's defaults (`Ly=1000km`, `latitude=-45°`), not a negligible rounding artifact. Since
+  this codebase's own diagnostics (Πₖ, Π_A) integrate over the *entire* domain, that artificial discontinuity
+  risked contaminating exactly the budgets this project cares about. `BetaPlane`-on-a-periodic-channel is a
+  known idealization in beta-plane-turbulence literature (treating the domain as a small "local patch" and
+  accepting the seam artifact) -- legitimate elsewhere, but not the choice made on this branch. The
+  trade-off is real, not a free fix: no β-effect at all here (no Rossby-wave propagation, no meridional
+  variation in the Coriolis parameter). The geostrophic initial condition (below) reads `model.coriolis.f`
+  instead of the beta-plane branch's `.f₀`/`.β` pair, but is otherwise unchanged -- `f_cor(y)` is still
+  written as a function of y for the same call signature, it just always returns the one constant `f`.
 - Grid: `(Periodic, Periodic, Bounded)` -- a **double front** rather than a single front against channel
   walls: two opposite-signed buoyancy ramps (`double_ramp`) so the field closes periodically in y. This
   avoids side-wall boundary layers (an extra KE sink the budget would otherwise need to account for) and

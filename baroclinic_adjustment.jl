@@ -87,7 +87,7 @@ let s = ArgParseSettings()
             default = 0.01
 
         "--latitude"
-            help = "Latitude for the beta-plane Coriolis approximation (default: -45)"
+            help = "Latitude used to set the (constant) Coriolis parameter f, f-plane approximation (default: -45)"
             arg_type = Float64
             required = false
             default = -45.0
@@ -474,8 +474,21 @@ global params = (; params..., Cd=(Cd === nothing ? 0.0 : Cd))
 # which closes its coarse-grained KE budget cleanly (~11-15% residual/dominant, vs our ~40-60% under the
 # old hydrostatic setup) -- see conversation for the ongoing investigation into how much of that gap is
 # closure/numerics vs. the buoyancy-production-term convention (w̄b̄ vs w̄b̄ᵣ).
+#
+# FPlane (constant f), not BetaPlane: this domain is doubly-periodic in x AND y (see the double-front
+# rationale below), and a linear-in-y β term is fundamentally inconsistent with periodicity in y -- f(y) at
+# the two edges of a periodic domain must be equal (they're the same physical point after wraparound), but
+# f₀+βy gives f(-Ly/2) ≠ f(+Ly/2) whenever β≠0, a jump of exactly β·Ly right at the periodic seam. At this
+# domain's defaults (Ly=1000km, latitude=-45°) that jump is ~16% of f₀ -- not a negligible rounding
+# artifact. BetaPlane-on-a-periodic-channel is a common idealization in beta-plane-turbulence literature
+# (treating the domain as a small "local patch" and accepting the seam artifact), but given this codebase's
+# diagnostics integrate Πₖ/Π_A over the *entire* domain, an artificial discontinuity at the domain edge
+# risks contaminating exactly the budgets this project cares about. FPlane removes the inconsistency
+# entirely at the cost of the β-effect itself (no Rossby-wave propagation, no meridional variation in the
+# Coriolis parameter) -- a real physics trade-off, not a free fix, so this is its own branch rather than
+# folded into the beta-plane setup.
 model = NonhydrostaticModel(grid;
-                            coriolis = BetaPlane(latitude=params.latitude),
+                            coriolis = FPlane(latitude=params.latitude),
                             buoyancy = BuoyancyTracer(),
                             tracers = :b,
                             advection = advection_scheme,
@@ -523,11 +536,12 @@ double_ramp_prime(y, Δy) = ramp_prime(y - y₁, Δy) - ramp_prime(y - y₂, Δy
 
 # Reused directly from the model's own coriolis object (not recomputed from params.latitude independently)
 # so this is guaranteed consistent with whatever Coriolis parameter the momentum equation itself actually
-# uses going forward -- a hand-rederived β could silently drift from Oceananigans' own value (e.g. a
-# different assumed planetary radius) without erroring.
-f₀ = model.coriolis.f₀
-β  = model.coriolis.β
-f_cor(y) = f₀ + β * y
+# uses going forward -- a hand-rederived f could silently drift from Oceananigans' own value (e.g. a
+# different assumed planetary radius) without erroring. FPlane has no β term (see the model-construction
+# comment above for why) -- f_cor(y) is still written as a function of y, unused, purely so this line reads
+# identically to the beta-plane form and u_geo below needs no change at all between the two branches.
+f₀ = model.coriolis.f
+f_cor(y) = f₀
 
 # Thermal wind: f ∂u/∂z = -∂b/∂y, integrated from a reference level z_ref where u=0. z_ref = -Lz/2
 # (mid-depth) specifically so the initial state carries no barotropic (depth-independent) velocity
