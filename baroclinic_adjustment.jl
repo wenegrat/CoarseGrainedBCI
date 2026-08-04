@@ -257,7 +257,7 @@ let s = ArgParseSettings()
 
         "--filter_scales_m"
             help = "Two horizontal filter scales (FWHM, in meters) for the online coarse-graining diagnostics \
-                    (default: 50000 100000), matching the units used throughout the offline post-processing \
+                    (default: 12000 50000), matching the units used throughout the offline post-processing \
                     pipeline (--filter-scales/FILTER_SCALES_M). Renamed from the old --filter_scales (which \
                     took km) specifically so a stale invocation fails loudly (unrecognized argument) instead \
                     of silently applying scales 1000x too small. No halo-size penalty for large scales -- the \
@@ -266,7 +266,7 @@ let s = ArgParseSettings()
             arg_type = Float64
             nargs = 2
             required = false
-            default = [50000.0, 100000.0]
+            default = [12000.0, 50000.0]
 
         "--progress_interval"
             help = "Print a progress message every this many iterations (default: 100; use a small value \

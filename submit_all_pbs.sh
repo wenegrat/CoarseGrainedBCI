@@ -12,7 +12,7 @@
 #   SWEEP       also run the many-filter-scale sweep (sweep1/2/3) after budgeting: 0 or 1
 #   EXTRA_ARGS  extra baroclinic_adjustment.jl CLI args, passed through verbatim (quote multi-word values).
 #               The simulation's own online filter scales are set here via --filter_scales_m, in METERS
-#               (e.g. EXTRA_ARGS='--filter_scales_m 30000 60000'; default 50000 100000).
+#               (e.g. EXTRA_ARGS='--filter_scales_m 30000 60000'; default 12000 50000).
 #   GPU         1 requests an A100 for the simulation stage only (see submit_simulation.sh); post-processing
 #               stages are pure CPU/numpy/dask regardless and are unaffected
 #   FILTER_SCALES_M   offline post-processing filter scales, in meters, passed to budgeting_filter.pbs

@@ -28,7 +28,7 @@ julia --project -t 8 baroclinic_adjustment.jl --Nx 16 --Ny 16 --Nz 4 --stop_time
 ```
 CLI args: `--Nx`, `--Ny`, `--Nz` (default 48, 48, 8), `--N2`, `--M2`, `--front_width`, `--perturbation_amplitude`,
 `--latitude`, `--nu`, `--Pr`, `--stop_time` (days, default 20), `--filter_scales_m` (two horizontal FWHM scales
-in meters, default 50000 100000 -- matches the units used throughout the offline post-processing pipeline;
+in meters, default 12000 50000 -- matches the units used throughout the offline post-processing pipeline;
 renamed from the old km-based `--filter_scales` specifically so a stale invocation fails loudly instead of
 silently applying scales 1000x too small), `--progress_interval` (default 100; use a small value for
 short/smoke-test runs where the default interval may never be reached), `--advection_scheme` (`centered`
@@ -255,7 +255,7 @@ by the repo alone, since it's personal shell config.
 ### Post-processing
 ```bash
 cd postprocessing
-bash 00_get_budgets.sh output/bci_Nx48_Ny48_Nz8.nc --filter-scales 50000 100000
+bash 00_get_budgets.sh output/bci_Nx48_Ny48_Nz8.nc --filter-scales 12000 50000
 ```
 Set `N_WORKERS` env var to control parallelism (default 1): `N_WORKERS=4 bash 00_get_budgets.sh ...`
 

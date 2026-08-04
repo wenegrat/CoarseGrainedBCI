@@ -55,7 +55,7 @@ julia --project -t 8 baroclinic_adjustment.jl
 julia --project -t 8 baroclinic_adjustment.jl --Nx 16 --Ny 16 --Nz 4 --stop_time 1
 
 # Custom filter scales (horizontal FWHM, in meters) for the online filtered-field diagnostics
-julia --project -t 8 baroclinic_adjustment.jl --filter_scales_m 50000 100000
+julia --project -t 8 baroclinic_adjustment.jl --filter_scales_m 30000 60000
 ```
 
 Run with `--help` for the full list of CLI arguments (front width, N², M², latitude, viscosity, etc.).
@@ -83,7 +83,7 @@ budgeting_filter → budgeting → plots chain, without resubmitting the simulat
 | `GPU=1` | Run the simulation stage on an A100 (post-processing stages are always CPU) |
 | `SWEEP=1` | Also run the many-filter-scale transfer-spectrum sweep after budgeting (`submit_all_pbs.sh` only) |
 | `FIXED_REF=0\|1\|both` | Fixed-in-time vs. recomputed reference density profile |
-| `FILTER_SCALES_M='30000 60000'` | Offline post-processing filter scales, in **meters** (default `"50000 100000"`) |
+| `FILTER_SCALES_M='30000 60000'` | Offline post-processing filter scales, in **meters** (default: unset, i.e. use whatever `--filter_scales_m` the simulation itself was run with) |
 | `EXTRA_ARGS='...'` | Any `baroclinic_adjustment.jl` CLI flag, passed through verbatim -- this is how GPU-adjacent numerics options (advection scheme, closure, Péclet numbers) reach the simulation |
 
 ```bash
@@ -121,7 +121,7 @@ and layout.
 
 ```bash
 cd postprocessing
-bash 00_get_budgets.sh output/bci_Nx48_Ny48_Nz8.nc --filter-scales 50000 100000
+bash 00_get_budgets.sh output/bci_Nx48_Ny48_Nz8.nc --filter-scales 12000 50000
 ```
 
 Set `N_WORKERS` to control parallelism: `N_WORKERS=4 bash 00_get_budgets.sh ...`.
