@@ -3,6 +3,7 @@
 import gc
 import os
 from pathlib import Path
+import shutil
 import time
 import dask
 import numpy as np
@@ -144,7 +145,15 @@ print("Saving results...")
 energy_transfer.attrs.update(ds.attrs)
 output_filename = str(PP_OUTPUT / (Path(filename).stem + f"_energy_transfer_sweep{ref_suffix}.nc"))
 tmp_dir = PP_OUTPUT / (Path(output_filename).stem + "_tmp")
-tmp_dir.mkdir(exist_ok=True)
+# Same class of issue as the stale-checkpoint fix above: this run's own cleanup at the bottom only knows
+# about the files *it* wrote (tmp_files), so any leftovers from an earlier run against this same output
+# filename that didn't reach that cleanup (crashed, killed, walltime limit) -- especially a run with a
+# different number of timesteps -- silently persist here. Confirmed as a real production issue: tmp_dir.rmdir()
+# failed with "Directory not empty" after a successful write, because stale t{i:04d}.nc files from a prior,
+# larger run were still sitting alongside this run's own (fewer) files. Clearing the directory unconditionally
+# before this run writes anything guarantees a clean slate regardless of what an earlier run left behind.
+shutil.rmtree(tmp_dir, ignore_errors=True)
+tmp_dir.mkdir()
 tmp_files = []
 # energy_transfer is dask-lazy here too -- each piece re-read from its own on-disk checkpoint above
 # (open_dataset(...).chunk() is always lazy regardless of the checkpoint's own data having been eager on

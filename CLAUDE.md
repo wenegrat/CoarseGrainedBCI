@@ -367,6 +367,19 @@ don't have this specific failure mode (no `--n-time-skip`-equivalent knob that c
 between runs against the same input) and weren't changed, but carry the same generic risk described above
 if their own inputs ever change out from under a stale checkpoint.
 
+The same class of bug hit `sweep2_energy_transfer.py`'s *other* transient-file directory too, one layer
+further down: the per-timestep `_tmp/` directory its final merge-write step uses (see `01_filter_fields.py`'s
+analogous per-scale tmp files) used to be created with `mkdir(exist_ok=True)` and cleaned up at the end by
+removing only the files *this run itself* wrote (`tmp_files`) before `rmdir()`-ing the now-supposedly-empty
+directory. A run that left stale `t{i:04d}.nc` files behind (crashed, killed, walltime limit -- especially
+one with *more* timesteps than a later run) meant `rmdir()` failed with "Directory not empty" on an
+otherwise-successful run, confirmed directly in production -- and since `sweep_transfer.pbs` runs under `set
+-eo pipefail`, that uncaught error aborted `sweep3`/`sweep4` even though `sweep2`'s own actual output file had
+already been written correctly (the crash is the very last line, after the real work is done). Fixed the same
+way as the checkpoint issue: `shutil.rmtree(tmp_dir, ignore_errors=True)` before `mkdir()`, guaranteeing a
+clean slate up front rather than trusting this run's own bookkeeping to fully account for the directory's
+actual contents at cleanup time.
+
 `03_energy_transfer.py`'s `calculate_energy_transfer()` (`aux02_ke_functions.py`) already computes the
 filtered-density local potential-energy fields (z₀(ρ̄), Υˡ, Dˡ, Ea(ρ̄,z), via
 `local_potential_energies_timeseries()` on `ds_filt_ℓ`) per scale, purely as an intermediate for Π_A --
