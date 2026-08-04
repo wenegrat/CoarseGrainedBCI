@@ -474,11 +474,21 @@ to submit as separate concurrent jobs that this restructuring was a prerequisite
 `sweep3` also gained a second row of panels that was previously missing: it already computed a `1/ℓ`
 coordinate (`inv_scale`) specifically so a proper spectrum line plot could use it as the x-axis, but the
 plotting code only ever drew the Hovmöllers -- the spectrum itself was never implemented. Now it also plots
-the time-mean (±1 std across time, excluding the first `--min-time-days` as an initial-transient cutoff)
-of ∫Π_K dV/∫Π_A dV vs. 1/ℓ, with a dashed vertical line at the theoretical Eady deformation radius
-`Ld = N·Lz/|f0|` (computed from the run's own `N2`/`Lz`/`latitude` attrs). The shaded band is temporal
+the time-mean (±1 std across time, restricted to `[--min-time-days, --max-time-days]`, default the full
+available range) of ∫Π_K dV/∫Π_A dV vs. 1/ℓ, with a dashed vertical line at the theoretical Eady deformation
+radius `Ld = N·Lz/|f0|` (computed from the run's own `N2`/`Lz`/`latitude` attrs). The shaded band is temporal
 spread of the diagnostic itself, not a statistical confidence interval -- there's only one simulation
-realization, so don't read it as sampling uncertainty on the mean.
+realization, so don't read it as sampling uncertainty on the mean. `--max-time-days` (default `None`, i.e.
+the latest available time) applies to the Hovmöller panels too, not just the spectrum average -- e.g. pass
+`--max-time-days 30` to see what the whole figure would look like using only the first 30 days of a longer
+run, not just the spectrum's own time-mean over that window while the Hovmöller still shows everything.
+
+`sweep4_plot_depth_scale.py` (depth vs. `1/ℓ` structure of the horizontally- and time-averaged Πₖ/Π_A/Πₖ+Π_A,
+one panel each) gained the equivalent `--max-time-days` alongside its existing `--min-time-days` (default 5
+days, a longer initial-transient cutoff than `sweep3`'s 1 day -- this plot averages over depth *and* time,
+so needs the flow more settled). It was also missing the `ConsecutiveIterations` pair dedup `sweep3` already
+had (see the time-axis-pairs Note below) -- its time average was silently double-weighting near-identical
+snapshot pairs before this fix.
 
 `anim3_panels.py` is also new: a 6-panel GIF animation (`--filename ...`, `--filter-scale` in meters,
 `--fps`, `--dpi`, `--clim-percentile`) combining surface buoyancy, surface Rossby number ζ/f, the SFS
@@ -642,14 +652,16 @@ quantity get plotted across this pipeline, and only one of them was actually mis
   range -- will silently process roughly double the expected sample count, double-weighting each real
   snapshot's near-identical pair partner rather than genuinely pooling that many independent samples.
   Caught via a real report: `plot5_vorticity_strain_flux.py` printed "41 snapshots" for a 10-day window at a
-  12h output interval (expected 21). Fixed in `plot5_vorticity_strain_flux.py` and
-  `sweep3_plot_transfer_spectrum.py` (both pool/average over a time range) by keeping only the first member
-  of each pair -- `ds.isel(time=slice(0, None, 2))` -- applied to the *full*, unsliced time axis immediately
-  after loading, before any `--time-min`/`--time-max`/`--min-time-days` selection, so the pair parity stays
-  anchored to the simulation start regardless of the chosen window. `plot3_budgets.py` (each raw point
-  plotted as its own point on a line) and `anim3_panels.py` (each raw point is its own animation frame) show
-  the same underlying duplication but only as a cosmetic double-point/stutter, not a statistical pooling
-  bias, and were left as-is.
+  12h output interval (expected 21). Fixed in `plot5_vorticity_strain_flux.py`,
+  `sweep3_plot_transfer_spectrum.py`, and `sweep4_plot_depth_scale.py` (all pool/average over a time range)
+  by keeping only the first member of each pair -- `ds.isel(time=slice(0, None, 2))` -- applied to the
+  *full*, unsliced time axis immediately after loading, before any `--time-min`/`--time-max`/
+  `--min-time-days`/`--max-time-days` selection, so the pair parity stays anchored to the simulation start
+  regardless of the chosen window. `sweep4` was missing this fix entirely until caught alongside adding its
+  `--max-time-days` (same commit) -- it had no dedup at all, not even a broken one. `plot3_budgets.py` (each
+  raw point plotted as its own point on a line) and `anim3_panels.py` (each raw point is its own animation
+  frame) show the same underlying duplication but only as a cosmetic double-point/stutter, not a statistical
+  pooling bias, and were left as-is.
 
   `sweep1_filter_fields.py`'s `--n-time-skip` (`(i // 2) % n_time_skip == 0`, dividing the raw index by 2
   before the skip logic) looked like it already accounted for this, but didn't: at the default

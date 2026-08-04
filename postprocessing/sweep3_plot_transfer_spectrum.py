@@ -13,7 +13,8 @@ import argparse
 parser = argparse.ArgumentParser(description="Plot cross-scale KE and APE transfer spectra")
 parser.add_argument("--filename", default="output/bci_Nx48_Ny48_Nz8.nc", help="Path to simulation NetCDF file (used to derive energy transfer filename)")
 parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load output produced with the fixed-in-time reference profile")
-parser.add_argument("--min-time-days", type=float, default=1.0, help="Exclude time samples before this (in days) from the time-averaged spectrum panel -- the first ~1-2 saved samples are dominated by a large initial transient unrelated to the ongoing cascade (default 1.0)")
+parser.add_argument("--min-time-days", type=float, default=1.0, help="Exclude time samples before this (in days) -- the first ~1-2 saved samples are dominated by a large initial transient unrelated to the ongoing cascade (default 1.0). Applies to both the Hovmöller and the time-averaged spectrum panel.")
+parser.add_argument("--max-time-days", type=float, default=None, help="Exclude time samples after this (in days). Defaults to the latest available time (no upper restriction) -- e.g. pass 30 to see what the plots would look like using only the first 30 days of a longer run.")
 args = parser.parse_args()
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
@@ -38,6 +39,14 @@ et = xr.open_dataset(input_filename, decode_timedelta=False)
 # the first member of each pair (same ::2 pattern already used for this exact structure elsewhere), on the
 # full time axis before any time-based selection so the pair parity stays anchored to the simulation start.
 et = et.isel(time=slice(0, None, 2))
+
+# Restrict to the requested [--min-time-days, --max-time-days] window -- default is the full available
+# range (no restriction). Applied once, here, to the shared et used by both the Hovmöller and the
+# time-averaged spectrum panel below, so --max-time-days genuinely shows "what the plots would look like"
+# over a shorter window rather than only affecting the spectrum average while the Hovmöller still shows
+# the full run.
+t_max_sec = args.max_time_days * 86400 if args.max_time_days is not None else float(et.time.max())
+et = et.sel(time=slice(args.min_time_days * 86400, t_max_sec))
 
 # Add 1/ℓ as a non-dimension coordinate so plot.line can use it as the x axis
 et = et.assign_coords(inv_scale=("filter_scale", 1.0 / et.filter_scale.values))
@@ -79,14 +88,14 @@ for ax, var in zip(axes[0], ["∫Π_K dV", "∫Π_A dV"]):
 axes[0,0].set_title("KE cross-scale transfer (Hovmöller)")
 axes[0,1].set_title("APE cross-scale transfer (Hovmöller)")
 
-# Time-averaged spectrum: mean (and ±1 std across time) of Π_K/Π_A vs. 1/ℓ, excluding the initial transient
-et_avg = et.sel(time=slice(args.min_time_days * 86400, None))
+# Time-averaged spectrum: mean (and ±1 std across time) of Π_K/Π_A vs. 1/ℓ, over the [--min-time-days,
+# --max-time-days] window already applied to et above.
 var_labels = {"∫Π_K dV": r"$\langle\Pi_K\rangle$", "∫Π_A dV": r"$\langle\Pi_A\rangle$"}
 for ax, var, title in zip(axes[1], ["∫Π_K dV", "∫Π_A dV"], ["KE cross-scale transfer spectrum", "APE cross-scale transfer spectrum"]):
-    mean = et_avg[var].mean("time") / V_total
-    std = et_avg[var].std("time") / V_total
-    ax.plot(et_avg.inv_scale, mean, marker="o", color="C0")
-    ax.fill_between(et_avg.inv_scale, mean - std, mean + std, color="C0", alpha=0.25)
+    mean = et[var].mean("time") / V_total
+    std = et[var].std("time") / V_total
+    ax.plot(et.inv_scale, mean, marker="o", color="C0")
+    ax.fill_between(et.inv_scale, mean - std, mean + std, color="C0", alpha=0.25)
     ax.axhline(0, color="gray", lw=0.5)
     ax.axvline(inv_Ld, color="k", ls="--", lw=1.2, label=f"$L_d$={Ld/1e3:.1f}km")
     ax.legend(fontsize=9, loc="best")
