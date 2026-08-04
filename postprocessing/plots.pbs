@@ -19,8 +19,9 @@
 #                                  at each depth in Z_VALUES_M (mid-depth and surface by default; all three
 #                                  scripts' own --z default is mid-depth alone, this loop adds the surface
 #                                  pass)
-#   plot8_depth_profile.py     -- once per filter scale (no --z: plots the full depth profile in one go,
-#                                  so it sits outside the Z_VALUES_M loop rather than being rerun per depth)
+#   plot8_depth_profile.py     -- once total, like plot3_budgets.py (both filter scales as side-by-side
+#                                  panels in one figure, not a per-scale loop; no --z either, since it plots
+#                                  the full depth profile in one go)
 #   anim2_surface_buoyancy.py  -- surface buoyancy GIF
 #   anim3_panels.py            -- once per filter scale (surface fields + budget time series GIF)
 set -eo pipefail
@@ -50,6 +51,7 @@ if [ -n "$FILTER_SCALES_M" ]; then
     FILTER_SCALES_FLAG=(--filter-scales $SCALE_A $SCALE_B)
 fi
 time $PYTHON -u plot3_budgets.py --filename output/${SIM}.nc "${FILTER_SCALES_FLAG[@]}" 2>&1 | tee $LOG
+time $PYTHON -u plot8_depth_profile.py --filename output/${SIM}.nc "${FILTER_SCALES_FLAG[@]}" 2>&1 | tee -a $LOG
 
 # Scales to loop plot5/plot6/anim3 over: explicit FILTER_SCALES_M, else every scale actually in the budget
 # file (guaranteed to exist at this point -- budgeting.pbs must have completed before plots.pbs runs).
@@ -72,7 +74,6 @@ for FS in $LOOP_SCALES; do
         time $PYTHON -u plot6_snapshots.py --filename output/${SIM}.nc --filter-scale $FS --z $Z 2>&1 | tee -a $LOG
         time $PYTHON -u plot7_flux_phase_space.py --filename output/${SIM}.nc --filter-scale $FS --z $Z 2>&1 | tee -a $LOG
     done
-    time $PYTHON -u plot8_depth_profile.py --filename output/${SIM}.nc --filter-scale $FS 2>&1 | tee -a $LOG
 done
 
 time $PYTHON -u anim2_surface_buoyancy.py --filename output/${SIM}.nc 2>&1 | tee -a $LOG
