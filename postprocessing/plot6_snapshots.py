@@ -84,8 +84,9 @@ print(f"z = {z_sel:.1f} m")
 print("Building figure...")
 fig, axes = plt.subplots(2, 3, figsize=(16, 10), constrained_layout=True)
 
-def plot_field(ax, field, title, unit, cmap="RdBu_r", contour_field=None):
-    vmax = np.nanpercentile(np.abs(field.values), args.clim_percentile)
+def plot_field(ax, field, title, unit, cmap="RdBu_r", contour_field=None, vmax=None):
+    if vmax is None:
+        vmax = np.nanpercentile(np.abs(field.values), args.clim_percentile)
     # set_edgecolor("face") avoids a known pcolormesh rendering artifact -- thin white seams between
     # adjacent quads in vector output (PDF) -- that a plain shading="auto" call leaves in. Deliberately NOT
     # passing linewidth=0: verified empirically (throwaway test, not committed) that linewidth=0 does NOT
@@ -105,16 +106,24 @@ def plot_field(ax, field, title, unit, cmap="RdBu_r", contour_field=None):
     ax.set_ylabel("y [km]")
     fig.colorbar(im, ax=ax, shrink=0.85, label=unit)
 
+# conv/Π_A/Π_total share one colorscale -- close enough in magnitude to each other that a shared linear
+# scale doesn't wash any of them out (unlike Πₖ, which runs noticeably weaker than all three and would be
+# reduced to a near-blank panel if forced onto the same scale). vmax is the max of each of the three terms'
+# own clim_percentile -- robust to a single outlier pixel in whichever one has the heaviest tail, rather
+# than the literal max, matching this script's existing per-panel percentile-clipping convention. Πₖ keeps
+# its own independent auto-scaled vmax, same as b/ζ-f already get.
+shared_vmax = float(max(np.nanpercentile(np.abs(f.values), args.clim_percentile) for f in [conv, Pi_A, Pi_total]))
+
 # Units: b is a Boussinesq buoyancy (acceleration, m s⁻²); ζ/f is dimensionless by construction; conv/Πₖ/
 # Π_A/their sum are all raw (unintegrated) specific cross-scale fluxes, m² s⁻³ -- no ρ₀ factor anywhere in
 # this codebase's fully Boussinesq/per-unit-mass convention (see aux02_ke_functions.py's
 # calculate_cross_scale_ke_flux()).
 plot_field(axes[0,0], b,         f"buoyancy b\nt={t_days:.1f}d, z={z_sel:.0f}m",                    "m s⁻²")
 plot_field(axes[0,1], zeta_norm, f"Rossby number ζ/f\nt={t_days:.1f}d, z={z_sel:.0f}m",              "")
-plot_field(axes[0,2], conv,      f"buoyancy conversion (SFS APE→KE, ℓ={ℓ_km}km)\nt={t_days:.1f}d, z={z_sel:.0f}m", "m² s⁻³", contour_field=b)
+plot_field(axes[0,2], conv,      f"buoyancy conversion (SFS APE→KE, ℓ={ℓ_km}km)\nt={t_days:.1f}d, z={z_sel:.0f}m", "m² s⁻³", contour_field=b, vmax=shared_vmax)
 plot_field(axes[1,0], Pi_K,      f"cross-scale KE flux Πₖ (ℓ={ℓ_km}km)\nt={t_days:.1f}d, z={z_sel:.0f}m",  "m² s⁻³", contour_field=b)
-plot_field(axes[1,1], Pi_A,      f"cross-scale APE flux Π_A (ℓ={ℓ_km}km)\nt={t_days:.1f}d, z={z_sel:.0f}m", "m² s⁻³", contour_field=b)
-plot_field(axes[1,2], Pi_total,  f"total cross-scale flux Πₖ+Π_A (ℓ={ℓ_km}km)\nt={t_days:.1f}d, z={z_sel:.0f}m", "m² s⁻³", contour_field=b)
+plot_field(axes[1,1], Pi_A,      f"cross-scale APE flux Π_A (ℓ={ℓ_km}km)\nt={t_days:.1f}d, z={z_sel:.0f}m", "m² s⁻³", contour_field=b, vmax=shared_vmax)
+plot_field(axes[1,2], Pi_total,  f"total cross-scale flux Πₖ+Π_A (ℓ={ℓ_km}km)\nt={t_days:.1f}d, z={z_sel:.0f}m", "m² s⁻³", contour_field=b, vmax=shared_vmax)
 
 fig.suptitle(f"{stem}: z={z_sel:.0f}m snapshots", fontsize=14)
 
