@@ -19,6 +19,8 @@
 #                                  at each depth in Z_VALUES_M (mid-depth and surface by default; all three
 #                                  scripts' own --z default is mid-depth alone, this loop adds the surface
 #                                  pass)
+#   plot8_depth_profile.py     -- once per filter scale (no --z: plots the full depth profile in one go,
+#                                  so it sits outside the Z_VALUES_M loop rather than being rerun per depth)
 #   anim2_surface_buoyancy.py  -- surface buoyancy GIF
 #   anim3_panels.py            -- once per filter scale (surface fields + budget time series GIF)
 set -eo pipefail
@@ -60,7 +62,7 @@ print(' '.join(str(float(x)) for x in ds.filter_scale.values))
 ")
 fi
 
-# plot5/plot7 pool snapshots over a time range and default to a fixed 15-30 day window (see their own
+# plot5/plot7/plot8 pool snapshots over a time range and default to a fixed 15-30 day window (see their own
 # --time-min/--time-max) -- left unpassed here deliberately, so every run gets plotted over that same fixed
 # window rather than one that silently shifts with each run's own length. Pass --time-min/--time-max
 # explicitly (not via this script) for a run-length-relative window instead.
@@ -70,6 +72,7 @@ for FS in $LOOP_SCALES; do
         time $PYTHON -u plot6_snapshots.py --filename output/${SIM}.nc --filter-scale $FS --z $Z 2>&1 | tee -a $LOG
         time $PYTHON -u plot7_flux_phase_space.py --filename output/${SIM}.nc --filter-scale $FS --z $Z 2>&1 | tee -a $LOG
     done
+    time $PYTHON -u plot8_depth_profile.py --filename output/${SIM}.nc --filter-scale $FS 2>&1 | tee -a $LOG
 done
 
 time $PYTHON -u anim2_surface_buoyancy.py --filename output/${SIM}.nc 2>&1 | tee -a $LOG
