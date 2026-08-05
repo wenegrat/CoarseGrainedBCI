@@ -1,6 +1,7 @@
 # Baroclinic adjustment (double-front, doubly-periodic-horizontal channel)
 using Oceananigans
 using Oceananigans.Units
+using Oceananigans.Grids: znode
 using Printf
 using Random
 using ArgParse
@@ -64,6 +65,39 @@ let s = ArgParseSettings()
                     buoyancy is constant (well-mixed) from the surface down to this depth, then stratified \
                     at the background N² below it, continuous at the base of the mixed layer. Pass e.g. \
                     200 for a 200 m mixed layer."
+            arg_type = Float64
+            required = false
+            default = 0.0
+
+        "--mixed_layer_kappa_v"
+            help = "Extra vertical diffusivity for buoyancy (only -- not viscosity), in m² s⁻¹, applied \
+                    everywhere above -mixed_layer_depth for the entire run, on top of whatever the main \
+                    --closure already provides (default: 0.0, i.e. disabled). Ignored unless \
+                    --mixed_layer_depth > 0 (warns and is skipped if set without it). Rationale: mixed-layer \
+                    instability (MLI) both grows *and* shuts itself off via the same route -- it converts the \
+                    mixed layer's own lateral buoyancy gradient into vertical stratification (restratification, \
+                    Boccaletti et al. 2007), and once that stratification builds up MLI has nothing left to \
+                    feed on. A one-off run therefore gets a single burst of submesoscale activity that \
+                    dies out long before mesoscale baroclinic instability (a much slower, ~15+ day process \
+                    at this file's own default parameters) has had time to develop, so the two scales never \
+                    actually coexist. Continuously mixing away the mixed layer's own stratification (this \
+                    flag) keeps MLI perpetually unable to fully restratify -- rather than damping the \
+                    instability directly (which would need picking a cutoff time, and getting it wrong \
+                    either starves mesoscale of time to grow or suppresses submesoscale for longer than \
+                    needed), this targets only the shutdown mechanism, needs no cutoff at all, and only \
+                    touches vertical (not horizontal) mixing so the lateral submesoscale structure itself \
+                    isn't smeared out. A depth-dependent (not spatially-uniform) κ is implemented via \
+                    ScalarDiffusivity's discrete_form=true + parameters= mechanism (confirmed directly against \
+                    the installed Oceananigans version -- a real model built and run one timestep) rather than \
+                    closing over --mixed_layer_depth/--mixed_layer_kappa_v as globals, which would hit the \
+                    same non-const-global-in-a-hot-path-function performance trap already documented for \
+                    --bottom_drag's Cd. Composed as an additional closure alongside whatever --closure already \
+                    selected (Oceananigans sums diffusivities across a tuple of closures), so it needs no \
+                    changes to the scale_aware/constant/smagorinsky branches. Order of magnitude: mixing away \
+                    stratification on a timescale comparable to MLI's own restratification timescale (order \
+                    days) over a mixed layer depth H needs κ ~ H²/(few days); e.g. H=100m, 3 days gives \
+                    κ~0.03-0.1 m² s⁻¹ -- treat this as a starting point to check empirically, not a precise \
+                    prediction."
             arg_type = Float64
             required = false
             default = 0.0
@@ -418,6 +452,31 @@ else
     # now. A zero-valued ScalarDiffusivity works fine and gives identical physics.)
     (HorizontalScalarDiffusivity(ν=νh, κ=κh),
      VerticalScalarDiffusivity(VerticallyImplicitTimeDiscretization(); ν=νv, κ=κv))
+end
+
+# --mixed_layer_kappa_v: extra vertical diffusivity for buoyancy only, confined above
+# -mixed_layer_depth, for the whole run -- see the flag's own --help for the full rationale (keeps MLI
+# perpetually unable to fully restratify, rather than damping its growth directly, so mesoscale and
+# submesoscale can coexist without needing to pick a cutoff time). Composed as an *additional* closure
+# tuple element, summed with whatever --closure already selected above -- Oceananigans sums diffusivities
+# across a tuple of closures, confirmed directly (a real model built and run one timestep) -- so this needs
+# no changes to the branches above. discrete_form=true + parameters= (not a plain closed-over-globals
+# function) for the same reason --bottom_drag's Cd uses `parameters=`: params.mixed_layer_depth/
+# params.mixed_layer_kappa_v are fields of a non-const, reassigned global, and closing over that directly
+# inside a per-grid-point, per-timestep hot-path function is the same performance trap documented there.
+if params.mixed_layer_kappa_v > 0 && params.mixed_layer_depth <= 0
+    @warn "--mixed_layer_kappa_v=$(params.mixed_layer_kappa_v) has no effect without --mixed_layer_depth > 0; ignoring"
+elseif params.mixed_layer_kappa_v > 0
+    @inline function κ_v_ml(i, j, k, grid, clock, fields, p)
+        z = znode(i, j, k, grid, Center(), Center(), Face())
+        return z > -p.mixed_layer_depth ? p.mixed_layer_kappa_v : zero(z)
+    end
+    ml_closure = VerticalScalarDiffusivity(κ=κ_v_ml, discrete_form=true, loc=(Center, Center, Face),
+                                           parameters=(; mixed_layer_depth=params.mixed_layer_depth,
+                                                          mixed_layer_kappa_v=params.mixed_layer_kappa_v))
+    global closure = (closure..., ml_closure)
+    @info "Mixed-layer persistent submesoscale forcing enabled: extra κᵥ=$(params.mixed_layer_kappa_v) m² s⁻¹ " *
+          "for z > -$(params.mixed_layer_depth) m, for the entire run"
 end
 
 # WENO(order=9) needs a wider stencil (halo≥5) than the grid's fixed halo=(3,3,3) -- order=5 needs halo≥3,
