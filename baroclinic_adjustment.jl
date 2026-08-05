@@ -109,10 +109,10 @@ let s = ArgParseSettings()
             default = 1e-7
 
         "--front_width"
-            help = "Width of each front, in km (default: 150)"
+            help = "Width of each front, in km (default: 200)"
             arg_type = Float64
             required = false
-            default = 150.0
+            default = 200.0
 
         "--perturbation_amplitude"
             help = "Noise amplitude as a fraction of the front's buoyancy jump Δb (default: 0.01)"
