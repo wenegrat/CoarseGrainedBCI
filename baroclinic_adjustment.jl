@@ -312,6 +312,21 @@ let s = ArgParseSettings()
     global parsed_args = parse_args(s, as_symbols=true)
 end
 params = (; parsed_args...)
+
+# --mixed_layer_kappa_v requires --implicit, for now: under a non-implicit closure, the offline ε_Aˢ
+# diagnostic (05_sfs_ape_budget.py) needs to know this term's exact depth-dependent κv to compute
+# dissipation correctly (it does, as of the fix alongside this check -- but that relies on the offline
+# script staying in sync with whatever this flag does, which is more fragile than just disallowing the
+# combination outright). Under --implicit, the existing residual-based ε_Aˢ estimate is robust to this
+# by construction -- it solves the budget from the *other* terms, none of which depend on κ, so it
+# correctly absorbs the ML term's real contribution automatically, the same way it already absorbs
+# WENO's own implicit numerical dissipation. Hard error (not a warning): silently producing a budget
+# that doesn't close under an unsupported combination would be worse than failing loudly here.
+if params.mixed_layer_kappa_v > 0 && !params.implicit
+    error("--mixed_layer_kappa_v > 0 requires --implicit (for now) -- without it, the offline ε_Aˢ " *
+          "dissipation diagnostic would need this term's exact depth-dependent κv to stay correct, " *
+          "which --implicit's own residual-based estimate gets automatically instead.")
+end
 #---
 
 #+++ Define simulation parameters
