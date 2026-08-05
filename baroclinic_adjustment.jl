@@ -52,6 +52,23 @@ let s = ArgParseSettings()
             default = "auto"
             range_tester = (s -> s in ("auto", "cpu", "gpu"))
 
+        "--precision"
+            help = "Floating-point type for the grid and all fields: 'Float64' (default, matches all prior \
+                    behavior) or 'Float32'. Float32 roughly halves GPU memory for essentially every \
+                    persistent field (prognostic, tendency, pressure-solver scratch, diagnostics) -- the \
+                    single biggest lever for a memory-bound high-resolution GPU run (e.g. an OOM at \
+                    1024x1024x64 on a 40GB GPU). Not a free lunch: verify budget closure still looks \
+                    reasonable after switching, since it does trade off some numerical precision. Every \
+                    scalar constant passed into a discrete_form=true/parameters= hot-path function \
+                    (--bottom_drag's Cd, --mixed_layer_kappa_v's mixed_layer_depth/mixed_layer_kappa_v) is \
+                    explicitly converted to match this precision below -- leaving those as literal Float64 \
+                    under a Float32 grid wouldn't break correctness (Julia promotes), but would silently \
+                    force Float64 arithmetic back into what should be a Float32 per-cell kernel."
+            arg_type = String
+            required = false
+            default = "Float64"
+            range_tester = (s -> s in ("Float64", "Float32"))
+
         "--N2"
             help = "Background stratification N² (default: 1e-5 s⁻²)"
             arg_type = Float64
@@ -374,15 +391,17 @@ else # "auto"
 end
 @info "Using architecture: $architecture"
 
-grid = RectilinearGrid(architecture;
+FT = params.precision == "Float32" ? Float32 : Float64
+
+grid = RectilinearGrid(architecture, FT;
                        size=(Nx, Ny, Nz),
                        x=(0, params.Lx),
                        y=(-params.Ly/2, params.Ly/2),
                        z=(-params.Lz, 0),
                        halo=(3, 3, 3),
                        topology=(Periodic, Periodic, Bounded))
-@info "Grid created: Nx=$Nx, Ny=$Ny, Nz=$Nz, halo=(3, 3, 3) (may be auto-inflated below if the advection \
-scheme needs more, e.g. --implicit's WENO(order=$(params.implicit_weno_order)))"
+@info "Grid created: Nx=$Nx, Ny=$Ny, Nz=$Nz, precision=$FT, halo=(3, 3, 3) (may be auto-inflated below if \
+the advection scheme needs more, e.g. --implicit's WENO(order=$(params.implicit_weno_order)))"
 #---
 
 #+++ Create model
@@ -486,9 +505,13 @@ elseif params.mixed_layer_kappa_v > 0
         z = znode(i, j, k, grid, Center(), Center(), Face())
         return z > -p.mixed_layer_depth ? p.mixed_layer_kappa_v : zero(z)
     end
+    # mixed_layer_depth/mixed_layer_kappa_v are cast to FT here (not left as ArgParse's plain Float64):
+    # without this, `z > -p.mixed_layer_depth ? p.mixed_layer_kappa_v : zero(z)` is type-unstable under
+    # --precision Float32 (the two branches would return different types), which is a real problem inside
+    # a per-grid-point GPU kernel, not just a missed precision win.
     ml_closure = VerticalScalarDiffusivity(κ=κ_v_ml, discrete_form=true, loc=(Center, Center, Face),
-                                           parameters=(; mixed_layer_depth=params.mixed_layer_depth,
-                                                          mixed_layer_kappa_v=params.mixed_layer_kappa_v))
+                                           parameters=(; mixed_layer_depth=FT(params.mixed_layer_depth),
+                                                          mixed_layer_kappa_v=FT(params.mixed_layer_kappa_v)))
     global closure = (closure..., ml_closure)
     @info "Mixed-layer persistent submesoscale forcing enabled: extra κᵥ=$(params.mixed_layer_kappa_v) m² s⁻¹ " *
           "for z > -$(params.mixed_layer_depth) m, for the entire run"
@@ -514,7 +537,10 @@ advection_scheme = params.implicit ? WENO(order=params.implicit_weno_order) : (p
 Cd = nothing
 boundary_conditions = NamedTuple()
 if params.bottom_drag
-    global Cd = (κᵥₖ / log(Δz / (2 * params.z0)))^2
+    # Cast to FT: Cd otherwise stays plain Float64 (from the Float64 literals/params feeding the formula
+    # above), which would silently force Float64 arithmetic into this per-bottom-cell boundary condition
+    # kernel under --precision Float32.
+    global Cd = FT((κᵥₖ / log(Δz / (2 * params.z0)))^2)
     bottom_drag_u(x, y, t, u, v, w, p) = -p.Cd * u * sqrt(u^2 + v^2 + w^2)
     bottom_drag_v(x, y, t, u, v, w, p) = -p.Cd * v * sqrt(u^2 + v^2 + w^2)
     u_drag_bc = FluxBoundaryCondition(bottom_drag_u, field_dependencies=(:u, :v, :w), parameters=(; Cd))
