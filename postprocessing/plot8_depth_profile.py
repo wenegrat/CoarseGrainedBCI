@@ -135,13 +135,15 @@ for ℓ_target in filter_scales:
     print(f"  ℓ = {ℓ:.4f} m ({ℓ_km} km): profiles computed")
 #---
 
-#+++ Plot: two panels side by side (one per filter scale), sharing both depth (y) and value (x) axes so
-# magnitudes are directly comparable between scales -- unlike the color-scale map panels elsewhere in this
-# pipeline, a shared line-plot axis doesn't wash out a weaker term the way a shared color scale would (each
-# line's own shape stays visible regardless of the others' magnitude, confirmed in this script's earlier
-# single-panel version).
+#+++ Plot: two panels side by side (one per filter scale), sharing the depth (y) axis but each with its
+# own independent value (x) axis -- Πₖ/Π_A/conversion can differ enough in magnitude between the two
+# filter scales that a shared x-range would compress the smaller-scale panel's own variation, unlike the
+# earlier single-panel version where all three lines shared one scale (comparable magnitudes there since
+# it was the same filter scale).
 print("Building figure...")
-fig, axes = plt.subplots(1, 2, figsize=(12, 8), constrained_layout=True, sharex=True, sharey=True)
+FS_SUPTITLE, FS_TITLE, FS_LABEL, FS_TICK, FS_LEGEND = 17, 15, 14, 13, 13
+
+fig, axes = plt.subplots(1, 2, figsize=(12, 8), constrained_layout=True, sharey=True)
 
 for ax, (ℓ_km, profiles) in zip(axes, panels):
     for name, (mean, std) in profiles.items():
@@ -149,18 +151,19 @@ for ax, (ℓ_km, profiles) in zip(axes, panels):
         ax.plot(mean, mean.z_aac, color=color, lw=1.8, label=name)
         ax.fill_betweenx(mean.z_aac, mean - std, mean + std, color=color, alpha=0.2)
     ax.axvline(0, color="gray", lw=0.8, ls="--")
-    ax.set_xlabel("m² s⁻³")
-    ax.set_title(f"ℓ = {ℓ_km} km", fontsize=13)
+    ax.set_xlabel("m² s⁻³", fontsize=FS_LABEL)
+    ax.set_title(f"ℓ = {ℓ_km} km", fontsize=FS_TITLE)
     ax.grid(True, alpha=0.3)
+    ax.tick_params(labelsize=FS_TICK)
 
-axes[0].set_ylabel("Depth  [m]")
-axes[0].legend(fontsize=10, loc="best")
+axes[0].set_ylabel("Depth  [m]", fontsize=FS_LABEL)
+axes[0].legend(fontsize=FS_LEGEND, loc="best")
 
 label = run_label(ke_fields.attrs)
 suptitle = f"{stem}, t={t_min_days:.1f}-{t_max_days:.1f}d ({n_times} snapshots)"
 if label:
     suptitle = f"{label}\n{suptitle}"
-fig.suptitle(suptitle, fontsize=12)
+fig.suptitle(suptitle, fontsize=FS_SUPTITLE)
 
 ℓ_km_tag = "-".join(str(ℓ_km) for ℓ_km, _ in panels)
 outfile = FIGURES / f"{stem}_depth_profile_l{ℓ_km_tag}km_t{t_min_days:.0f}-{t_max_days:.0f}d.pdf"
