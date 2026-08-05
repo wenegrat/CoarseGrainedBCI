@@ -40,5 +40,9 @@ source ../hpc_env.sh
 time $PYTHON -u sweep2_energy_transfer.py        --filename output/${SIM}.nc --n-workers 8 --write-mode $WRITE_MODE $FIXED_REF_FLAG 2>&1 | tee    logs/${JOB_NAME}.out
 time $PYTHON -u sweep3_plot_transfer_spectrum.py --filename output/${SIM}.nc               $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
 time $PYTHON -u sweep4_plot_depth_scale.py       --filename output/${SIM}.nc               $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
+# sweep5's own --min-time-days/--max-time-days (default 10.0/latest) are left unpassed here, same
+# reasoning as plots.pbs leaving plot5/plot7/plot8's own time-window defaults unpassed -- every run gets
+# plotted over that same fixed window rather than one that silently shifts with each run's own length.
+time $PYTHON -u sweep5_transfer_summary.py       --filename output/${SIM}.nc               $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
 
 qstat -f $PBS_JOBID >> logs/${JOB_NAME}.out
