@@ -83,7 +83,11 @@ fig, axes = plt.subplots(1, 3, figsize=(13, 4.6), constrained_layout=True, share
 for ax, (da, title) in zip(axes, panels):
     # set_edgecolor("face") avoids a known pcolormesh rendering artifact -- see plot6_snapshots.py's
     # comment for why linewidth is deliberately left untouched (linewidth=0 does not fix it).
-    im = ax.pcolormesh(x_km, y_km, da.values, cmap="RdBu_r", vmin=-vmax, vmax=vmax, shading="auto")
+    # rasterized=True: without it, a PDF pcolormesh draws one vector polygon per grid cell -- at a high
+    # resolution (e.g. 384x384), three panels' worth of cells balloon the PDF to 10s of MB. Rasterizing
+    # just this Artist embeds the mesh as a single bitmap (at the savefig dpi= below) while titles/axes/
+    # text stay vector, cutting file size by roughly an order of magnitude with no visible quality loss.
+    im = ax.pcolormesh(x_km, y_km, da.values, cmap="RdBu_r", vmin=-vmax, vmax=vmax, shading="auto", rasterized=True)
     im.set_edgecolor("face")
     ax.set_aspect("equal")
     ax.set_title(title, fontsize=12)
@@ -104,6 +108,6 @@ fig.colorbar(im, ax=axes[-1], fraction=0.046, pad=0.04, label="m s⁻²")
 fig.suptitle(f"{stem}: buoyancy evolution", fontsize=13)
 
 outfile = FIGURES / f"{stem}_buoyancy_evolution_t{t0_days:.0f}-{t1_days:.0f}d.pdf"
-fig.savefig(outfile, dpi=150, bbox_inches="tight")
+fig.savefig(outfile, dpi=450, bbox_inches="tight")
 print(f"Saved: {outfile}")
 #---

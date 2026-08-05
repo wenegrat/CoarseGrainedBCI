@@ -91,13 +91,17 @@ fig, axes = plt.subplots(1, 3, figsize=(13, 4.6), constrained_layout=True, share
 for ax, (da, title) in zip(axes[:2], b_panels):
     # set_edgecolor("face") avoids a known pcolormesh rendering artifact -- see plot6_snapshots.py's
     # comment for why linewidth is deliberately left untouched (linewidth=0 does not fix it).
-    im_b = ax.pcolormesh(x_km, y_km, da.values, cmap="RdBu_r", vmin=-vmax_b, vmax=vmax_b, shading="auto")
+    # rasterized=True: without it, a PDF pcolormesh draws one vector polygon per grid cell -- at a high
+    # resolution (e.g. 384x384), three panels' worth of cells balloon the PDF to 10s of MB. Rasterizing
+    # just this Artist embeds the mesh as a single bitmap (at the savefig dpi= below) while titles/axes/
+    # text stay vector, cutting file size by roughly an order of magnitude with no visible quality loss.
+    im_b = ax.pcolormesh(x_km, y_km, da.values, cmap="RdBu_r", vmin=-vmax_b, vmax=vmax_b, shading="auto", rasterized=True)
     im_b.set_edgecolor("face")
     ax.set_aspect("equal")
     ax.set_title(title, fontsize=12)
     ax.set_xlabel("x [km]")
 
-im_zeta = axes[2].pcolormesh(x_km, y_km, zeta_mid_t1.values, cmap="RdBu_r", vmin=-vmax_zeta, vmax=vmax_zeta, shading="auto")
+im_zeta = axes[2].pcolormesh(x_km, y_km, zeta_mid_t1.values, cmap="RdBu_r", vmin=-vmax_zeta, vmax=vmax_zeta, shading="auto", rasterized=True)
 im_zeta.set_edgecolor("face")
 axes[2].set_aspect("equal")
 axes[2].set_title(zeta_title, fontsize=12)
@@ -121,6 +125,6 @@ fig.colorbar(im_zeta, ax=axes[2], fraction=0.046, pad=0.04, label="")
 fig.suptitle(f"{stem}: buoyancy evolution and final-time vorticity", fontsize=13)
 
 outfile = FIGURES / f"{stem}_buoyancy_vorticity_t{t0_days:.0f}-{t1_days:.0f}d.pdf"
-fig.savefig(outfile, dpi=150, bbox_inches="tight")
+fig.savefig(outfile, dpi=450, bbox_inches="tight")
 print(f"Saved: {outfile}")
 #---
