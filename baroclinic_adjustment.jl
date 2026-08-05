@@ -5,7 +5,7 @@ using Oceananigans.Grids: znode
 using Printf
 using Random
 using ArgParse
-using Oceanostics: PotentialEnergyEquation, GaussianFilter, KineticEnergyCrossScaleFlux, SubFilterKineticEnergyDissipationRate, FilteredKineticEnergyDissipationRate
+using Oceanostics: GaussianFilter, KineticEnergyCrossScaleFlux, SubFilterKineticEnergyDissipationRate
 
 @info "Finished loading packages"
 Random.seed!(8675309)
@@ -132,7 +132,7 @@ let s = ArgParseSettings()
                     ignoring (with a warning) any --closure/--advection_scheme/--Pe_cell_h/--Pe_cell_v/ \
                     --nu_h/--nu_v flags that look like they were also explicitly set. Relies entirely on \
                     WENO's own implicit, scale-selective numerical dissipation for stability -- an \
-                    implicit-LES configuration. IMPORTANT: the online ε_Kˢ/εˡ SFS dissipation diagnostics \
+                    implicit-LES configuration. IMPORTANT: the online ε_Kˢ SFS dissipation diagnostic \
                     and the offline APE dissipation term both read from an explicit closure's ν/κ, which is \
                     nothing here, so they report ~zero rather than the real (numerical, untracked) \
                     dissipation actually happening -- the post-processing pipeline detects this via this \
@@ -674,25 +674,20 @@ v_center = @at (Center, Center, Center) v
 w_center = @at (Center, Center, Center) w
 
 ζ = Field(∂x(v) - ∂y(u))
-ρ₀ = 1025 # kg/m^3
-pe = ρ₀ * PotentialEnergyEquation.PotentialEnergy(model)
-PE = Integral(pe)
 
-#+++ Gaussian-filtered u, v, w, b at multiple filter scales — HORIZONTAL ONLY (dims=(1,2)).
-# Coarse-graining is applied over (x, y) at each depth level, not in z: horizontal scales span the
-# mesoscale/submesoscale range this budget targets, while the vertical direction has its own distinct
-# structure (stratification, surface/bottom boundary layers) that shouldn't be smoothed over. Both
-# horizontal directions are periodic here, so (unlike the KH setup's bounded-z filter) no edge-extension
-# boundary handling is needed — it's a pure periodic wrap.
+# filter_ℓs/gaussian_filters are consumed below by ke_budget_fields (Πₖ/ε_Kˢ) and, when --bottom_drag,
+# bottom_drag_fields -- both call Oceanostics functions as (model, gf), which do their own internal
+# filtering, so no separately-filtered u/v/w/b fields need to be built or written here. An earlier version
+# of this file also built and wrote gf(u), gf(v), gf(w), gf(b) per scale as their own output fields
+# (u_ℓ50km, etc.) -- removed (see git history) after confirming nothing downstream ever read them:
+# 01_filter_fields.py performs its own independent offline Gaussian filtering of the raw u/v/w/b (its own
+# --filter-scales are explicitly documented as free parameters, not required to match filter_ℓs here), so
+# those online-filtered fields were pure write volume (8 extra full-3D fields at the default 2 scales) for
+# data immediately discarded and recomputed from scratch offline.
 filter_ℓs = Tuple(params.filter_scales_m .* meters)
 gaussian_filters = [GaussianFilter(; dims=(1, 2), σ=_FWHM_to_σ(ℓ)) for ℓ in filter_ℓs]  # one reusable filter object per scale
 
-_fields = (u=u_center, v=v_center, w=w_center, b=b)
-_filt_pairs = [Symbol("$(n)_ℓ$(round(Int, ℓ/1000))km") => gf(f) for (ℓ, gf) in zip(filter_ℓs, gaussian_filters) for (n, f) in pairs(_fields)]
-filtered_fields = (; _filt_pairs...)
-#---
-
-@info "Online diagnostics (filtered fields) built"
+@info "Online diagnostics (filters) built"
 
 #+++ Cross-scale KE flux Πₖ and SFS KE dissipation ε_Kˢ, per filter scale
 # w is a genuine prognostic variable in this NonhydrostaticModel, with its own momentum equation and
@@ -702,24 +697,21 @@ filtered_fields = (; _filt_pairs...)
 # reintroduce a different missing term (horizontal-vertical pressure redistribution) in place of the
 # free-surface one this model switch removes.
 #
-# ε_Kˢ (SubFilterKineticEnergyDissipationRate) and εˡ (FilteredKineticEnergyDissipationRate) have no
-# `dims` restriction in their public API at all -- both always include w's full contribution via the
-# model's actual per-direction viscous fluxes, which is the physically correct behavior now (it was a
-# small "phantom" w-diffusion term under the old hydrostatic setup, verified negligible there via a
-# smoke test: ~1e-8 relative magnitude, 0.99 spatial correlation with the w-excluded offline formula).
+# ε_Kˢ (SubFilterKineticEnergyDissipationRate) has no `dims` restriction in its public API at all -- it
+# always includes w's full contribution via the model's actual per-direction viscous fluxes, which is the
+# physically correct behavior now (it was a small "phantom" w-diffusion term under the old hydrostatic
+# setup, verified negligible there via a smoke test: ~1e-8 relative magnitude, 0.99 spatial correlation
+# with the w-excluded offline formula).
 #
-# εˡ is included alongside Πₖ/ε_Kˢ for an ongoing investigation into whether the *filtered* (large-scale)
-# KE budget (∂ₜK̄ = w̄b̄ᵣ - Πₖ - εˡ, K̄ = ½(ū²+v̄²+w̄²)) is a more robust diagnostic than the SFS budget this
-# repo has focused on so far -- unlike ε_Kˢ = filter(ε) - εˡ (a difference of two large, closely-related
-# quantities, fragile by construction), εˡ is a single directly-computed term with no cancellation,
-# matching how tomchor's own Eady baroclinic-instability example (Oceanostics PR #260) closes its
-# coarse-grained KE budget. That example's own setup (NonhydrostaticModel, no free surface, full 3D Πₖ)
-# is exactly what this switch adopts; see conversation history for the ongoing investigation into how
-# much of the closure gap is numerics vs. the buoyancy-production-term convention (w̄b̄ vs w̄b̄ᵣ).
+# εˡ (FilteredKineticEnergyDissipationRate) used to be computed here alongside Πₖ/ε_Kˢ for an
+# ongoing investigation into whether the *filtered* (large-scale) KE budget (∂ₜK̄ = w̄b̄ᵣ - Πₖ - εˡ,
+# K̄ = ½(ū²+v̄²+w̄²)) is a more robust diagnostic than the SFS budget this repo has focused on so far --
+# removed (see git history) since no script ever read it: there's no full large-scale/filtered KE budget
+# assembly in the offline pipeline yet, so it was pure write volume with no consumer. Revive it (it's a
+# one-line addition back to _ke_pairs below) if that investigation resumes.
 _ke_pairs = vcat(
     [Symbol("Π_K_ℓ$(round(Int, ℓ/1000))km")  => KineticEnergyCrossScaleFlux(model, gf; dims=(1, 2, 3)) for (ℓ, gf) in zip(filter_ℓs, gaussian_filters)],
     [Symbol("ε_Kˢ_ℓ$(round(Int, ℓ/1000))km") => SubFilterKineticEnergyDissipationRate(model, gf)        for (ℓ, gf) in zip(filter_ℓs, gaussian_filters)],
-    [Symbol("ε_l_ℓ$(round(Int, ℓ/1000))km")  => FilteredKineticEnergyDissipationRate(model, gf)         for (ℓ, gf) in zip(filter_ℓs, gaussian_filters)],
 )
 ke_budget_fields = (; _ke_pairs...)
 #---
@@ -727,8 +719,9 @@ ke_budget_fields = (; _ke_pairs...)
 #+++ Bottom drag work diagnostics: τ̄ (filtered stress) and overline{τ·u_b} (filtered pointwise work), per
 # filter scale -- only when --bottom_drag. These are the "primitive" SFS-decomposition ingredients: offline
 # assembly (04_sfs_ke_budget.py) combines them into the large-scale term -(τ̄·ū_b) and the SFS term
-# -(overline{τ·u_b} - τ̄·ū_b). ū_b/v̄_b need no separate computation here -- they're already the bottom
-# z-slice of the filtered u_ℓ/v_ℓ fields built above. τ_x, τ_y, and the raw work τ·u_b are built as full 3D
+# -(overline{τ·u_b} - τ̄·ū_b). ū_b/v̄_b need no separate computation here -- 04_sfs_ke_budget.py reuses the
+# bottom z-slice of 01_filter_fields.py's own offline-filtered u/v (ds_filt_ℓ), not anything from this file.
+# τ_x, τ_y, and the raw work τ·u_b are built as full 3D
 # expressions from u_center/v_center/w_center for convenience (reusing the same gaussian_filters, which only
 # ever touch x,y), but only the bottom z-level (written via the new :bottom output writer below,
 # indices=(:,:,1)) is physically meaningful -- horizontal-only filtering and z-slicing commute, so this is
@@ -746,7 +739,7 @@ if params.bottom_drag
 end
 #---
 
-outputs = (; ζ, b, pe, PE, u=u_center, v=v_center, w=w_center, filtered_fields..., ke_budget_fields...)
+outputs = (; ζ, b, u=u_center, v=v_center, w=w_center, ke_budget_fields...)
 
 # Smagorinsky's eddy viscosity/diffusivity are spatially/temporally varying fields (unlike the
 # 'constant' closure's fixed ν/κ, which are recorded as scalar global attributes below), so they must be
