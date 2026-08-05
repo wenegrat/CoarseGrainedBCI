@@ -296,7 +296,11 @@ for col, (name, field) in enumerate(top_panels):
     vmax = np.nanpercentile(np.abs(field.values), args.clim_percentile)
     # set_edgecolor("face") avoids a known pcolormesh rendering artifact -- see plot6_snapshots.py's
     # comment for why linewidth is deliberately left untouched (linewidth=0 does not fix it).
-    im = ax.pcolormesh(x_km, y_km, field.values, cmap="RdBu_r", vmin=-vmax, vmax=vmax, shading="auto")
+    # rasterized=True: a PDF pcolormesh draws one vector polygon per grid cell -- at this row's full
+    # simulation resolution (unlike the bottom row's much coarser --n-bins JPDF grid), that bloated the
+    # output to 10s of MB (see plot9/plot10's identical fix). Rasterizing just this Artist embeds it as a
+    # single bitmap (at the savefig dpi= below) while titles/axes/text stay vector.
+    im = ax.pcolormesh(x_km, y_km, field.values, cmap="RdBu_r", vmin=-vmax, vmax=vmax, shading="auto", rasterized=True)
     im.set_edgecolor("face")
     ax.contour(x_km, y_km, b_snap.values, levels=5, colors="0.4", linewidths=0.4)
     add_inset_colorbar(ax, im)
@@ -362,6 +366,6 @@ fig.suptitle(f"{stem}: ℓ={ℓ_km}km, z={z_sel:.0f}m", fontsize=13)
 
 z_m = int(round(z_sel))
 outfile = FIGURES / f"{stem}_flux_snapshot_phase_space_l{ℓ_km}km_z{z_m}m_t{t_days:.0f}d.pdf"
-fig.savefig(outfile, dpi=150, bbox_inches="tight")
+fig.savefig(outfile, dpi=450, bbox_inches="tight")
 print(f"Saved: {outfile}")
 #---
