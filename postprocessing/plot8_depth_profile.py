@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 """Depth profile of the horizontally- and time-averaged cross-scale KE/APE flux, buoyancy conversion, and
-the vertical-only component of the cross-scale APE flux (Π_A^v), at two filter scales side by side."""
+the vertical/horizontal decomposition of the cross-scale APE flux (Π_A^v, Π_A^h), at two filter scales
+side by side."""
 
 #+++ Imports
 import os
@@ -21,8 +22,9 @@ DEFAULT_TIME_MAX_DAYS = 30.0
 
 import argparse
 parser = argparse.ArgumentParser(description="Depth profile of horizontally- and time-averaged Πₖ, Π_A, "
-                                              "buoyancy conversion (SFS APE->KE exchange), and Π_A^v "
-                                              "(vertical-only component of Π_A), two filter scales side by side")
+                                              "buoyancy conversion (SFS APE->KE exchange), and the "
+                                              "vertical/horizontal decomposition of Π_A (Π_A^v, Π_A^h), "
+                                              "two filter scales side by side")
 parser.add_argument("--filename", default="output/bci_Nx48_Ny48_Nz8.nc", help="Path to simulation NetCDF file")
 parser.add_argument("--filter-scales", type=float, nargs=2, default=None,
     help="Two filter length scales (meters) for left and right panels. Defaults to the first two scales "
@@ -121,9 +123,10 @@ def horiz_mean(da):
     return (da * dA).sum(("x_caa", "y_aca")) / dA.sum(("x_caa", "y_aca"))  # -> (time, z_aac)
 
 # Colors match the inherited (KH-era, unadapted) postprocessing/S3_plot_sweep.py's own Πₖ/Π_A/SFS-exchange
-# palette, for visual consistency with that precedent; Π_A^v gets a new, distinct color (purple) in the
-# same diverging-palette family.
-COLORS = {"Πₖ": "#2166ac", "Π_A": "#d6604d", "buoyancy conversion": "#1b7837", "Π_A^v": "#762a83"}
+# palette, for visual consistency with that precedent; Π_A^v/Π_A^h get new, distinct colors (purple/orange)
+# in the same diverging-palette family.
+COLORS = {"Πₖ": "#2166ac", "Π_A": "#d6604d", "buoyancy conversion": "#1b7837",
+          "Π_A^v": "#762a83", "Π_A^h": "#e08214"}
 
 panels = []
 for ℓ_target in filter_scales:
@@ -146,8 +149,13 @@ for ℓ_target in filter_scales:
 
     if have_pi_a_vertical:
         Pi_A_v = fix_orientation(energy_transfer["Π_A^v"].sel(filter_scale=ℓ, time=ke_t.time, method="nearest"))
-        Pi_A_v_hz = horiz_mean(Pi_A_v).compute()
+        # Π_A^h = Π_A - Π_A^v, taken at the field level (before horiz_mean) so its own std below is a
+        # genuine std of the horizontal-component field, not derived after-the-fact from two already-
+        # reduced mean profiles (std does not commute with the horizontal averaging/differencing order).
+        Pi_A_h = Pi_A - Pi_A_v
+        Pi_A_v_hz, Pi_A_h_hz = horiz_mean(Pi_A_v).compute(), horiz_mean(Pi_A_h).compute()
         profiles["Π_A^v"] = (Pi_A_v_hz.mean("time"), Pi_A_v_hz.std("time"))
+        profiles["Π_A^h"] = (Pi_A_h_hz.mean("time"), Pi_A_h_hz.std("time"))
     panels.append((ℓ_km, profiles))
     print(f"  ℓ = {ℓ:.4f} m ({ℓ_km} km): profiles computed")
 #---
