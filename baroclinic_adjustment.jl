@@ -87,10 +87,14 @@ let s = ArgParseSettings()
             default = 0.0
 
         "--mixed_layer_kappa_v"
-            help = "Extra vertical diffusivity for buoyancy (only -- not viscosity), in m² s⁻¹, applied \
-                    everywhere above -mixed_layer_depth for the entire run, on top of whatever the main \
-                    --closure already provides (default: 0.0, i.e. disabled). Ignored unless \
-                    --mixed_layer_depth > 0 (warns and is skipped if set without it). Rationale: mixed-layer \
+            help = "PEAK extra vertical diffusivity for buoyancy (only -- not viscosity), in m² s⁻¹, for \
+                    the entire run, on top of whatever the main --closure already provides (default: 0.0, \
+                    i.e. disabled). Ignored unless --mixed_layer_depth > 0 (warns and is skipped if set \
+                    without it). NOT a uniform/top-hat value across the mixed layer: the vertical shape is \
+                    κ(z) = this_flag · (27/4)·σ·(1-σ)², σ=min(-z/H, 1), H=--mixed_layer_depth -- a smooth \
+                    KPP-style bump, zero at the surface (z=0) and at/below the ML base (z=-H), peaking at \
+                    exactly this flag's value at z=-H/3 (the 27/4 prefactor is chosen precisely so the peak \
+                    equals this_flag's value, not some other multiple of it). Rationale: mixed-layer \
                     instability (MLI) both grows *and* shuts itself off via the same route -- it converts the \
                     mixed layer's own lateral buoyancy gradient into vertical stratification (restratification, \
                     Boccaletti et al. 2007), and once that stratification builds up MLI has nothing left to \
@@ -112,9 +116,14 @@ let s = ArgParseSettings()
                     selected (Oceananigans sums diffusivities across a tuple of closures), so it needs no \
                     changes to the scale_aware/constant/smagorinsky branches. Order of magnitude: mixing away \
                     stratification on a timescale comparable to MLI's own restratification timescale (order \
-                    days) over a mixed layer depth H needs κ ~ H²/(few days); e.g. H=100m, 3 days gives \
-                    κ~0.03-0.1 m² s⁻¹ -- treat this as a starting point to check empirically, not a precise \
-                    prediction."
+                    days) over a mixed layer depth H needs κ ~ H²/(few days) as a uniform-equivalent value; \
+                    e.g. H=100m, 3 days gives κ~0.03-0.1 m² s⁻¹ -- treat this as a starting point for the \
+                    PEAK value to check empirically, not a precise prediction. Since this flag now sets a \
+                    peak (with the mixing concentrated near z=-H/3 rather than spread uniformly over the \
+                    whole layer) instead of a uniform value, the actual bulk mixing effect for a given \
+                    number is somewhat weaker than the old top-hat profile at the same number -- expect to \
+                    need a somewhat larger value than this estimate if comparing against a previously-tuned \
+                    top-hat run."
             arg_type = Float64
             required = false
             default = 0.0
@@ -488,33 +497,38 @@ else
      VerticalScalarDiffusivity(VerticallyImplicitTimeDiscretization(); ν=νv, κ=κv))
 end
 
-# --mixed_layer_kappa_v: extra vertical diffusivity for buoyancy only, confined above
-# -mixed_layer_depth, for the whole run -- see the flag's own --help for the full rationale (keeps MLI
-# perpetually unable to fully restratify, rather than damping its growth directly, so mesoscale and
-# submesoscale can coexist without needing to pick a cutoff time). Composed as an *additional* closure
-# tuple element, summed with whatever --closure already selected above -- Oceananigans sums diffusivities
-# across a tuple of closures, confirmed directly (a real model built and run one timestep) -- so this needs
-# no changes to the branches above. discrete_form=true + parameters= (not a plain closed-over-globals
-# function) for the same reason --bottom_drag's Cd uses `parameters=`: params.mixed_layer_depth/
-# params.mixed_layer_kappa_v are fields of a non-const, reassigned global, and closing over that directly
-# inside a per-grid-point, per-timestep hot-path function is the same performance trap documented there.
+# --mixed_layer_kappa_v: extra vertical diffusivity for buoyancy only, shaped over the mixed layer as a
+# smooth KPP-style bump (not a uniform top-hat) -- see the flag's own --help for the full rationale (keeps
+# MLI perpetually unable to fully restratify, rather than damping its growth directly, so mesoscale and
+# submesoscale can coexist without needing to pick a cutoff time) and for the shape formula itself. Composed
+# as an *additional* closure tuple element, summed with whatever --closure already selected above --
+# Oceananigans sums diffusivities across a tuple of closures, confirmed directly (a real model built and run
+# one timestep) -- so this needs no changes to the branches above. discrete_form=true + parameters= (not a
+# plain closed-over-globals function) for the same reason --bottom_drag's Cd uses `parameters=`:
+# params.mixed_layer_depth/params.mixed_layer_kappa_v are fields of a non-const, reassigned global, and
+# closing over that directly inside a per-grid-point, per-timestep hot-path function is the same performance
+# trap documented there.
 if params.mixed_layer_kappa_v > 0 && params.mixed_layer_depth <= 0
     @warn "--mixed_layer_kappa_v=$(params.mixed_layer_kappa_v) has no effect without --mixed_layer_depth > 0; ignoring"
 elseif params.mixed_layer_kappa_v > 0
+    # σ = min(-z/H, 1) is a single branchless GPU instruction (fminf), not a conditional -- no divergence
+    # risk, no more expensive than the comparison the old top-hat ternary already did here. mixed_layer_
+    # depth/mixed_layer_kappa_v/shape_peak_coeff are all explicitly cast to FT in the `parameters=` tuple
+    # below (not left as ArgParse's plain Float64, and not written as a bare `27/4` literal in the function
+    # body either -- both would silently reintroduce Float64 arithmetic into this per-grid-point kernel
+    # under --precision Float32, the same trap documented for Cd/these two params previously).
     @inline function κ_v_ml(i, j, k, grid, clock, fields, p)
         z = znode(i, j, k, grid, Center(), Center(), Face())
-        return z > -p.mixed_layer_depth ? p.mixed_layer_kappa_v : zero(z)
+        σ = min(-z / p.mixed_layer_depth, one(z))
+        return p.mixed_layer_kappa_v * p.shape_peak_coeff * σ * (1 - σ)^2
     end
-    # mixed_layer_depth/mixed_layer_kappa_v are cast to FT here (not left as ArgParse's plain Float64):
-    # without this, `z > -p.mixed_layer_depth ? p.mixed_layer_kappa_v : zero(z)` is type-unstable under
-    # --precision Float32 (the two branches would return different types), which is a real problem inside
-    # a per-grid-point GPU kernel, not just a missed precision win.
     ml_closure = VerticalScalarDiffusivity(κ=κ_v_ml, discrete_form=true, loc=(Center, Center, Face),
                                            parameters=(; mixed_layer_depth=FT(params.mixed_layer_depth),
-                                                          mixed_layer_kappa_v=FT(params.mixed_layer_kappa_v)))
+                                                          mixed_layer_kappa_v=FT(params.mixed_layer_kappa_v),
+                                                          shape_peak_coeff=FT(27//4)))
     global closure = (closure..., ml_closure)
-    @info "Mixed-layer persistent submesoscale forcing enabled: extra κᵥ=$(params.mixed_layer_kappa_v) m² s⁻¹ " *
-          "for z > -$(params.mixed_layer_depth) m, for the entire run"
+    @info "Mixed-layer persistent submesoscale forcing enabled: peak κᵥ=$(params.mixed_layer_kappa_v) m² s⁻¹ " *
+          "at z=-$(params.mixed_layer_depth/3) m (KPP-style bump over the top $(params.mixed_layer_depth) m), for the entire run"
 end
 
 # WENO(order=9) needs a wider stencil (halo≥5) than the grid's fixed halo=(3,3,3) -- order=5 needs halo≥3,
