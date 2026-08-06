@@ -1,6 +1,6 @@
 #!/usr/bin/env python
-"""Depth profile of the horizontally- and time-averaged cross-scale KE/APE flux and buoyancy conversion,
-at two filter scales side by side."""
+"""Depth profile of the horizontally- and time-averaged cross-scale KE/APE flux, buoyancy conversion, and
+the vertical-only component of the cross-scale APE flux (Π_A^v), at two filter scales side by side."""
 
 #+++ Imports
 import os
@@ -21,7 +21,8 @@ DEFAULT_TIME_MAX_DAYS = 30.0
 
 import argparse
 parser = argparse.ArgumentParser(description="Depth profile of horizontally- and time-averaged Πₖ, Π_A, "
-                                              "and buoyancy conversion (SFS APE->KE exchange), two filter scales side by side")
+                                              "buoyancy conversion (SFS APE->KE exchange), and Π_A^v "
+                                              "(vertical-only component of Π_A), two filter scales side by side")
 parser.add_argument("--filename", default="output/bci_Nx48_Ny48_Nz8.nc", help="Path to simulation NetCDF file")
 parser.add_argument("--filter-scales", type=float, nargs=2, default=None,
     help="Two filter length scales (meters) for left and right panels. Defaults to the first two scales "
@@ -50,12 +51,22 @@ def fix_orientation(da):
     return da.transpose(*other_dims, y_dim, x_dim)
 #---
 
-#+++ Load Πₖ/conversion (ke_fields) and Π_A (ape_fields); pick the two filter scales, dedup + pool over
-# the requested time window
+#+++ Load Πₖ/conversion (ke_fields), Π_A (ape_fields), and Π_A^v (energy_transfer -- the only file that
+# has it, since it's only computed in 03_energy_transfer.py, not re-exported through 05's own output);
+# pick the two filter scales, dedup + pool over the requested time window
 print("Loading energy budget fields...")
-ke_fields  = xr.open_dataset(PP_OUTPUT / f"{stem}_sfs_ke_budget_fields.nc",  decode_times=False)
-ape_fields = xr.open_dataset(PP_OUTPUT / f"{stem}_sfs_ape_budget_fields.nc", decode_times=False)
+ke_fields       = xr.open_dataset(PP_OUTPUT / f"{stem}_sfs_ke_budget_fields.nc",  decode_times=False)
+ape_fields      = xr.open_dataset(PP_OUTPUT / f"{stem}_sfs_ape_budget_fields.nc", decode_times=False)
+energy_transfer = xr.open_dataset(PP_OUTPUT / f"{stem}_energy_transfer.nc",       decode_times=False)
 print(f"  Filter scales available: {ke_fields.filter_scale.values}")
+
+# Π_A^v (03_energy_transfer.py, include_pi_a_vertical=True) postdates some existing energy_transfer
+# outputs -- skip that line rather than erroring if this file predates it (rerun 03_energy_transfer.py to
+# add it).
+have_pi_a_vertical = "Π_A^v" in energy_transfer.data_vars
+if not have_pi_a_vertical:
+    print(f"  Note: {stem}_energy_transfer.nc has no Π_A^v (predates include_pi_a_vertical=True) -- "
+          "omitting that line. Rerun 03_energy_transfer.py to add it.")
 
 # baroclinic_adjustment.jl's :fields writer uses schedule=ConsecutiveIterations(TimeInterval(...)), which
 # writes TWO consecutive model iterations (nominal output time, then the next iteration ~seconds-minutes
@@ -110,8 +121,9 @@ def horiz_mean(da):
     return (da * dA).sum(("x_caa", "y_aca")) / dA.sum(("x_caa", "y_aca"))  # -> (time, z_aac)
 
 # Colors match the inherited (KH-era, unadapted) postprocessing/S3_plot_sweep.py's own Πₖ/Π_A/SFS-exchange
-# palette, for visual consistency with that precedent.
-COLORS = {"Πₖ": "#2166ac", "Π_A": "#d6604d", "buoyancy conversion": "#1b7837"}
+# palette, for visual consistency with that precedent; Π_A^v gets a new, distinct color (purple) in the
+# same diverging-palette family.
+COLORS = {"Πₖ": "#2166ac", "Π_A": "#d6604d", "buoyancy conversion": "#1b7837", "Π_A^v": "#762a83"}
 
 panels = []
 for ℓ_target in filter_scales:
@@ -131,6 +143,11 @@ for ℓ_target in filter_scales:
         "Π_A":                 (Pi_A_hz.mean("time"), Pi_A_hz.std("time")),
         "buoyancy conversion": (conv_hz.mean("time"), conv_hz.std("time")),
     }
+
+    if have_pi_a_vertical:
+        Pi_A_v = fix_orientation(energy_transfer["Π_A^v"].sel(filter_scale=ℓ, time=ke_t.time, method="nearest"))
+        Pi_A_v_hz = horiz_mean(Pi_A_v).compute()
+        profiles["Π_A^v"] = (Pi_A_v_hz.mean("time"), Pi_A_v_hz.std("time"))
     panels.append((ℓ_km, profiles))
     print(f"  ℓ = {ℓ:.4f} m ({ℓ_km} km): profiles computed")
 #---
