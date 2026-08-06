@@ -13,7 +13,7 @@ from src.aux00_utils import (integrate, calculate_gradient,
 from src.aux01_pe_functions import (calculate_density_fields_from_buoyancy,
                                 sorted_timeseries,
                                 local_potential_energies_timeseries,
-                                calculate_cross_scale_ape_flux,
+                                calculate_subfilter_tracer_flux,
                                 calculate_b_r,
                                 calculate_ape_to_ke_exchange_term)
 
@@ -271,7 +271,7 @@ def calculate_cross_scale_ke_flux(τ, S̄, index_dims=("i", "j")):
 #+++ Cross-scale energy transfer pipeline
 def calculate_energy_transfer(ds, filter_scales,
                               ds_filt=None, rho_sorted=None, dz_sorted=None, n_workers=18,
-                              include_pi_k=True, include_filt_local_pes=False):
+                              include_pi_k=True, include_filt_local_pes=False, include_pi_a_vertical=False):
     """Calculate cross-scale KE and APE transfer terms at each filter scale.
 
     Parameters
@@ -313,14 +313,21 @@ def calculate_energy_transfer(ds, filter_scales,
         (e.g. 30) and has no use for these fields -- it already has a known
         memory sensitivity at high scale counts (see the note on filt_local_pes
         below), so this stays opt-in rather than on by default.
+    include_pi_a_vertical : bool
+        If True, also include Π_A^v = -τ(w,ρ) ∂Υˡ/∂z, the vertical-only (i=3) term of the same
+        -τᵢ·∇Υˡ contraction that Π_A already sums over i=1,2,3. Extracted as a free byproduct of
+        τᵢ/∇Υˡ (both already fully computed for Π_A below) -- no new filtering or gradient
+        calculation. Off by default, matching include_filt_local_pes's own reasoning: sweep2_
+        energy_transfer.py has no use for it and stays unaffected either way.
 
     Returns
     -------
     xr.Dataset
         Dataset with Π_A, the SFS APE->KE exchange term and the coarse conversion
         w̄·b̄ᵣ (plus their volume integrals) indexed by filter_scale — Π_K (with
-        ∫Π_K dV) when include_pi_k=True, and z₀(ρ̄)/Υˡ/Dˡ/Ea(ρ̄, z) when
-        include_filt_local_pes=True.
+        ∫Π_K dV) when include_pi_k=True, z₀(ρ̄)/Υˡ/Dˡ/Ea(ρ̄, z) when
+        include_filt_local_pes=True, and Π_A^v (with ∫Π_A^v dV) when
+        include_pi_a_vertical=True.
     """
     filtered_dimensions = ["x_caa", "y_aca"]
     tensor_dimensions   = ("x_caa", "y_aca", "z_aac")   # full 3D, matches indices (1,2,3) for Π_K
@@ -393,16 +400,22 @@ def calculate_energy_transfer(ds, filter_scales,
                                                              rho_sorted=rho_sorted,
                                                              dz_sorted=dz_sorted,
                                                              n_workers=n_workers)
-        # Π_A = -(filter(ρuᵢ) - ρ̄ūᵢ) · ∇Υˡ, with ∇Υˡ computed by differentiating the assembled Υˡ
-        # field using a 4th-order stencil (see calculate_cross_scale_ape_flux()).
+        # Π_A = -τᵢ·∇Υˡ = -(filter(ρuᵢ) - ρ̄ūᵢ) · ∇Υˡ, with ∇Υˡ computed by differentiating the
+        # assembled Υˡ field using a 4th-order stencil. Expanded inline here (rather than calling
+        # calculate_cross_scale_ape_flux(), which does exactly this internally) so that τᵢ/∇Υˡ stay
+        # available afterward -- include_pi_a_vertical below reuses them as-is to extract Π_A^v, the
+        # i=3 (vertical) term of this same sum, at zero extra cost (no new filtering/gradient calc).
+        # calculate_cross_scale_ape_flux() itself is untouched and still available for standalone use.
         # Printed/timed: this step used to be a long silent gap after this loop's per-scale prints,
         # easily mistaken for a hang even though it's just slow (confirmed via cput/walltime deltas).
         print("Calculating cross-scale APE flux (Π_A)...")
         t0 = time.time()
-        Π_A = calculate_cross_scale_ape_flux(ds_full.ρ, ds_full["uᵢ"], filt_local_pes.upsilon,
-                                              gaussian_filter, filter_dims=filtered_dimensions,
-                                              filtered_density=ds_filt_ℓ.ρ̄,
-                                              filtered_velocity_vector=ds_filt_ℓ["ūᵢ"])
+        tau_i = calculate_subfilter_tracer_flux(ds_full.ρ, ds_full["uᵢ"], gaussian_filter,
+                                                filter_dims=filtered_dimensions,
+                                                filtered_density=ds_filt_ℓ.ρ̄,
+                                                filtered_velocity_vector=ds_filt_ℓ["ūᵢ"])
+        grad_upsilon_l = calculate_gradient(filt_local_pes.upsilon)
+        Π_A = -(tau_i * grad_upsilon_l).sum(dim="i")
         # filt_local_pes (local_potential_energies_timeseries(), now fully eager per its own fix) holds 8
         # full fields (ape/z0/upsilon/D/tpe/rpe/rho_sorted/dz_sorted), but only .upsilon is used above. Π_A
         # is still a lazy dask graph at this point, and that graph captures filt_local_pes.upsilon (already-
@@ -413,9 +426,16 @@ def calculate_energy_transfer(ds, filter_scales,
         # 384x384x64, n_scales=30 sweep run (sweep2_energy_transfer.py), dying inside this loop despite each
         # individual scale's data being modest. Loading Π_A here breaks that reference so filt_local_pes can
         # be freed before the next scale, bounding peak memory to ~1 scale's filt_local_pes instead of all
-        # n_scales -- the same pattern already used in 05_sfs_ape_budget.py's own per-scale loop.
+        # n_scales -- the same pattern already used in 05_sfs_ape_budget.py's own per-scale loop. Π_A^v below
+        # is loaded here too, for the same reason (its own lazy graph also captures filt_local_pes.upsilon).
         Π_A = Π_A.load()
         print(f"  Π_A computed and loaded  ({time.time()-t0:.1f}s)")
+
+        pi_a_vertical_vars = {}
+        if include_pi_a_vertical:
+            Π_A_v = (-(tau_i.sel(i=3) * grad_upsilon_l.sel(i=3))).load()
+            pi_a_vertical_vars = {"Π_A^v": Π_A_v, "∫Π_A^v dV": integrate(Π_A_v, dV)}
+
         # Grabbed before filt_local_pes is deleted below -- these are references to filt_local_pes's own
         # already-eager DataArrays (see local_potential_energies_timeseries()), not copies, so this doesn't
         # cost anything extra: it just keeps 4 of the 8 fields reachable past the del instead of all 8.
@@ -427,7 +447,7 @@ def calculate_energy_transfer(ds, filter_scales,
                 "Dˡ":        filt_local_pes.D,
                 "Ea(ρ̄, z)": filt_local_pes.ape,
             }
-        del filt_local_pes
+        del filt_local_pes, tau_i, grad_upsilon_l
         gc.collect()
 
         int_Π_A                = integrate(Π_A, dV)
@@ -441,6 +461,7 @@ def calculate_energy_transfer(ds, filter_scales,
             "∫Π_A dV":              int_Π_A,
             "∫(SFS APE->KE) dV":    int_ape_to_ke_exchange,
             **filt_local_pes_vars,
+            **pi_a_vertical_vars,
             "∫w̄·b̄ᵣ dV":             int_wbar_b_r_bar,
             **ke_vars,
         }
