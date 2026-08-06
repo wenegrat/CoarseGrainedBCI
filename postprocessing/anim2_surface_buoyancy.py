@@ -19,11 +19,11 @@ parser.add_argument("--dpi", type=int, default=120, help="DPI for output GIF")
 args = parser.parse_args()
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-ANIMATIONS = REPO_ROOT / "animations"
-ANIMATIONS.mkdir(exist_ok=True)
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 surface_filename = filename.replace(".nc", "_surface.nc")
 stem = Path(filename).stem
+ANIMATIONS = REPO_ROOT / "animations" / stem  # one subfolder per run, keyed by input filename stem
+ANIMATIONS.mkdir(parents=True, exist_ok=True)
 #---
 
 #+++ Load surface data

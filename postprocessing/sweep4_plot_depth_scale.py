@@ -25,6 +25,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 ref_suffix = "_fixed_ref" if args.fixed_reference else ""
+FIGURES = REPO_ROOT / "figures" / Path(filename).stem  # one subfolder per run, keyed by input filename stem
+FIGURES.mkdir(parents=True, exist_ok=True)
 #---
 
 #+++ Load energy transfer data -- Π_K/Π_A are already full local (filter_scale, time, z, y, x) fields in
@@ -112,7 +114,7 @@ if label:
     suptitle = f"{label}\n{suptitle}"
 fig.suptitle(suptitle, fontsize=11)
 
-plot_filename = str(REPO_ROOT / "figures" / (Path(filename).stem + f"_depth_scale_transfer{ref_suffix}.png"))
+plot_filename = str(FIGURES / (Path(filename).stem + f"_depth_scale_transfer{ref_suffix}.png"))
 fig.savefig(plot_filename, dpi=150, bbox_inches="tight")
 print(f"Plot saved to: {plot_filename}")
 #---
