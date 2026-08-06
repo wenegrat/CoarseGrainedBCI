@@ -89,3 +89,11 @@ for FS in $LOOP_SCALES; do
 done
 
 qstat -f $PBS_JOBID >> $LOG
+
+# Copy the simulation's own log (written by simulation.pbs to the repo-root logs/, named identically to
+# this run's own SIM/stem) into this run's figures/ subfolder, alongside the plots it produced -- best-
+# effort, not set -e-fatal: a missing log (e.g. plots.pbs run standalone, without the simulation stage
+# having been submitted under this exact job name) shouldn't fail an otherwise-successful plotting job.
+cp ../logs/${SIM}.out ../figures/${SIM}/ 2>/dev/null \
+    && echo "Copied ../logs/${SIM}.out to ../figures/${SIM}/" \
+    || echo "Note: ../logs/${SIM}.out not found -- skipping simulation-log copy into ../figures/${SIM}/"
