@@ -19,6 +19,8 @@ PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 fixed_reference = args.fixed_reference
 ref_suffix = "_fixed_ref" if fixed_reference else ""
+FIGURES = REPO_ROOT / "figures" / Path(filename).stem  # one subfolder per run, keyed by input filename stem
+FIGURES.mkdir(parents=True, exist_ok=True)
 #---
 
 #+++ Load budget data
@@ -92,7 +94,7 @@ for ℓ in filter_scales:
     elif fixed_reference:
         fig.suptitle("(fixed reference)", fontsize=11)
 
-    plot_filename = str(REPO_ROOT / "figures" / (Path(filename).stem + f"_sfs_budgets_l{ℓ:.4f}{ref_suffix}.png"))
+    plot_filename = str(FIGURES / (Path(filename).stem + f"_sfs_budgets_l{ℓ:.4f}{ref_suffix}.png"))
     fig.savefig(plot_filename, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"  Plot saved to: {plot_filename}")

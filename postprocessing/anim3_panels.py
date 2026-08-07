@@ -23,10 +23,10 @@ print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" fo
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
-ANIMATIONS = REPO_ROOT / "animations"
-ANIMATIONS.mkdir(exist_ok=True)
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 stem = Path(filename).stem
+ANIMATIONS = REPO_ROOT / "animations" / stem  # one subfolder per run, keyed by input filename stem
+ANIMATIONS.mkdir(parents=True, exist_ok=True)
 #---
 
 #+++ Orientation fix: some offline APE-pipeline fields (Π_A, the KE<->APE exchange term) are stored with

@@ -5,7 +5,7 @@ using Oceananigans.Grids: znode
 using Printf
 using Random
 using ArgParse
-using Oceanostics: PotentialEnergyEquation, GaussianFilter, KineticEnergyCrossScaleFlux, SubFilterKineticEnergyDissipationRate, FilteredKineticEnergyDissipationRate
+using Oceanostics: GaussianFilter, KineticEnergyCrossScaleFlux, SubFilterKineticEnergyDissipationRate
 
 @info "Finished loading packages"
 Random.seed!(8675309)
@@ -52,6 +52,23 @@ let s = ArgParseSettings()
             default = "auto"
             range_tester = (s -> s in ("auto", "cpu", "gpu"))
 
+        "--precision"
+            help = "Floating-point type for the grid and all fields: 'Float64' (default, matches all prior \
+                    behavior) or 'Float32'. Float32 roughly halves GPU memory for essentially every \
+                    persistent field (prognostic, tendency, pressure-solver scratch, diagnostics) -- the \
+                    single biggest lever for a memory-bound high-resolution GPU run (e.g. an OOM at \
+                    1024x1024x64 on a 40GB GPU). Not a free lunch: verify budget closure still looks \
+                    reasonable after switching, since it does trade off some numerical precision. Every \
+                    scalar constant passed into a discrete_form=true/parameters= hot-path function \
+                    (--bottom_drag's Cd, --mixed_layer_kappa_v's mixed_layer_depth/mixed_layer_kappa_v) is \
+                    explicitly converted to match this precision below -- leaving those as literal Float64 \
+                    under a Float32 grid wouldn't break correctness (Julia promotes), but would silently \
+                    force Float64 arithmetic back into what should be a Float32 per-cell kernel."
+            arg_type = String
+            required = false
+            default = "Float64"
+            range_tester = (s -> s in ("Float64", "Float32"))
+
         "--N2"
             help = "Background stratification N² (default: 1e-5 s⁻²)"
             arg_type = Float64
@@ -70,10 +87,14 @@ let s = ArgParseSettings()
             default = 0.0
 
         "--mixed_layer_kappa_v"
-            help = "Extra vertical diffusivity for buoyancy (only -- not viscosity), in m² s⁻¹, applied \
-                    everywhere above -mixed_layer_depth for the entire run, on top of whatever the main \
-                    --closure already provides (default: 0.0, i.e. disabled). Ignored unless \
-                    --mixed_layer_depth > 0 (warns and is skipped if set without it). Rationale: mixed-layer \
+            help = "PEAK extra vertical diffusivity for buoyancy (only -- not viscosity), in m² s⁻¹, for \
+                    the entire run, on top of whatever the main --closure already provides (default: 0.0, \
+                    i.e. disabled). Ignored unless --mixed_layer_depth > 0 (warns and is skipped if set \
+                    without it). NOT a uniform/top-hat value across the mixed layer: the vertical shape is \
+                    κ(z) = this_flag · (27/4)·σ·(1-σ)², σ=min(-z/H, 1), H=--mixed_layer_depth -- a smooth \
+                    KPP-style bump, zero at the surface (z=0) and at/below the ML base (z=-H), peaking at \
+                    exactly this flag's value at z=-H/3 (the 27/4 prefactor is chosen precisely so the peak \
+                    equals this_flag's value, not some other multiple of it). Rationale: mixed-layer \
                     instability (MLI) both grows *and* shuts itself off via the same route -- it converts the \
                     mixed layer's own lateral buoyancy gradient into vertical stratification (restratification, \
                     Boccaletti et al. 2007), and once that stratification builds up MLI has nothing left to \
@@ -95,9 +116,14 @@ let s = ArgParseSettings()
                     selected (Oceananigans sums diffusivities across a tuple of closures), so it needs no \
                     changes to the scale_aware/constant/smagorinsky branches. Order of magnitude: mixing away \
                     stratification on a timescale comparable to MLI's own restratification timescale (order \
-                    days) over a mixed layer depth H needs κ ~ H²/(few days); e.g. H=100m, 3 days gives \
-                    κ~0.03-0.1 m² s⁻¹ -- treat this as a starting point to check empirically, not a precise \
-                    prediction."
+                    days) over a mixed layer depth H needs κ ~ H²/(few days) as a uniform-equivalent value; \
+                    e.g. H=100m, 3 days gives κ~0.03-0.1 m² s⁻¹ -- treat this as a starting point for the \
+                    PEAK value to check empirically, not a precise prediction. Since this flag now sets a \
+                    peak (with the mixing concentrated near z=-H/3 rather than spread uniformly over the \
+                    whole layer) instead of a uniform value, the actual bulk mixing effect for a given \
+                    number is somewhat weaker than the old top-hat profile at the same number -- expect to \
+                    need a somewhat larger value than this estimate if comparing against a previously-tuned \
+                    top-hat run."
             arg_type = Float64
             required = false
             default = 0.0
@@ -132,7 +158,7 @@ let s = ArgParseSettings()
                     ignoring (with a warning) any --closure/--advection_scheme/--Pe_cell_h/--Pe_cell_v/ \
                     --nu_h/--nu_v flags that look like they were also explicitly set. Relies entirely on \
                     WENO's own implicit, scale-selective numerical dissipation for stability -- an \
-                    implicit-LES configuration. IMPORTANT: the online ε_Kˢ/εˡ SFS dissipation diagnostics \
+                    implicit-LES configuration. IMPORTANT: the online ε_Kˢ SFS dissipation diagnostic \
                     and the offline APE dissipation term both read from an explicit closure's ν/κ, which is \
                     nothing here, so they report ~zero rather than the real (numerical, untracked) \
                     dissipation actually happening -- the post-processing pipeline detects this via this \
@@ -374,15 +400,17 @@ else # "auto"
 end
 @info "Using architecture: $architecture"
 
-grid = RectilinearGrid(architecture;
+FT = params.precision == "Float32" ? Float32 : Float64
+
+grid = RectilinearGrid(architecture, FT;
                        size=(Nx, Ny, Nz),
                        x=(0, params.Lx),
                        y=(-params.Ly/2, params.Ly/2),
                        z=(-params.Lz, 0),
                        halo=(3, 3, 3),
                        topology=(Periodic, Periodic, Bounded))
-@info "Grid created: Nx=$Nx, Ny=$Ny, Nz=$Nz, halo=(3, 3, 3) (may be auto-inflated below if the advection \
-scheme needs more, e.g. --implicit's WENO(order=$(params.implicit_weno_order)))"
+@info "Grid created: Nx=$Nx, Ny=$Ny, Nz=$Nz, precision=$FT, halo=(3, 3, 3) (may be auto-inflated below if \
+the advection scheme needs more, e.g. --implicit's WENO(order=$(params.implicit_weno_order)))"
 #---
 
 #+++ Create model
@@ -469,29 +497,38 @@ else
      VerticalScalarDiffusivity(VerticallyImplicitTimeDiscretization(); ν=νv, κ=κv))
 end
 
-# --mixed_layer_kappa_v: extra vertical diffusivity for buoyancy only, confined above
-# -mixed_layer_depth, for the whole run -- see the flag's own --help for the full rationale (keeps MLI
-# perpetually unable to fully restratify, rather than damping its growth directly, so mesoscale and
-# submesoscale can coexist without needing to pick a cutoff time). Composed as an *additional* closure
-# tuple element, summed with whatever --closure already selected above -- Oceananigans sums diffusivities
-# across a tuple of closures, confirmed directly (a real model built and run one timestep) -- so this needs
-# no changes to the branches above. discrete_form=true + parameters= (not a plain closed-over-globals
-# function) for the same reason --bottom_drag's Cd uses `parameters=`: params.mixed_layer_depth/
-# params.mixed_layer_kappa_v are fields of a non-const, reassigned global, and closing over that directly
-# inside a per-grid-point, per-timestep hot-path function is the same performance trap documented there.
+# --mixed_layer_kappa_v: extra vertical diffusivity for buoyancy only, shaped over the mixed layer as a
+# smooth KPP-style bump (not a uniform top-hat) -- see the flag's own --help for the full rationale (keeps
+# MLI perpetually unable to fully restratify, rather than damping its growth directly, so mesoscale and
+# submesoscale can coexist without needing to pick a cutoff time) and for the shape formula itself. Composed
+# as an *additional* closure tuple element, summed with whatever --closure already selected above --
+# Oceananigans sums diffusivities across a tuple of closures, confirmed directly (a real model built and run
+# one timestep) -- so this needs no changes to the branches above. discrete_form=true + parameters= (not a
+# plain closed-over-globals function) for the same reason --bottom_drag's Cd uses `parameters=`:
+# params.mixed_layer_depth/params.mixed_layer_kappa_v are fields of a non-const, reassigned global, and
+# closing over that directly inside a per-grid-point, per-timestep hot-path function is the same performance
+# trap documented there.
 if params.mixed_layer_kappa_v > 0 && params.mixed_layer_depth <= 0
     @warn "--mixed_layer_kappa_v=$(params.mixed_layer_kappa_v) has no effect without --mixed_layer_depth > 0; ignoring"
 elseif params.mixed_layer_kappa_v > 0
+    # σ = min(-z/H, 1) is a single branchless GPU instruction (fminf), not a conditional -- no divergence
+    # risk, no more expensive than the comparison the old top-hat ternary already did here. mixed_layer_
+    # depth/mixed_layer_kappa_v/shape_peak_coeff are all explicitly cast to FT in the `parameters=` tuple
+    # below (not left as ArgParse's plain Float64, and not written as a bare `27/4` literal in the function
+    # body either -- both would silently reintroduce Float64 arithmetic into this per-grid-point kernel
+    # under --precision Float32, the same trap documented for Cd/these two params previously).
     @inline function κ_v_ml(i, j, k, grid, clock, fields, p)
         z = znode(i, j, k, grid, Center(), Center(), Face())
-        return z > -p.mixed_layer_depth ? p.mixed_layer_kappa_v : zero(z)
+        σ = min(-z / p.mixed_layer_depth, one(z))
+        return p.mixed_layer_kappa_v * p.shape_peak_coeff * σ * (1 - σ)^2
     end
     ml_closure = VerticalScalarDiffusivity(κ=κ_v_ml, discrete_form=true, loc=(Center, Center, Face),
-                                           parameters=(; mixed_layer_depth=params.mixed_layer_depth,
-                                                          mixed_layer_kappa_v=params.mixed_layer_kappa_v))
+                                           parameters=(; mixed_layer_depth=FT(params.mixed_layer_depth),
+                                                          mixed_layer_kappa_v=FT(params.mixed_layer_kappa_v),
+                                                          shape_peak_coeff=FT(27//4)))
     global closure = (closure..., ml_closure)
-    @info "Mixed-layer persistent submesoscale forcing enabled: extra κᵥ=$(params.mixed_layer_kappa_v) m² s⁻¹ " *
-          "for z > -$(params.mixed_layer_depth) m, for the entire run"
+    @info "Mixed-layer persistent submesoscale forcing enabled: peak κᵥ=$(params.mixed_layer_kappa_v) m² s⁻¹ " *
+          "at z=-$(params.mixed_layer_depth/3) m (KPP-style bump over the top $(params.mixed_layer_depth) m), for the entire run"
 end
 
 # WENO(order=9) needs a wider stencil (halo≥5) than the grid's fixed halo=(3,3,3) -- order=5 needs halo≥3,
@@ -514,7 +551,10 @@ advection_scheme = params.implicit ? WENO(order=params.implicit_weno_order) : (p
 Cd = nothing
 boundary_conditions = NamedTuple()
 if params.bottom_drag
-    global Cd = (κᵥₖ / log(Δz / (2 * params.z0)))^2
+    # Cast to FT: Cd otherwise stays plain Float64 (from the Float64 literals/params feeding the formula
+    # above), which would silently force Float64 arithmetic into this per-bottom-cell boundary condition
+    # kernel under --precision Float32.
+    global Cd = FT((κᵥₖ / log(Δz / (2 * params.z0)))^2)
     bottom_drag_u(x, y, t, u, v, w, p) = -p.Cd * u * sqrt(u^2 + v^2 + w^2)
     bottom_drag_v(x, y, t, u, v, w, p) = -p.Cd * v * sqrt(u^2 + v^2 + w^2)
     u_drag_bc = FluxBoundaryCondition(bottom_drag_u, field_dependencies=(:u, :v, :w), parameters=(; Cd))
@@ -674,25 +714,20 @@ v_center = @at (Center, Center, Center) v
 w_center = @at (Center, Center, Center) w
 
 ζ = Field(∂x(v) - ∂y(u))
-ρ₀ = 1025 # kg/m^3
-pe = ρ₀ * PotentialEnergyEquation.PotentialEnergy(model)
-PE = Integral(pe)
 
-#+++ Gaussian-filtered u, v, w, b at multiple filter scales — HORIZONTAL ONLY (dims=(1,2)).
-# Coarse-graining is applied over (x, y) at each depth level, not in z: horizontal scales span the
-# mesoscale/submesoscale range this budget targets, while the vertical direction has its own distinct
-# structure (stratification, surface/bottom boundary layers) that shouldn't be smoothed over. Both
-# horizontal directions are periodic here, so (unlike the KH setup's bounded-z filter) no edge-extension
-# boundary handling is needed — it's a pure periodic wrap.
+# filter_ℓs/gaussian_filters are consumed below by ke_budget_fields (Πₖ/ε_Kˢ) and, when --bottom_drag,
+# bottom_drag_fields -- both call Oceanostics functions as (model, gf), which do their own internal
+# filtering, so no separately-filtered u/v/w/b fields need to be built or written here. An earlier version
+# of this file also built and wrote gf(u), gf(v), gf(w), gf(b) per scale as their own output fields
+# (u_ℓ50km, etc.) -- removed (see git history) after confirming nothing downstream ever read them:
+# 01_filter_fields.py performs its own independent offline Gaussian filtering of the raw u/v/w/b (its own
+# --filter-scales are explicitly documented as free parameters, not required to match filter_ℓs here), so
+# those online-filtered fields were pure write volume (8 extra full-3D fields at the default 2 scales) for
+# data immediately discarded and recomputed from scratch offline.
 filter_ℓs = Tuple(params.filter_scales_m .* meters)
 gaussian_filters = [GaussianFilter(; dims=(1, 2), σ=_FWHM_to_σ(ℓ)) for ℓ in filter_ℓs]  # one reusable filter object per scale
 
-_fields = (u=u_center, v=v_center, w=w_center, b=b)
-_filt_pairs = [Symbol("$(n)_ℓ$(round(Int, ℓ/1000))km") => gf(f) for (ℓ, gf) in zip(filter_ℓs, gaussian_filters) for (n, f) in pairs(_fields)]
-filtered_fields = (; _filt_pairs...)
-#---
-
-@info "Online diagnostics (filtered fields) built"
+@info "Online diagnostics (filters) built"
 
 #+++ Cross-scale KE flux Πₖ and SFS KE dissipation ε_Kˢ, per filter scale
 # w is a genuine prognostic variable in this NonhydrostaticModel, with its own momentum equation and
@@ -702,24 +737,21 @@ filtered_fields = (; _filt_pairs...)
 # reintroduce a different missing term (horizontal-vertical pressure redistribution) in place of the
 # free-surface one this model switch removes.
 #
-# ε_Kˢ (SubFilterKineticEnergyDissipationRate) and εˡ (FilteredKineticEnergyDissipationRate) have no
-# `dims` restriction in their public API at all -- both always include w's full contribution via the
-# model's actual per-direction viscous fluxes, which is the physically correct behavior now (it was a
-# small "phantom" w-diffusion term under the old hydrostatic setup, verified negligible there via a
-# smoke test: ~1e-8 relative magnitude, 0.99 spatial correlation with the w-excluded offline formula).
+# ε_Kˢ (SubFilterKineticEnergyDissipationRate) has no `dims` restriction in its public API at all -- it
+# always includes w's full contribution via the model's actual per-direction viscous fluxes, which is the
+# physically correct behavior now (it was a small "phantom" w-diffusion term under the old hydrostatic
+# setup, verified negligible there via a smoke test: ~1e-8 relative magnitude, 0.99 spatial correlation
+# with the w-excluded offline formula).
 #
-# εˡ is included alongside Πₖ/ε_Kˢ for an ongoing investigation into whether the *filtered* (large-scale)
-# KE budget (∂ₜK̄ = w̄b̄ᵣ - Πₖ - εˡ, K̄ = ½(ū²+v̄²+w̄²)) is a more robust diagnostic than the SFS budget this
-# repo has focused on so far -- unlike ε_Kˢ = filter(ε) - εˡ (a difference of two large, closely-related
-# quantities, fragile by construction), εˡ is a single directly-computed term with no cancellation,
-# matching how tomchor's own Eady baroclinic-instability example (Oceanostics PR #260) closes its
-# coarse-grained KE budget. That example's own setup (NonhydrostaticModel, no free surface, full 3D Πₖ)
-# is exactly what this switch adopts; see conversation history for the ongoing investigation into how
-# much of the closure gap is numerics vs. the buoyancy-production-term convention (w̄b̄ vs w̄b̄ᵣ).
+# εˡ (FilteredKineticEnergyDissipationRate) used to be computed here alongside Πₖ/ε_Kˢ for an
+# ongoing investigation into whether the *filtered* (large-scale) KE budget (∂ₜK̄ = w̄b̄ᵣ - Πₖ - εˡ,
+# K̄ = ½(ū²+v̄²+w̄²)) is a more robust diagnostic than the SFS budget this repo has focused on so far --
+# removed (see git history) since no script ever read it: there's no full large-scale/filtered KE budget
+# assembly in the offline pipeline yet, so it was pure write volume with no consumer. Revive it (it's a
+# one-line addition back to _ke_pairs below) if that investigation resumes.
 _ke_pairs = vcat(
     [Symbol("Π_K_ℓ$(round(Int, ℓ/1000))km")  => KineticEnergyCrossScaleFlux(model, gf; dims=(1, 2, 3)) for (ℓ, gf) in zip(filter_ℓs, gaussian_filters)],
     [Symbol("ε_Kˢ_ℓ$(round(Int, ℓ/1000))km") => SubFilterKineticEnergyDissipationRate(model, gf)        for (ℓ, gf) in zip(filter_ℓs, gaussian_filters)],
-    [Symbol("ε_l_ℓ$(round(Int, ℓ/1000))km")  => FilteredKineticEnergyDissipationRate(model, gf)         for (ℓ, gf) in zip(filter_ℓs, gaussian_filters)],
 )
 ke_budget_fields = (; _ke_pairs...)
 #---
@@ -727,8 +759,9 @@ ke_budget_fields = (; _ke_pairs...)
 #+++ Bottom drag work diagnostics: τ̄ (filtered stress) and overline{τ·u_b} (filtered pointwise work), per
 # filter scale -- only when --bottom_drag. These are the "primitive" SFS-decomposition ingredients: offline
 # assembly (04_sfs_ke_budget.py) combines them into the large-scale term -(τ̄·ū_b) and the SFS term
-# -(overline{τ·u_b} - τ̄·ū_b). ū_b/v̄_b need no separate computation here -- they're already the bottom
-# z-slice of the filtered u_ℓ/v_ℓ fields built above. τ_x, τ_y, and the raw work τ·u_b are built as full 3D
+# -(overline{τ·u_b} - τ̄·ū_b). ū_b/v̄_b need no separate computation here -- 04_sfs_ke_budget.py reuses the
+# bottom z-slice of 01_filter_fields.py's own offline-filtered u/v (ds_filt_ℓ), not anything from this file.
+# τ_x, τ_y, and the raw work τ·u_b are built as full 3D
 # expressions from u_center/v_center/w_center for convenience (reusing the same gaussian_filters, which only
 # ever touch x,y), but only the bottom z-level (written via the new :bottom output writer below,
 # indices=(:,:,1)) is physically meaningful -- horizontal-only filtering and z-slicing commute, so this is
@@ -746,7 +779,7 @@ if params.bottom_drag
 end
 #---
 
-outputs = (; ζ, b, pe, PE, u=u_center, v=v_center, w=w_center, filtered_fields..., ke_budget_fields...)
+outputs = (; ζ, b, u=u_center, v=v_center, w=w_center, ke_budget_fields...)
 
 # Smagorinsky's eddy viscosity/diffusivity are spatially/temporally varying fields (unlike the
 # 'constant' closure's fixed ν/κ, which are recorded as scalar global attributes below), so they must be

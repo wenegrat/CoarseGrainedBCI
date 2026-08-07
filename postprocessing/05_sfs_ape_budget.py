@@ -88,20 +88,22 @@ if "κₑ" in ds:
 else:
     κh, κv = ds.attrs["nu_h"] / ds.attrs["Pr"], ds.attrs["nu_v"] / ds.attrs["Pr"]
 
-# --mixed_layer_kappa_v (baroclinic_adjustment.jl): an extra vertical buoyancy diffusivity confined
-# above -mixed_layer_depth, composed as an *additional* closure term on top of whatever the base
-# --closure already provides (see the flag's own --help) -- neither the nu_v/Pr scalar above nor the
-# Smagorinsky κₑ diagnostic field has any way to know about this separately-added term, so without this,
-# ε_Aˢ would systematically undercount real dissipation happening in the mixed layer. calculate_sfs_ape_
-# dissipation()'s κv already accepts either a scalar or an xr.DataArray (see its own docstring) -- via
+# --mixed_layer_kappa_v (baroclinic_adjustment.jl): an extra vertical buoyancy diffusivity shaped as a
+# smooth KPP-style bump over the mixed layer (peak at z=-mixed_layer_depth/3, zero at the surface and at/
+# below the ML base -- see the flag's own --help for the shape formula), composed as an *additional*
+# closure term on top of whatever the base --closure already provides -- neither the nu_v/Pr scalar above
+# nor the Smagorinsky κₑ diagnostic field has any way to know about this separately-added term, so without
+# this, ε_Aˢ would systematically undercount real dissipation happening in the mixed layer. calculate_sfs_
+# ape_dissipation()'s κv already accepts either a scalar or an xr.DataArray (see its own docstring) -- via
 # _anisotropic_dot(), which just multiplies κv elementwise against ∂ρ/∂z -- so broadcasting a z-dependent
 # κv in is already fully supported with no changes needed there, only in how κv is built here.
 mixed_layer_depth = ds.attrs.get("mixed_layer_depth", 0.0)
 mixed_layer_kappa_v = ds.attrs.get("mixed_layer_kappa_v", 0.0)
 if mixed_layer_kappa_v > 0:
-    κv = κv + xr.where(ds.z_aac > -mixed_layer_depth, mixed_layer_kappa_v, 0.0)
-    print(f"  --mixed_layer_kappa_v={mixed_layer_kappa_v} detected (from simulation attrs): added to κv "
-          f"above z=-{mixed_layer_depth}m for the ε_Aˢ calculation below")
+    σ = (-ds.z_aac / mixed_layer_depth).clip(max=1.0)
+    κv = κv + mixed_layer_kappa_v * (27 / 4) * σ * (1 - σ) ** 2
+    print(f"  --mixed_layer_kappa_v={mixed_layer_kappa_v} detected (from simulation attrs): added KPP-style "
+          f"bump (peak at z=-{mixed_layer_depth/3}m) to κv for the ε_Aˢ calculation below")
 
 ds = condense_velocities(ds, indices=(1, 2, 3))
 ds_full = ds[["b", "dV", "LxLy", "uᵢ"]].copy()

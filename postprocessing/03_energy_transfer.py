@@ -68,6 +68,10 @@ print("Calculating cross-scale transfer terms...")
 # Υˡ once Π_A is built. Persisting the rest here lets 05_sfs_ape_budget.py read them back from this script's
 # output instead of computing local_potential_energies_timeseries() on the same ds_filt_ℓ a second time.
 #
+# include_pi_a_vertical=True: also persist Π_A^v = -τ(w,ρ) ∂Υˡ/∂z, the vertical-only (i=3) term of the
+# same -τᵢ·∇Υˡ sum Π_A is already built from -- a free byproduct (see calculate_energy_transfer()'s own
+# comment), no new filtering or gradient computation.
+#
 # Looped one scale at a time and checkpointed to disk -- same pattern as 05_sfs_ape_budget.py's per-scale
 # loop -- so a scale's full lazy graph (and everything upstream of it) doesn't stay reachable for the rest
 # of the script. calculate_energy_transfer() itself is unchanged (still called once per scale, just with a
@@ -90,7 +94,8 @@ for ℓ in filter_scales:
                                            dz_sorted=ds_sorted.dz_sorted,
                                            n_workers=n_workers,
                                            include_pi_k=False,
-                                           include_filt_local_pes=True)
+                                           include_filt_local_pes=True,
+                                           include_pi_a_vertical=True)
     print(f"  Computing and saving checkpoint (write-mode={args.write_mode})...")
     t0 = time.time()
     write_dataset(transfer_ℓ, str(checkpoint_path), write_mode=args.write_mode)

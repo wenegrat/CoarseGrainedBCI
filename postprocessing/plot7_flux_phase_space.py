@@ -35,10 +35,10 @@ print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" fo
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
-FIGURES = REPO_ROOT / "figures"
-FIGURES.mkdir(exist_ok=True)
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 stem = Path(filename).stem
+FIGURES = REPO_ROOT / "figures" / stem  # one subfolder per run, keyed by input filename stem
+FIGURES.mkdir(parents=True, exist_ok=True)
 #---
 
 #+++ Orientation fix: some pipeline fields (Π_A, the KE<->APE exchange term, and ūᵢ here) are stored with
