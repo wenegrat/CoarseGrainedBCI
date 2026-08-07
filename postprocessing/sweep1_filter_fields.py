@@ -34,6 +34,14 @@ parser.add_argument("--merge-only", action="store_true", default=False,
          "[0, n_scales) range into the final output. Validates every expected file's filter_scale value "
          "and time axis, hard-erroring with the specific missing/stale indices rather than silently "
          "merging an incomplete set. Mutually exclusive with --scale-start-idx/--scale-end-idx.")
+parser.add_argument("--print-scale-ranges", type=int, default=None, metavar="N_JOBS",
+    help="Print N_JOBS cost-weighted '<start> <end>' index ranges covering [0, n_scales) and exit without "
+         "filtering anything. Used by submit_sweep.sh to split the sweep across jobs. Weighted by ℓ rather "
+         "than split evenly by count because the scales are log-spaced and the Gaussian filter costs "
+         "O(L·σ) with σ ∝ ℓ, so the largest few scales dominate: at 1024², an even-by-count split into 6 "
+         "leaves one job holding ~60%% of the work. Lives here (rather than being reimplemented in the "
+         "submit script) so it reuses this script's own scale_min/scale_max/geomspace logic verbatim and "
+         "can't drift from it.")
 args = parser.parse_args()
 
 if args.merge_only and (args.scale_start_idx is not None or args.scale_end_idx is not None):
@@ -74,6 +82,48 @@ scale_max = args.scale_max if args.scale_max is not None else 0.4 * np.asarray(d
 filter_scales = np.geomspace(scale_min, scale_max, args.n_scales)
 n_scales = args.n_scales
 print(f"Filter scales: {scale_min/1e3:.1f}km to {scale_max/1e3:.1f}km ({n_scales} log-spaced steps)")
+
+if args.print_scale_ranges is not None:
+    # Partition [0, n_scales) into n_jobs contiguous ranges minimizing the heaviest range's cost, with
+    # cost ∝ ℓ (the Gaussian filter is a direct O(L·σ) correlation and σ ∝ ℓ). Binary-search the smallest
+    # feasible max-load, then walk greedily under it -- exact, and only a few lines. Costs are relative,
+    # so the same split applies to sweep2, whose per-scale filtering scales with ℓ the same way.
+    n_jobs = args.print_scale_ranges
+    if not (1 <= n_jobs <= n_scales):
+        parser.error(f"--print-scale-ranges must be between 1 and n_scales ({n_scales}), got {n_jobs}")
+    w = filter_scales.astype(float)
+
+    def _fits(limit):
+        """Greedy pack under `limit`; returns the ranges if they fit in n_jobs batches, else None."""
+        ranges, start, acc = [], 0, 0.0
+        for i, wi in enumerate(w):
+            if acc + wi > limit and i > start:
+                ranges.append((start, i)); start, acc = i, 0.0
+            acc += wi
+        ranges.append((start, len(w)))
+        return ranges if len(ranges) <= n_jobs else None
+
+    lo, hi = float(w.max()), float(w.sum())
+    for _ in range(200):                      # ~1e-60 relative precision; far more than needed
+        mid = (lo + hi) / 2
+        if _fits(mid) is not None: hi = mid
+        else:                      lo = mid
+    ranges = _fits(hi)
+    # Greedy may use fewer batches than asked; split the widest remaining range until we have n_jobs, so
+    # every requested job gets work (an empty range would be rejected by the start<end check above).
+    while len(ranges) < n_jobs:
+        j = max(range(len(ranges)), key=lambda k: ranges[k][1] - ranges[k][0])
+        a, b = ranges[j]
+        if b - a < 2: break                   # can't split further; fewer jobs than requested
+        mid_i = (a + b) // 2
+        ranges[j:j+1] = [(a, mid_i), (mid_i, b)]
+    # Tagged so the caller can grep these out of this script's other stdout chatter.
+    total = float(w.sum())
+    for a, b in ranges:
+        print(f"SCALE_RANGE {a} {b}   # {b-a} scales, "
+              f"ℓ={filter_scales[a]/1e3:.1f}-{filter_scales[b-1]/1e3:.1f}km, "
+              f"{100*float(w[a:b].sum())/total:.1f}% of filtering cost")
+    raise SystemExit(0)
 
 # Resolve this invocation's slice of the full scale list. Defaults cover everything, so an invocation
 # that passes neither flag behaves exactly as it always has.
@@ -120,9 +170,16 @@ if not args.merge_only:
     dy_min = float(ds.Δy_aca.min())
 
     with ProgressBar(minimum=5, dt=5):
+        n_this_batch = scale_end_idx - scale_start_idx
         for local_idx, ℓ in enumerate(filter_scales[scale_start_idx:scale_end_idx]):
             global_idx = scale_start_idx + local_idx
-            print(f"  filter_scale = {ℓ:.4f}  (global {global_idx+1}/{n_scales})...")
+            # Progress counts this job's own allocation, not the full sweep -- the global index rides
+            # along for a partial batch so sibling jobs' logs can be lined up against each other.
+            if is_full_range:
+                progress = f"{global_idx+1}/{n_scales}"
+            else:
+                progress = f"{local_idx+1}/{n_this_batch} of this batch (global {global_idx+1}/{n_scales})"
+            print(f"  filter_scale = {ℓ:.4f}  ({progress})...")
             gf = GaussianFilter(ℓ, dx_min, dy_min)
             ds_filt_ℓ = xr.Dataset({
                 "ūᵢ": gf.apply(ds["uᵢ"], dims=["x_caa", "y_aca"]),

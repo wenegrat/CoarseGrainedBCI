@@ -31,14 +31,29 @@ if [ "$N_SCALE_JOBS" -gt "$N_SCALES" ]; then
     exit 1
 fi
 
+# $PYTHON (for the cost-weighted split below) comes from hpc_env.sh, same as every .pbs script uses.
+# Sourced in a subshell-safe way: it purges/reloads modules, which is fine here since this script only
+# submits jobs. If it isn't available, compute_ranges() falls back to the even-by-count split.
+if [ "$N_SCALE_JOBS" -gt 1 ] && [ -f ../hpc_env.sh ]; then
+    source ../hpc_env.sh > /dev/null 2>&1 || true
+fi
+
 # Merge/sort jobs only read already-computed files and write the combined result -- no per-scale compute
 # loop -- so they override the .pbs headers' 23:59:00 down to 8 hours. Same "static #PBS directives,
 # override on the qsub command line" pattern submit_all_pbs.sh already uses for GPU_FLAGS.
 SHORT_WALLTIME=(-l walltime=08:00:00)
 
-# Prints N_SCALE_JOBS lines of "start end" covering [0, N_SCALES) as evenly as possible (the first
-# N_SCALES%N_SCALE_JOBS jobs each take one extra scale).
-compute_ranges() {
+# Prints N_SCALE_JOBS lines of "start end" covering [0, N_SCALES).
+#
+# Splitting evenly by *count* is badly unbalanced here: the scales are log-spaced and the Gaussian filter
+# is a direct O(L·σ) correlation with σ ∝ ℓ, so cost per scale grows with ℓ and the largest few dominate.
+# At 1024x1024 with the default 2km-400km range, the top scale alone is ~17% of the total and an
+# even-by-count split into 6 leaves one job holding ~60% of the work (~1.7x speedup instead of 6x).
+# sweep1_filter_fields.py --print-scale-ranges does the cost-weighted partition, reusing its own
+# scale_min/scale_max/geomspace logic so this can't drift from the scales actually filtered. Falls back to
+# the even-by-count split if that call fails for any reason (no $PYTHON on the submit host, unreadable
+# input file, ...) -- a worse split, but still correct and complete.
+compute_ranges_even() {
     local n=$1 k=$2 base rem start=0 size end j
     base=$((n / k)); rem=$((n % k))
     for ((j=0; j<k; j++)); do
@@ -48,6 +63,19 @@ compute_ranges() {
         echo "$start $end"
         start=$end
     done
+}
+
+compute_ranges() {
+    local n=$1 k=$2 out
+    if [ -n "$PYTHON" ] && out=$("$PYTHON" -u sweep1_filter_fields.py --filename "output/${SIM}.nc" \
+                                     --n-time-skip "$N_TIME_SKIP" --n-scales "$n" \
+                                     --print-scale-ranges "$k" 2>/dev/null | grep '^SCALE_RANGE ') \
+       && [ "$(echo "$out" | wc -l)" -eq "$k" ]; then
+        echo "$out" | awk '{print $2, $3}'
+        return
+    fi
+    echo "  (warning: cost-weighted split unavailable, falling back to even-by-count)" >&2
+    compute_ranges_even "$n" "$k"
 }
 
 #+++ Filter stage (sweep1)

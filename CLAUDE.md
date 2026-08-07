@@ -183,10 +183,32 @@ scripts already checkpointed each scale to its own file before a final merge, wh
 this splits on:
 
 - `N_SCALE_JOBS` (default `1`) fans **each** stage out into that many batch jobs covering disjoint scale
-  index ranges (`[0, N_SCALES)` split as evenly as possible, remainder on the first jobs), followed by one
-  merge job depending on all of them via PBS's colon-joined multi-parent `-W depend=afterok:$J1:$J2:...`
-  (standard PBS Pro syntax, but this repo had no prior instance of it -- every other dependency here is
-  single-parent). `N_SCALE_JOBS=1` is byte-for-byte the old behavior.
+  index ranges, followed by one merge job depending on all of them via PBS's colon-joined multi-parent
+  `-W depend=afterok:$J1:$J2:...` (standard PBS Pro syntax, but this repo had no prior instance of it --
+  every other dependency here is single-parent; confirmed accepted on casper, where `qstat -f` shows it
+  expanded to `afterok:<id>@casper-pbs:<id>@casper-pbs`). `N_SCALE_JOBS=1` is byte-for-byte the old
+  behavior.
+
+**The split is cost-weighted, not even-by-count -- this matters a lot.** Scales are log-spaced and the
+Gaussian filter is a direct `O(L·σ)` correlation with `σ ∝ ℓ`, so per-scale cost grows with ℓ and the
+largest few dominate: at 1024x1024 over the default 2km-400km range, the **single largest scale is ~17% of
+total filtering cost and the top 5 are ~60%**. Splitting evenly by count therefore leaves the last job
+holding most of the work -- measured against that cost model, `N_SCALE_JOBS=6` would give only ~1.7x
+speedup instead of 6x. `submit_sweep.sh` instead calls `sweep1_filter_fields.py --print-scale-ranges N`
+(which reuses that script's own `scale_min`/`scale_max`/`geomspace` logic, so the weighting can't drift
+from the scales actually filtered) to get a cost-balanced contiguous partition, computed by binary-searching
+the smallest feasible max-load. Same numbers, weighted: 4.8x at K=6, 5.9x at K=8. If that call fails for any
+reason (no `$PYTHON` on the submit host, unreadable input), it warns and falls back to the even-by-count
+split -- worse balance, still correct and complete.
+
+**There's a hard ceiling at ~5.9x** for this configuration, no matter how many jobs: a single scale is the
+smallest indivisible unit of work, and the largest one is ~17% of the total. Past `N_SCALE_JOBS≈8` you get
+no further speedup, just more 732GB jobs queueing. This applies to both stages -- `sweep2` does *more*
+ℓ-dependent filtering per scale than `sweep1` (the 3x3 `uⁱuʲ` stress tensor for Πₖ, `ρuᵢ` for τᵢ, plus
+`w·b_r` and `b_r`, ~14 filtered fields vs sweep1's 4), which is why one shared `N_SCALE_JOBS` is the right
+knob rather than separate per-stage ones. Note `sweep2` genuinely needs `include_pi_k=True` (unlike
+`03_energy_transfer.py`, which disables it): the online simulation only computes Πₖ at its own 2 configured
+filter scales, not at the sweep's 30, and `sweep3`/`sweep4`/`sweep5` all plot Πₖ from the sweep output.
 - `N_SCALES` (default `30`, matching `sweep1_filter_fields.py`'s own `--n-scales`) has to be passed at
   submit time because the shell needs the total count up front to compute index ranges; every batch job
   gets it explicitly so they all derive the identical `geomspace` array before slicing it.

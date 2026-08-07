@@ -148,6 +148,15 @@ for i, ℓ in enumerate(filter_scales):
     if not (in_this_batch or args.merge_only):
         continue
 
+    # Progress label: how far through THIS job's own allocation, since that's what tells you how much
+    # work it has left. The global index rides along for a partial batch so logs from sibling jobs can be
+    # lined up against each other and against the full scale list.
+    if is_full_range:
+        progress = f"{i+1}/{n_scales}"
+    else:
+        progress = (f"{i - scale_start_idx + 1}/{scale_end_idx - scale_start_idx} of this batch "
+                    f"(global {i+1}/{n_scales})")
+
     if checkpoint_path.exists():
         cached = xr.open_dataset(str(checkpoint_path), decode_times=False).chunk(chunks)
         # A checkpoint is keyed only by filter scale, not by which timesteps went into it -- if a *different*
@@ -161,7 +170,7 @@ for i, ℓ in enumerate(filter_scales):
         # cached checkpoint; recompute (and overwrite) it otherwise.
         stale = cached.sizes["time"] != ds_filt.sizes["time"] or not np.array_equal(cached.time.values, ds_filt.time.values)
         if not stale:
-            print(f"\n--- filter {i+1}/{n_scales}: scale = {ℓ:.4f} (loading from checkpoint) ---")
+            print(f"\n--- filter {progress}: scale = {ℓ:.4f} (loading from checkpoint) ---")
             transfer_list.append(cached)
             continue
         if args.merge_only:
@@ -169,7 +178,7 @@ for i, ℓ in enumerate(filter_scales):
                 f"--merge-only: checkpoint for filter_scale={ℓ:.4f} is stale (has "
                 f"{cached.sizes['time']} timesteps, this run expects {ds_filt.sizes['time']}) -- a batch "
                 f"covering this scale needs to (re)run before merging. Checkpoint: {checkpoint_path}")
-        print(f"\n--- filter {i+1}/{n_scales}: scale = {ℓ:.4f}: checkpoint has {cached.sizes['time']} timesteps, "
+        print(f"\n--- filter {progress}: scale = {ℓ:.4f}: checkpoint has {cached.sizes['time']} timesteps, "
               f"this run expects {ds_filt.sizes['time']} -- stale checkpoint from a different run, recomputing ---")
         cached.close()
         # Delete rather than just closing and letting write_dataset() overwrite it in place -- closing a
@@ -186,7 +195,7 @@ for i, ℓ in enumerate(filter_scales):
     # scale's call gets) so progress through the whole sweep is visible -- otherwise the "--- filter_scale =
     # ... ---" line the shared function itself prints right after gives no sense of how many scales remain,
     # which matters for a 30-scale sweep where each one can take minutes.
-    print(f"\n=== Filter {i+1}/{n_scales} ===")
+    print(f"\n=== Filter {progress} ===")
     transfer_ℓ = calculate_energy_transfer(ds, [ℓ],
                                            ds_filt=ds_filt,
                                            rho_sorted=rho_sorted,
