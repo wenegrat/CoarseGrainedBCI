@@ -208,10 +208,12 @@ out to be **affine, not proportional**, because a large ℓ-independent cost per
 
 so the true largest/smallest cost ratio was **3.7x, not the 51x** the pure-ℓ model predicted. The two
 terms scale differently with resolution (the fixed part with data volume, the ℓ-dependent part with data
-volume × σ, i.e. volume/dx), so the weighting is stored resolution-free as `w ∝ 1 + 0.0286·(ℓ/dx)` --
-"fixed cost plus a term proportional to kernel width in grid cells; a kernel ~35 cells wide doubles the
-per-scale cost." Fit on the 16-scale batch plus the largest single scale; predicts the three held-out
-batches to +10/+11/+14%. Re-splitting the same 256² run under the corrected weights gives batches of
+volume × σ, i.e. volume/dx), so the weighting is stored resolution-free as `w ∝ 1 + 0.0230·(ℓ/dx)` --
+"fixed cost plus a term proportional to kernel width in grid cells; a kernel ~43 cells wide doubles the
+per-scale cost." The constant is a least-squares fit over all 16 measured batches from both runs below,
+which independently imply 0.0221 (256²) and 0.0239 (512²) -- an 8% spread across a 2.08x change in data
+volume, which is the check that the resolution-free form holds. It replaces an earlier 0.0286 from a
+2-point fit at one resolution, which over-weighted the ℓ term by 25%. Re-splitting the same 256² run under the corrected weights gives batches of
 0.31-0.45 h instead of 0.15-1.13 h.
 
 **Validated at 512², which also confirms the resolution scaling.** A second 30-scale/8-job run
@@ -260,10 +262,21 @@ fanning out, so a fresh parallel submission always starts clean rather than tryi
 across concurrently-running siblings. The sequential path (`N_SCALE_JOBS=1`) keeps its existing
 resume-from-existing-checkpoints behavior untouched.
 
-**Picking `N_SCALE_JOBS`: 12 for the default 30-scale range at 1024²** -- that's where the
-largest-single-scale ceiling above is reached (K=15/20/30 all give the same ~12 h makespan), and each job
-requests `mem=732GB:ncpus=8` on a shared queue, so more jobs past that only add queue wait. At lower
-resolution the ceiling is far away and K is limited by queue etiquette instead, not by the model.
+**Picking `N_SCALE_JOBS`: there is a threshold, and below it the split is ~25% worse than it looks.**
+Two floors bound the heaviest batch -- an even share (`total/K`) and the single costliest scale, which is
+indivisible. Below `K = total/max(w)` the even-share floor dominates, and contiguous ranges over log-spaced
+scales *cannot* reach it: measured 20-26% over, and an oracle splitter handed the exact per-scale costs does
+no better, so this is partition granularity, not a weighting error. At or above that K the costliest scale
+dominates and the existing split hits the floor exactly. **Raising K is therefore the fix, not a cleverer
+partition** (dropping contiguity would recover that 25%, at the price of passing a per-scale index list
+instead of a start/end range -- deliberately not done).
+
+The threshold rises as resolution falls, because the largest scale is a smaller share of a narrower cost
+range: **K≥9 at 1024², K≥11 at 512², K≥15 at 256²**. `--print-scale-ranges` now computes and prints this
+per run as `SCALE_ADVICE` lines, which `submit_sweep.sh` forwards to the terminal at submit time -- read
+them rather than guessing. `N_SCALE_JOBS=12` remains the recommendation at 1024²: past the threshold, with
+margin, and each job requests `mem=732GB:ncpus=8` on a shared queue so more only add queue wait. Note the
+earlier `K=8` guidance was *below* the threshold at every resolution and left ~26% on the table.
 
 **Job memory: most of the reported high-water mark is reclaimable page cache, not heap.** The same 256²
 run measured 30.9 GiB for a 1-scale batch rising linearly to 198.7 GiB for a 16-scale batch -- alarming at

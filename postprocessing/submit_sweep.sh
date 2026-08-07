@@ -63,8 +63,9 @@ require_job() {
 # Splitting evenly by *count* is unbalanced here: the scales are log-spaced, and per-scale cost grows with
 # ℓ (a fixed cost plus a term proportional to the Gaussian kernel's width in grid cells -- an empirical fit,
 # see CLAUDE.md; the analytically-obvious "cost ∝ ℓ" model was measured and refuted). At 1024x1024 over the
-# default 2km-400km range the largest scale costs ~12x the smallest, so an even-by-count split leaves the
-# last job holding several times its share.
+# default 2km-400km range the largest scale costs ~10x the smallest, so an even-by-count split leaves the
+# last job holding several times its share. The SCALE_ADVICE lines this prints also report whether the
+# chosen N_SCALE_JOBS is above the threshold where the split can actually reach its floor -- see CLAUDE.md.
 # sweep1_filter_fields.py --print-scale-ranges does the cost-weighted partition, reusing its own
 # scale_min/scale_max/geomspace logic so this can't drift from the scales actually filtered. Falls back to
 # the even-by-count split if that call fails for any reason (no $PYTHON on the submit host, unreadable
@@ -81,12 +82,18 @@ compute_ranges_even() {
     done
 }
 
+# Runs the splitter once and separates its two tagged outputs: SCALE_RANGE lines are the ranges (returned
+# on stdout for the caller's read loop), SCALE_ADVICE lines report how balanced the split actually is and
+# whether a larger N_SCALE_JOBS would help. The advice goes to stderr so it reaches the terminal instead of
+# being consumed as job ranges -- submit time is exactly when it's actionable.
 compute_ranges() {
-    local n=$1 k=$2 out
-    if [ -n "$PYTHON" ] && out=$("$PYTHON" -u sweep1_filter_fields.py --filename "output/${SIM}.nc" \
+    local n=$1 k=$2 all out
+    if [ -n "$PYTHON" ] && all=$("$PYTHON" -u sweep1_filter_fields.py --filename "output/${SIM}.nc" \
                                      --n-time-skip "$N_TIME_SKIP" --n-scales "$n" \
-                                     --print-scale-ranges "$k" 2>/dev/null | grep '^SCALE_RANGE ') \
+                                     --print-scale-ranges "$k" 2>/dev/null) \
+       && out=$(echo "$all" | grep '^SCALE_RANGE ') \
        && [ "$(echo "$out" | wc -l)" -eq "$k" ]; then
+        echo "$all" | sed -n 's/^SCALE_ADVICE /  note: /p' >&2
         echo "$out" | awk '{print $2, $3}'
         return
     fi

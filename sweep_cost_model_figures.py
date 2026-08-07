@@ -59,14 +59,14 @@ def relcost(W=720,H=330,pad=(52,120,44,16)):
     # refuted pure-l line: cost ratio == l ratio
     o.append(f'<line x1="{X(1):.1f}" y1="{Y(1):.1f}" x2="{X(260):.1f}" y2="{Y(260):.1f}" class="refuted"/>')
     o.append(txt(X(150),Y(230),"assumed  cost ∝ ℓ","lbl-refuted","end"))
-    K=0.0286
+    K=0.0230
     cols={256:"a",512:"b",1024:"c"}
     for N,cl in cols.items():
         s,dx=sc(N); w=1+K*s/dx; rel=w/w[0]; xr=s/s[0]
         pts=" ".join(f"{X(a):.1f},{Y(v):.1f}" for a,v in zip(xr,rel))
         o.append(f'<polyline points="{pts}" class="ln ln-{cl}"/>')
         o.append(f'<circle cx="{X(xr[-1]):.1f}" cy="{Y(rel[-1]):.1f}" r="4" class="dot dot-{cl}"/>')
-        o.append(txt(X(xr[-1])+11,Y(rel[-1]),f"{N}²   {rel[-1]:.0f}×",f"lbl lbl-{cl}","start",dy="0.32em"))
+        o.append(txt(X(xr[-1])+11,Y(rel[-1]),f"{N}²   {rel[-1]:.1f}×",f"lbl lbl-{cl}","start",dy="0.32em"))
     o.append(f'<line x1="{l}" y1="{t}" x2="{l}" y2="{t+ph}" class="axis"/>')
     o.append(f'<line x1="{l}" y1="{t+ph}" x2="{W-rr}" y2="{t+ph}" class="axis"/>')
     o.append(txt(l+pw/2,H-6,"filter scale ℓ, relative to the smallest in the sweep","axlbl"))
@@ -273,7 +273,7 @@ footer code{background:none;padding:0;color:var(--dim)}
 <div class="cards">
   <div class="card"><span class="k">assumed cost ratio</span><span class="v">51×</span>
     <span class="s">largest scale vs. smallest, weighting by ℓ</span></div>
-  <div class="card hi"><span class="k">measured at 256²</span><span class="v">3.7×</span>
+  <div class="card hi"><span class="k">measured at 256²</span><span class="v">3.2×</span>
     <span class="s">what the affine fit gives instead</span></div>
   <div class="card hi"><span class="k">out-of-sample error</span><span class="v">7.4%</span>
     <span class="s">256² fit predicting eight 512² batches</span></div>
@@ -324,8 +324,10 @@ footer code{background:none;padding:0;color:var(--dim)}
 
   <p>Both terms scale with data volume <span class="m">Nx·Ny·Nz·n_times</span>, but only the second carries
   a <span class="m">1/Δx</span>, so the two diverge with resolution. Storing the weight resolution-free as
-  <span class="m">w ∝ 1 + 0.0286·(ℓ/Δx)</span> — a fixed cost plus a term proportional to kernel width in
-  grid cells — keeps it valid at any grid. A kernel about 35 cells wide doubles the per-scale cost.</p>
+  <span class="m">w ∝ 1 + 0.0230·(ℓ/Δx)</span> — a fixed cost plus a term proportional to kernel width in
+  grid cells — keeps it valid at any grid. A kernel about 43 cells wide doubles the per-scale cost. The
+  two runs independently imply 0.0221 and 0.0239 across a 2.08× change in data volume, which is the check
+  that the resolution-free form holds.</p>
 
   <figure>
     <div class="panelbox">@@c2@@</div>
@@ -401,8 +403,13 @@ footer code{background:none;padding:0;color:var(--dim)}
   <pre># 1024², keep the time axis at or below ~41
 cd postprocessing
 bash submit_sweep.sh NX=1024 NY=1024 NZ=64 N_SCALES=30 N_SCALE_JOBS=12 N_TIME_SKIP=2</pre>
-  <p><code>N_SCALE_JOBS=12</code> reaches the largest-single-scale floor; 15, 20 and 30 all give the same
-  makespan and only add queue wait for eight more 732 GB jobs. If the time axis can't come down, the
+  <p><code>N_SCALE_JOBS=12</code> clears the threshold below which the split can't reach its own floor.
+  Two bounds apply to the heaviest batch — an even share, and the single costliest scale, which is
+  indivisible. Under <span class="m">K = total/max(cost)</span> (9 at 1024², 11 at 512², 15 at 256²) the
+  even share binds, and contiguous ranges over log-spaced scales land 20–26% above it; an oracle splitter
+  handed the exact costs does no better, so that gap is partition granularity, not a weighting error.
+  Above it the costliest scale binds and the existing split is exact. <b>Raising K is the fix, not a
+  cleverer partition.</b> The earlier K=8 advice sat below the threshold at every resolution. If the time axis can't come down, the
   remaining lever is an FFT-based Gaussian filter — <span class="m">O(L log L)</span>, independent of σ —
   which removes ℓ from the cost model rather than redistributing it.</p>
 </section>

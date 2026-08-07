@@ -97,9 +97,13 @@ if args.print_scale_ranges is not None:
     #
     # written resolution-free because the fixed and ℓ-dependent parts scale differently with resolution
     # (fixed ∝ data volume; ℓ-dependent ∝ data volume · σ ∝ data volume / dx), so a hardcoded ratio would
-    # only be right at the resolution it was fit at. Held-out check: predicts the three batches not used
-    # in the fit to within +10/+11/+14%.
-    K_SCALE_COST = 0.0286
+    # only be right at the resolution it was fit at.
+    #
+    # The constant is a least-squares fit over all 16 measured batches from two runs (256²/41 timesteps
+    # and 512²/21 timesteps), which independently imply 0.0221 and 0.0239 -- an 8% spread across a 2.08x
+    # change in data volume, which is the check that the resolution-free form actually holds. It replaces
+    # an earlier 0.0286 taken from a 2-point fit at one resolution, which over-weighted the ℓ term by 25%.
+    K_SCALE_COST = 0.0230
     n_jobs = args.print_scale_ranges
     if not (1 <= n_jobs <= n_scales):
         parser.error(f"--print-scale-ranges must be between 1 and n_scales ({n_scales}), got {n_jobs}")
@@ -122,20 +126,49 @@ if args.print_scale_ranges is not None:
         if _fits(mid) is not None: hi = mid
         else:                      lo = mid
     ranges = _fits(hi)
-    # Greedy may use fewer batches than asked; split the widest remaining range until we have n_jobs, so
-    # every requested job gets work (an empty range would be rejected by the start<end check above).
+    # Greedy may use fewer batches than asked; split the costliest remaining range until we have n_jobs,
+    # so every requested job gets work (an empty range would be rejected by the start<end check above).
+    # Split at the range's cost midpoint, not its index midpoint: within a range the scales are still
+    # log-spaced, so halving by count hands the upper half several times the work of the lower half.
     while len(ranges) < n_jobs:
-        j = max(range(len(ranges)), key=lambda k: ranges[k][1] - ranges[k][0])
+        j = max(range(len(ranges)), key=lambda k: float(w[ranges[k][0]:ranges[k][1]].sum()))
         a, b = ranges[j]
         if b - a < 2: break                   # can't split further; fewer jobs than requested
-        mid_i = (a + b) // 2
+        cum = np.cumsum(w[a:b])
+        mid_i = a + 1 + int(np.searchsorted(cum, cum[-1] / 2.0))
+        mid_i = min(max(mid_i, a + 1), b - 1)
         ranges[j:j+1] = [(a, mid_i), (mid_i, b)]
+
     # Tagged so the caller can grep these out of this script's other stdout chatter.
     total = float(w.sum())
     for a, b in ranges:
         print(f"SCALE_RANGE {a} {b}   # {b-a} scales, "
               f"ℓ={filter_scales[a]/1e3:.1f}-{filter_scales[b-1]/1e3:.1f}km, "
               f"{100*float(w[a:b].sum())/total:.1f}% of filtering cost")
+
+    # How good is this split, and would more jobs help? Two separate floors bound the heaviest batch:
+    # an even share of the total (total/n_jobs), and the single costliest scale -- a scale is the smallest
+    # indivisible unit of work, so no split beats it. Whichever is larger is the real floor.
+    #
+    # Below n_jobs = total/max(w) the even-share floor dominates, and contiguous ranges over log-spaced
+    # scales can't reach it -- measured ~20-26% over, and an oracle splitter handed the exact costs does no
+    # better, so this is partition granularity rather than a weighting error (dropping contiguity would
+    # recover it, at the price of a per-scale index list instead of a start/end range). At or above that
+    # n_jobs the costliest scale dominates instead and this split hits the floor exactly, which is why
+    # raising n_jobs to the reported value is the fix rather than a cleverer partition.
+    loads = np.array([float(w[a:b].sum()) for a, b in ranges])
+    floor = max(float(w.max()), total / n_jobs)
+    n_useful = int(np.ceil(total / float(w.max())))
+    print(f"SCALE_ADVICE heaviest batch is {100*loads.max()/total:.1f}% of the sweep "
+          f"({loads.max()/loads.min():.2f}x the lightest); {100*(loads.max()-floor)/floor:+.0f}% vs the "
+          f"best achievable {100*floor/total:.1f}%")
+    if n_jobs < n_useful:
+        print(f"SCALE_ADVICE N_SCALE_JOBS={n_jobs} is below the useful threshold: at {n_useful} or more, "
+              f"the heaviest batch is one scale ({100*float(w.max())/total:.1f}% of the sweep) and this "
+              f"split reaches that floor exactly. Below it, contiguous ranges cost ~20-25%.")
+    else:
+        print(f"SCALE_ADVICE at N_SCALE_JOBS={n_jobs} the heaviest batch is bounded by the single "
+              f"costliest scale; going past {n_useful} buys no further speedup.")
     raise SystemExit(0)
 
 # Resolve this invocation's slice of the full scale list. Defaults cover everything, so an invocation
