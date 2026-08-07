@@ -233,9 +233,21 @@ of stale-checkpoint bug documented below for `sweep2`, which had no equivalent g
 **Resumability tradeoff**: with `N_SCALE_JOBS>1`, `submit_sweep.sh` clears the tmp dir/checkpoints before
 fanning out, so a fresh parallel submission always starts clean rather than trying to detect staleness
 across concurrently-running siblings. The sequential path (`N_SCALE_JOBS=1`) keeps its existing
-resume-from-existing-checkpoints behavior untouched. Operationally, don't just maximize `N_SCALE_JOBS`:
-each job requests `mem=732GB:ncpus=8` on a shared queue, so past some point queue wait eats the gain --
-start around 4-6 and tune.
+resume-from-existing-checkpoints behavior untouched.
+
+**Picking `N_SCALE_JOBS`: 8 is the recommended cap** (for the default 30-scale range at high resolution).
+Two independent reasons converge there: the ~5.9x indivisible-scale ceiling above is already reached at
+K=8 (K=15 and K=30 measure the same 5.9x), and each job requests `mem=732GB:ncpus=8` on a shared queue, so
+additional jobs past that just add queue wait for no speedup. Before committing to a full-scale run, time
+the most expensive single scale to check the budget actually closes:
+```bash
+cd postprocessing        # times scale index 29 of 30 -- the largest, ~17% of the whole sweep's cost
+qsub -N timing_test -o logs/timing_test.log -e logs/timing_test.log \
+     -v NX=1024,NY=1024,NZ=64,N_SCALES=30,SCALE_START_IDX=29,SCALE_END_IDX=30 sweep_filter.pbs
+```
+If that scale takes T, the full sequential sweep is roughly 6T (the largest scale being ~1/6 of the total),
+and the heaviest batch under a weighted K=8 split is about T -- so T itself needs to fit comfortably inside
+the 23:59:00 cap, since no split can make the largest single scale any cheaper.
 
 **Sort redundancy, fixed (`sweep_sort.pbs`).** `sweep2_energy_transfer.py` calls
 `calculate_energy_transfer()` once per scale, and that function only skips its own internal
