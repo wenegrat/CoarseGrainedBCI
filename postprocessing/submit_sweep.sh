@@ -45,9 +45,9 @@ SHORT_WALLTIME=(-l walltime=08:00:00)
 
 # A merge job that fails to submit is the one failure this script can't afford to shrug off: its batch jobs
 # still run and still write their per-scale checkpoints, so everything *looks* fine right up until nothing
-# assembles them and sweep3/4/5 never run. Observed once in practice (a 30-scale/8-job run where the
-# "Submitted transfer merge" line simply wasn't there). qsub's own stderr is left to pass through; this just
-# makes the missing job ID fatal instead of a blank line in the middle of otherwise-successful output.
+# assembles them and sweep3/4/5 never run -- and the batch jobs' own exit status says nothing is wrong.
+# qsub's own stderr is left to pass through; this just makes a missing job ID fatal instead of a blank line
+# in the middle of otherwise-successful output.
 require_job() {
     local id=$1 what=$2
     if [ -z "$id" ]; then
