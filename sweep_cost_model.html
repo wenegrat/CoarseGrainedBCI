@@ -1,0 +1,488 @@
+<title>Sweep cost model — CoarseGrainedBCI</title>
+<style>
+:root{
+  --paper:#f2f4f7; --panel:#fbfcfd; --ink:#151d26; --dim:#5b6675; --faint:#8e99a8;
+  --rule:#d3dae3; --grid:#e2e7ee;
+  --measured:#0e7480; --measured-soft:#0e748022;
+  --refuted:#9d5a37; --critical:#b23c31; --critical-soft:#b23c3114;
+  --c-a:#7b8fa8; --c-b:#0e7480; --c-c:#1d3f66;
+  --serif:Charter,"Bitstream Charter","Sitka Text","Iowan Old Style",Cambria,Georgia,serif;
+  --mono:"IBM Plex Mono","SFMono-Regular","SF Mono","Cascadia Mono",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --paper:#11161c; --panel:#171e26; --ink:#e4e9ef; --dim:#9aa6b4; --faint:#6c7889;
+  --rule:#2a333e; --grid:#232c36;
+  --measured:#3fb3bf; --measured-soft:#3fb3bf22;
+  --refuted:#c98a5e; --critical:#e0705f; --critical-soft:#e0705f14;
+  --c-a:#7b8fa8; --c-b:#3fb3bf; --c-c:#7fa8d8;
+}}
+:root[data-theme="dark"]{
+  --paper:#11161c; --panel:#171e26; --ink:#e4e9ef; --dim:#9aa6b4; --faint:#6c7889;
+  --rule:#2a333e; --grid:#232c36;
+  --measured:#3fb3bf; --measured-soft:#3fb3bf22;
+  --refuted:#c98a5e; --critical:#e0705f; --critical-soft:#e0705f14;
+  --c-a:#7b8fa8; --c-b:#3fb3bf; --c-c:#7fa8d8;
+}
+*{box-sizing:border-box}
+body{background:var(--paper);color:var(--ink);font-family:var(--serif);
+  font-size:17px;line-height:1.62;margin:0;padding:0;-webkit-font-smoothing:antialiased}
+.wrap{max-width:860px;margin:0 auto;padding:clamp(2.2rem,5vw,4.5rem) clamp(1.1rem,4vw,2rem) 5rem;
+  display:flex;flex-direction:column;gap:2.6rem}
+.eyebrow{font-family:var(--mono);font-size:.7rem;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--measured);margin:0}
+h1{font-size:clamp(1.9rem,4.6vw,2.7rem);line-height:1.16;margin:.5rem 0 0;font-weight:600;
+  letter-spacing:-.015em;text-wrap:balance}
+.standfirst{font-size:1.12rem;color:var(--dim);margin:.9rem 0 0;max-width:64ch}
+h2{font-size:1.42rem;font-weight:600;letter-spacing:-.01em;margin:0 0 .1rem;text-wrap:balance}
+h3{font-size:1.02rem;font-weight:600;margin:0 0 .1rem}
+p{margin:0;max-width:68ch}
+section{display:flex;flex-direction:column;gap:1rem}
+.sechead{display:flex;flex-direction:column;gap:.25rem;padding-top:1.6rem;border-top:1px solid var(--rule)}
+.lede{color:var(--dim)}
+code,.m{font-family:var(--mono);font-size:.86em;font-variant-numeric:tabular-nums}
+code{background:var(--measured-soft);padding:.1em .38em;border-radius:2px;color:var(--ink)}
+pre{font-family:var(--mono);font-size:.82rem;line-height:1.55;background:var(--panel);
+  border:1px solid var(--rule);border-left:2px solid var(--measured);
+  padding:.85rem 1rem;overflow-x:auto;margin:0;border-radius:2px}
+.eq{font-family:var(--mono);font-size:.94rem;text-align:center;background:var(--panel);
+  border:1px solid var(--rule);padding:1.05rem .8rem;border-radius:2px;overflow-x:auto;
+  font-variant-numeric:tabular-nums}
+.eq .note{display:block;font-size:.76rem;color:var(--faint);margin-top:.5rem;letter-spacing:.02em}
+figure{margin:0;display:flex;flex-direction:column;gap:.6rem}
+figcaption{font-size:.83rem;color:var(--dim);max-width:70ch}
+figcaption b{color:var(--ink);font-weight:600}
+.panelbox{background:var(--panel);border:1px solid var(--rule);border-radius:3px;padding:1rem .9rem .7rem}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:.9rem}
+@media(max-width:640px){.pair{grid-template-columns:1fr}}
+.ptitle{font-family:var(--mono);font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--dim);margin:0 0 .1rem}
+.pmeta{font-family:var(--mono);font-size:.72rem;color:var(--faint);margin:0 0 .5rem}
+.spread{font-family:var(--mono);font-size:.76rem;margin:.4rem 0 0;color:var(--dim)}
+.spread b{font-size:1.15rem;font-weight:600}
+.bad b{color:var(--refuted)} .good b{color:var(--measured)}
+.chart{width:100%;height:auto;display:block;overflow:visible}
+.grid{stroke:var(--grid);stroke-width:1}
+.axis{stroke:var(--rule);stroke-width:1}
+.bar{fill:var(--measured)} .bar-pred{fill:var(--c-a);opacity:.55}
+.meanline{stroke:var(--faint);stroke-width:1;stroke-dasharray:2 4}
+.limit{stroke:var(--critical);stroke-width:1.3;stroke-dasharray:5 4}
+.danger{fill:var(--critical-soft)}
+.refuted{stroke:var(--refuted);stroke-width:1.4;stroke-dasharray:6 4}
+.ln{fill:none;stroke-width:2;stroke-linejoin:round}
+.ln-a{stroke:var(--c-a)} .ln-b{stroke:var(--c-b)} .ln-c{stroke:var(--c-c)}
+.dot-a{fill:var(--c-a)} .dot-b{fill:var(--c-b)} .dot-c{fill:var(--c-c)}
+text{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.tick{font-size:10px;fill:var(--faint)}
+.tickxs{font-size:9.5px;fill:var(--dim)}
+.tickxxs{font-size:9px;fill:var(--faint)}
+.val{font-size:10px;fill:var(--dim)}
+.axlbl{font-size:10.5px;fill:var(--dim);letter-spacing:.04em}
+.lbl{font-size:11px;font-weight:600}
+.lbl-a{fill:var(--c-a)} .lbl-b{fill:var(--c-b)} .lbl-c{fill:var(--c-c)}
+.lbl-refuted{font-size:11px;fill:var(--refuted)}
+.lbl-limit{font-size:10px;fill:var(--critical)}
+.legend{display:flex;flex-wrap:wrap;gap:1.1rem;font-family:var(--mono);font-size:.74rem;color:var(--dim)}
+.legend span{display:flex;align-items:center;gap:.4rem}
+.sw{width:15px;height:3px;border-radius:1px;flex:none}
+.tblwrap{overflow-x:auto;border:1px solid var(--rule);border-radius:3px;background:var(--panel)}
+table{border-collapse:collapse;width:100%;font-size:.87rem;font-variant-numeric:tabular-nums}
+th,td{text-align:right;padding:.52rem .8rem;border-bottom:1px solid var(--rule);white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+thead th{font-family:var(--mono);font-size:.68rem;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--dim);font-weight:500}
+tbody tr:last-child td{border-bottom:none}
+td.num{font-family:var(--mono)}
+tr.flag td{color:var(--critical)} tr.flag{background:var(--critical-soft)}
+tr.pick{background:var(--measured-soft)} tr.pick td:first-child{font-weight:600}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:.8rem}
+.card{background:var(--panel);border:1px solid var(--rule);border-radius:3px;padding:.9rem 1rem;
+  display:flex;flex-direction:column;gap:.22rem}
+.card .k{font-family:var(--mono);font-size:.66rem;letter-spacing:.1em;text-transform:uppercase;color:var(--dim)}
+.card .v{font-family:var(--mono);font-size:1.42rem;font-weight:600;letter-spacing:-.02em;
+  font-variant-numeric:tabular-nums}
+.card .s{font-size:.79rem;color:var(--faint);line-height:1.4}
+.card.hi .v{color:var(--measured)} .card.warn .v{color:var(--critical)}
+.verdict{border-left:2px solid var(--measured);padding:.15rem 0 .15rem 1rem;color:var(--dim)}
+.verdict b{color:var(--ink);font-weight:600}
+footer{border-top:1px solid var(--rule);padding-top:1.3rem;font-size:.79rem;color:var(--faint);
+  display:flex;flex-direction:column;gap:.35rem}
+footer code{background:none;padding:0;color:var(--dim)}
+@media(prefers-reduced-motion:no-preference){
+  .wrap>*{animation:rise .5s cubic-bezier(.2,.7,.3,1) backwards}
+  .wrap>*:nth-child(2){animation-delay:.05s} .wrap>*:nth-child(3){animation-delay:.1s}
+  @keyframes rise{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
+}
+</style>
+
+<div class="wrap">
+
+<header>
+  <p class="eyebrow">CoarseGrainedBCI · postprocessing/sweep · parallelize-sweep</p>
+  <h1>The filter-scale sweep costs what we measured, not what the algorithm suggested</h1>
+  <p class="standfirst">Splitting a 30-scale sweep across PBS jobs needs a cost model to balance the
+  batches. The obvious one — Gaussian filtering is an <span class="m">O(L·σ)</span> correlation with
+  <span class="m">σ ∝ ℓ</span>, so weight by ℓ — was wrong by an order of magnitude. Two runs at
+  256² and 512² replaced it with an affine model that predicts out of sample to 7%, and moved the
+  binding constraint at 1024² from walltime to memory.</p>
+</header>
+
+<div class="cards">
+  <div class="card"><span class="k">assumed cost ratio</span><span class="v">51×</span>
+    <span class="s">largest scale vs. smallest, weighting by ℓ</span></div>
+  <div class="card hi"><span class="k">measured at 256²</span><span class="v">3.7×</span>
+    <span class="s">what the affine fit gives instead</span></div>
+  <div class="card hi"><span class="k">out-of-sample error</span><span class="v">7.4%</span>
+    <span class="s">256² fit predicting eight 512² batches</span></div>
+  <div class="card warn"><span class="k">1024² hard limit</span><span class="v">57</span>
+    <span class="s">timesteps before a single scale exceeds the memory request</span></div>
+</div>
+
+<section>
+  <div class="sechead">
+    <p class="eyebrow">the refutation</p>
+    <h2>Eight batches that should have taken equal time didn't</h2>
+  </div>
+  <p class="lede">The split is cost-weighted, so a correctly-weighted run produces batches of equal wall
+  time by construction. That makes any real run a direct test of the weighting. The first one failed it.</p>
+
+  <div class="pair">
+    <div class="panelbox">
+      <p class="ptitle">256² · weighted by ℓ</p>
+      <p class="pmeta">30 scales, K=8, 41 timesteps · minutes</p>
+      <svg viewBox="0 0 340 250" class="chart" role="img">
+<line x1="38" y1="14.0" x2="330" y2="14.0" class="grid"/>
+<text x="31.0" y="14.0" dy="0.32em" text-anchor="end" class="tick">76</text>
+<line x1="38" y1="64.5" x2="330" y2="64.5" class="grid"/>
+<text x="31.0" y="64.5" dy="0.32em" text-anchor="end" class="tick">57</text>
+<line x1="38" y1="115.0" x2="330" y2="115.0" class="grid"/>
+<text x="31.0" y="115.0" dy="0.32em" text-anchor="end" class="tick">38</text>
+<line x1="38" y1="165.5" x2="330" y2="165.5" class="grid"/>
+<text x="31.0" y="165.5" dy="0.32em" text-anchor="end" class="tick">19</text>
+<line x1="38" y1="216.0" x2="330" y2="216.0" class="grid"/>
+<text x="31.0" y="216.0" dy="0.32em" text-anchor="end" class="tick">0</text>
+<rect x="43.8" y="35.6" width="24.8" height="180.4" class="bar"/>
+<text x="56.2" y="30.6" dy="0" text-anchor="middle" class="val">68</text>
+<text x="56.2" y="229.0" dy="0" text-anchor="middle" class="tickxs">0–16</text>
+<rect x="80.3" y="144.1" width="24.8" height="71.9" class="bar"/>
+<text x="92.8" y="139.1" dy="0" text-anchor="middle" class="val">27</text>
+<text x="92.8" y="229.0" dy="0" text-anchor="middle" class="tickxs">16–21</text>
+<rect x="116.8" y="161.3" width="24.8" height="54.7" class="bar"/>
+<text x="129.2" y="156.3" dy="0" text-anchor="middle" class="val">21</text>
+<text x="129.2" y="229.0" dy="0" text-anchor="middle" class="tickxs">21–24</text>
+<rect x="153.3" y="172.9" width="24.8" height="43.1" class="bar"/>
+<text x="165.8" y="167.9" dy="0" text-anchor="middle" class="val">16</text>
+<text x="165.8" y="229.0" dy="0" text-anchor="middle" class="tickxs">24–26</text>
+<rect x="189.8" y="192.8" width="24.8" height="23.2" class="bar"/>
+<text x="202.2" y="187.8" dy="0" text-anchor="middle" class="val">9</text>
+<text x="202.2" y="229.0" dy="0" text-anchor="middle" class="tickxs">26–27</text>
+<rect x="226.3" y="190.2" width="24.8" height="25.8" class="bar"/>
+<text x="238.8" y="185.2" dy="0" text-anchor="middle" class="val">10</text>
+<text x="238.8" y="229.0" dy="0" text-anchor="middle" class="tickxs">27–28</text>
+<rect x="262.8" y="187.8" width="24.8" height="28.2" class="bar"/>
+<text x="275.2" y="182.8" dy="0" text-anchor="middle" class="val">11</text>
+<text x="275.2" y="229.0" dy="0" text-anchor="middle" class="tickxs">28–29</text>
+<rect x="299.3" y="178.9" width="24.8" height="37.1" class="bar"/>
+<text x="311.8" y="173.9" dy="0" text-anchor="middle" class="val">14</text>
+<text x="311.8" y="229.0" dy="0" text-anchor="middle" class="tickxs">29–30</text>
+<line x1="38" y1="158.0" x2="330" y2="158.0" class="meanline"/>
+<line x1="38" y1="14" x2="38" y2="216" class="axis"/>
+<line x1="38" y1="216" x2="330" y2="216" class="axis"/>
+</svg>
+      <p class="spread bad">spread <b>7.8×</b> — should be 1.0×</p>
+    </div>
+    <div class="panelbox">
+      <p class="ptitle">512² · affine weights</p>
+      <p class="pmeta">30 scales, K=8, 21 timesteps · minutes</p>
+      <svg viewBox="0 0 340 250" class="chart" role="img">
+<line x1="38" y1="14.0" x2="330" y2="14.0" class="grid"/>
+<text x="31.0" y="14.0" dy="0.32em" text-anchor="end" class="tick">81</text>
+<line x1="38" y1="64.5" x2="330" y2="64.5" class="grid"/>
+<text x="31.0" y="64.5" dy="0.32em" text-anchor="end" class="tick">61</text>
+<line x1="38" y1="115.0" x2="330" y2="115.0" class="grid"/>
+<text x="31.0" y="115.0" dy="0.32em" text-anchor="end" class="tick">41</text>
+<line x1="38" y1="165.5" x2="330" y2="165.5" class="grid"/>
+<text x="31.0" y="165.5" dy="0.32em" text-anchor="end" class="tick">20</text>
+<line x1="38" y1="216.0" x2="330" y2="216.0" class="grid"/>
+<text x="31.0" y="216.0" dy="0.32em" text-anchor="end" class="tick">0</text>
+<rect x="43.8" y="35.6" width="24.8" height="180.4" class="bar"/>
+<text x="56.2" y="30.6" dy="0" text-anchor="middle" class="val">73</text>
+<text x="56.2" y="229.0" dy="0" text-anchor="middle" class="tickxs">0–9</text>
+<rect x="80.3" y="65.7" width="24.8" height="150.3" class="bar"/>
+<text x="92.8" y="60.7" dy="0" text-anchor="middle" class="val">60</text>
+<text x="92.8" y="229.0" dy="0" text-anchor="middle" class="tickxs">9–16</text>
+<rect x="116.8" y="70.8" width="24.8" height="145.2" class="bar"/>
+<text x="129.2" y="65.8" dy="0" text-anchor="middle" class="val">58</text>
+<text x="129.2" y="229.0" dy="0" text-anchor="middle" class="tickxs">16–21</text>
+<rect x="153.3" y="85.5" width="24.8" height="130.5" class="bar"/>
+<text x="165.8" y="80.5" dy="0" text-anchor="middle" class="val">52</text>
+<text x="165.8" y="229.0" dy="0" text-anchor="middle" class="tickxs">21–24</text>
+<rect x="189.8" y="100.2" width="24.8" height="115.8" class="bar"/>
+<text x="202.2" y="95.2" dy="0" text-anchor="middle" class="val">47</text>
+<text x="202.2" y="229.0" dy="0" text-anchor="middle" class="tickxs">24–26</text>
+<rect x="226.3" y="65.6" width="24.8" height="150.4" class="bar"/>
+<text x="238.8" y="60.6" dy="0" text-anchor="middle" class="val">60</text>
+<text x="238.8" y="229.0" dy="0" text-anchor="middle" class="tickxs">26–28</text>
+<rect x="262.8" y="125.1" width="24.8" height="90.9" class="bar"/>
+<text x="275.2" y="120.1" dy="0" text-anchor="middle" class="val">37</text>
+<text x="275.2" y="229.0" dy="0" text-anchor="middle" class="tickxs">28–29</text>
+<rect x="299.3" y="110.3" width="24.8" height="105.7" class="bar"/>
+<text x="311.8" y="105.3" dy="0" text-anchor="middle" class="val">43</text>
+<text x="311.8" y="229.0" dy="0" text-anchor="middle" class="tickxs">29–30</text>
+<line x1="38" y1="82.4" x2="330" y2="82.4" class="meanline"/>
+<line x1="38" y1="14" x2="38" y2="216" class="axis"/>
+<line x1="38" y1="216" x2="330" y2="216" class="axis"/>
+</svg>
+      <p class="spread good">spread <b>2.0×</b></p>
+    </div>
+  </div>
+  <figcaption>Wall time per batch; the dashed line is each run's own mean. Bars are labelled by
+  scale-index range — under ℓ-weighting the leftmost batch holds 16 of the 30 scales precisely
+  <i>because</i> the model believed they were cheap. <b>They weren't cheap; they were the bulk of the
+  work.</b> Absolute times differ between panels (different grid and timestep count) — the spread is
+  the comparable quantity.</figcaption>
+</section>
+
+<section>
+  <div class="sechead">
+    <p class="eyebrow">the correction</p>
+    <h2>A large fixed cost per scale swamps the ℓ term at small ℓ</h2>
+  </div>
+  <p>Per-scale cost is affine, not proportional. Loading and rechunking <code>ds_filt</code>, writing the
+  checkpoint, and the sort's downstream use are all fixed-size work that doesn't care how wide the filter
+  kernel is — and across a log-spaced sweep spanning 51× in ℓ, that fixed term dominates most of the range.</p>
+
+  <div class="eq">cost per scale &nbsp;=&nbsp; 3.69 min &nbsp;+&nbsp; 0.081 min · (ℓ / Δx)
+    <span class="note">fitted at 256², Δx = 3.906 km, 64 levels, 41 timesteps</span></div>
+
+  <p>Both terms scale with data volume <span class="m">Nx·Ny·Nz·n_times</span>, but only the second carries
+  a <span class="m">1/Δx</span>, so the two diverge with resolution. Storing the weight resolution-free as
+  <span class="m">w ∝ 1 + 0.0286·(ℓ/Δx)</span> — a fixed cost plus a term proportional to kernel width in
+  grid cells — keeps it valid at any grid. A kernel about 35 cells wide doubles the per-scale cost.</p>
+
+  <figure>
+    <div class="panelbox"><svg viewBox="0 0 720 330" class="chart" role="img">
+<line x1="52.0" y1="16" x2="52.0" y2="286" class="grid"/>
+<text x="52.0" y="301.0" dy="0" text-anchor="middle" class="tick">1×</text>
+<line x1="157.6" y1="16" x2="157.6" y2="286" class="grid"/>
+<text x="157.6" y="301.0" dy="0" text-anchor="middle" class="tick">3×</text>
+<line x1="273.2" y1="16" x2="273.2" y2="286" class="grid"/>
+<text x="273.2" y="301.0" dy="0" text-anchor="middle" class="tick">10×</text>
+<line x1="378.8" y1="16" x2="378.8" y2="286" class="grid"/>
+<text x="378.8" y="301.0" dy="0" text-anchor="middle" class="tick">30×</text>
+<line x1="494.4" y1="16" x2="494.4" y2="286" class="grid"/>
+<text x="494.4" y="301.0" dy="0" text-anchor="middle" class="tick">100×</text>
+<line x1="600.0" y1="16" x2="600.0" y2="286" class="grid"/>
+<text x="600.0" y="301.0" dy="0" text-anchor="middle" class="tick">300×</text>
+<line x1="52" y1="275.6" x2="600" y2="275.6" class="grid"/>
+<text x="44.0" y="275.6" dy="0.32em" text-anchor="end" class="tick">1×</text>
+<line x1="52" y1="224.3" x2="600" y2="224.3" class="grid"/>
+<text x="44.0" y="224.3" dy="0.32em" text-anchor="end" class="tick">3×</text>
+<line x1="52" y1="168.1" x2="600" y2="168.1" class="grid"/>
+<text x="44.0" y="168.1" dy="0.32em" text-anchor="end" class="tick">10×</text>
+<line x1="52" y1="116.8" x2="600" y2="116.8" class="grid"/>
+<text x="44.0" y="116.8" dy="0.32em" text-anchor="end" class="tick">30×</text>
+<line x1="52" y1="60.6" x2="600" y2="60.6" class="grid"/>
+<text x="44.0" y="60.6" dy="0.32em" text-anchor="end" class="tick">100×</text>
+<line x1="52" y1="17.8" x2="600" y2="17.8" class="grid"/>
+<text x="44.0" y="17.8" dy="0.32em" text-anchor="end" class="tick">250×</text>
+<line x1="52.0" y1="275.6" x2="586.3" y2="16.0" class="refuted"/>
+<text x="533.4" y="21.7" dy="0" text-anchor="end" class="lbl-refuted">assumed  cost ∝ ℓ</text>
+<polyline points="52.0,275.6 65.0,275.2 78.1,274.8 91.1,274.3 104.2,273.8 117.2,273.2 130.2,272.5 143.3,271.7 156.3,270.9 169.4,269.9 182.4,268.8 195.4,267.6 208.5,266.2 221.5,264.7 234.5,263.1 247.6,261.2 260.6,259.2 273.7,257.0 286.7,254.6 299.7,252.0 312.8,249.1 325.8,246.1 338.9,242.8 351.9,239.4 364.9,235.7 378.0,231.8 391.0,227.7 404.1,223.4 417.1,218.9 430.1,214.3" class="ln ln-a"/>
+<circle cx="430.1" cy="214.3" r="4" class="dot dot-a"/>
+<text x="441.1" y="214.3" dy="0.32em" text-anchor="start" class="lbl lbl-a">256²   4×</text>
+<polyline points="52.0,275.6 67.3,275.1 82.7,274.6 98.0,274.1 113.3,273.4 128.7,272.6 144.0,271.7 159.3,270.7 174.7,269.5 190.0,268.1 205.4,266.6 220.7,264.8 236.0,262.9 251.4,260.7 266.7,258.2 282.0,255.5 297.4,252.4 312.7,249.1 328.0,245.5 343.4,241.6 358.7,237.5 374.0,233.0 389.4,228.2 404.7,223.2 420.1,217.9 435.4,212.4 450.7,206.7 466.1,200.7 481.4,194.6 496.7,188.3" class="ln ln-b"/>
+<circle cx="496.7" cy="188.3" r="4" class="dot dot-b"/>
+<text x="507.7" y="188.3" dy="0.32em" text-anchor="start" class="lbl lbl-b">512²   6×</text>
+<polyline points="52.0,275.6 69.6,275.1 87.3,274.5 104.9,273.8 122.5,272.9 140.2,271.9 157.8,270.8 175.4,269.4 193.1,267.8 210.7,266.0 228.3,263.9 246.0,261.5 263.6,258.7 281.2,255.6 298.8,252.1 316.5,248.3 334.1,244.0 351.7,239.4 369.4,234.4 387.0,229.0 404.6,223.2 422.3,217.1 439.9,210.7 457.5,204.0 475.2,197.1 492.8,189.9 510.4,182.6 528.1,175.0 545.7,167.3 563.3,159.5" class="ln ln-c"/>
+<circle cx="563.3" cy="159.5" r="4" class="dot dot-c"/>
+<text x="574.3" y="159.5" dy="0.32em" text-anchor="start" class="lbl lbl-c">1024²   12×</text>
+<line x1="52" y1="16" x2="52" y2="286" class="axis"/>
+<line x1="52" y1="286" x2="600" y2="286" class="axis"/>
+<text x="326.0" y="324.0" dy="0" text-anchor="middle" class="axlbl">filter scale ℓ, relative to the smallest in the sweep</text>
+<text transform="translate(13,151.0) rotate(-90)" text-anchor="middle" class="axlbl">cost per scale, relative</text>
+</svg></div>
+    <div class="legend">
+      <span><i class="sw" style="background:var(--refuted)"></i>assumed, cost ∝ ℓ</span>
+      <span><i class="sw" style="background:var(--c-a)"></i>256²</span>
+      <span><i class="sw" style="background:var(--c-b)"></i>512²</span>
+      <span><i class="sw" style="background:var(--c-c)"></i>1024²</span>
+    </div>
+    <figcaption>Cost per scale relative to the cheapest scale in the sweep, against ℓ relative to the
+    smallest. The refuted model is the diagonal. <b>The real curves flatten at small ℓ</b>, where fixed
+    cost dominates — which is exactly where the ℓ-weighting packed most of the scales into one batch.
+    The gap narrows with resolution: at 1024² the ratio is 12×, still far from the 205× that weighting
+    by ℓ would assume over that grid's wider scale range.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <div class="sechead">
+    <p class="eyebrow">the validation</p>
+    <h2>Fit at 256², predict 512², check</h2>
+  </div>
+  <p>A model fitted and evaluated on the same run proves nothing. The 512² run is a genuine held-out test:
+  take the 256² coefficients, scale both by the data-volume ratio (2.081), and predict all eight batches
+  before looking at them.</p>
+
+  <figure>
+    <div class="panelbox"><svg viewBox="0 0 720 290" class="chart" role="img">
+<line x1="46" y1="16.0" x2="704" y2="16.0" class="grid"/>
+<text x="38.0" y="16.0" dy="0.32em" text-anchor="end" class="tick">87</text>
+<line x1="46" y1="71.5" x2="704" y2="71.5" class="grid"/>
+<text x="38.0" y="71.5" dy="0.32em" text-anchor="end" class="tick">65</text>
+<line x1="46" y1="127.0" x2="704" y2="127.0" class="grid"/>
+<text x="38.0" y="127.0" dy="0.32em" text-anchor="end" class="tick">43</text>
+<line x1="46" y1="182.5" x2="704" y2="182.5" class="grid"/>
+<text x="38.0" y="182.5" dy="0.32em" text-anchor="end" class="tick">22</text>
+<line x1="46" y1="238.0" x2="704" y2="238.0" class="grid"/>
+<text x="38.0" y="238.0" dy="0.32em" text-anchor="end" class="tick">0</text>
+<rect x="61.2" y="45.0" width="24.7" height="193.0" class="bar-pred"/>
+<rect x="88.4" y="52.3" width="24.7" height="185.7" class="bar"/>
+<text x="87.1" y="39.0" dy="0" text-anchor="middle" class="val">+4%</text>
+<text x="87.1" y="252.0" dy="0" text-anchor="middle" class="tickxs">0–9</text>
+<text x="87.1" y="265.0" dy="0" text-anchor="middle" class="tickxxs">9</text>
+<rect x="143.5" y="57.0" width="24.7" height="181.0" class="bar-pred"/>
+<rect x="170.6" y="83.3" width="24.7" height="154.7" class="bar"/>
+<text x="169.4" y="51.0" dy="0" text-anchor="middle" class="val">+17%</text>
+<text x="169.4" y="252.0" dy="0" text-anchor="middle" class="tickxs">9–16</text>
+<text x="169.4" y="265.0" dy="0" text-anchor="middle" class="tickxxs">7</text>
+<rect x="225.7" y="61.0" width="24.7" height="177.0" class="bar-pred"/>
+<rect x="252.9" y="88.5" width="24.7" height="149.5" class="bar"/>
+<text x="251.6" y="55.0" dy="0" text-anchor="middle" class="val">+18%</text>
+<text x="251.6" y="252.0" dy="0" text-anchor="middle" class="tickxs">16–21</text>
+<text x="251.6" y="265.0" dy="0" text-anchor="middle" class="tickxxs">5</text>
+<rect x="308.0" y="91.1" width="24.7" height="146.9" class="bar-pred"/>
+<rect x="335.1" y="103.7" width="24.7" height="134.3" class="bar"/>
+<text x="333.9" y="85.1" dy="0" text-anchor="middle" class="val">+9%</text>
+<text x="333.9" y="252.0" dy="0" text-anchor="middle" class="tickxs">21–24</text>
+<text x="333.9" y="265.0" dy="0" text-anchor="middle" class="tickxxs">3</text>
+<rect x="390.2" y="111.8" width="24.7" height="126.2" class="bar-pred"/>
+<rect x="417.4" y="118.7" width="24.7" height="119.3" class="bar"/>
+<text x="416.1" y="105.8" dy="0" text-anchor="middle" class="val">+6%</text>
+<text x="416.1" y="252.0" dy="0" text-anchor="middle" class="tickxs">24–26</text>
+<text x="416.1" y="265.0" dy="0" text-anchor="middle" class="tickxxs">2</text>
+<rect x="472.5" y="79.1" width="24.7" height="158.9" class="bar-pred"/>
+<rect x="499.6" y="83.2" width="24.7" height="154.8" class="bar"/>
+<text x="498.4" y="73.1" dy="0" text-anchor="middle" class="val">+3%</text>
+<text x="498.4" y="252.0" dy="0" text-anchor="middle" class="tickxs">26–28</text>
+<text x="498.4" y="265.0" dy="0" text-anchor="middle" class="tickxxs">2</text>
+<rect x="554.7" y="142.6" width="24.7" height="95.4" class="bar-pred"/>
+<rect x="581.9" y="144.4" width="24.7" height="93.6" class="bar"/>
+<text x="580.6" y="136.6" dy="0" text-anchor="middle" class="val">+2%</text>
+<text x="580.6" y="252.0" dy="0" text-anchor="middle" class="tickxs">28–29</text>
+<text x="580.6" y="265.0" dy="0" text-anchor="middle" class="tickxxs">1</text>
+<rect x="637.0" y="129.5" width="24.7" height="108.5" class="bar-pred"/>
+<rect x="664.1" y="129.2" width="24.7" height="108.8" class="bar"/>
+<text x="662.9" y="123.2" dy="0" text-anchor="middle" class="val">-0%</text>
+<text x="662.9" y="252.0" dy="0" text-anchor="middle" class="tickxs">29–30</text>
+<text x="662.9" y="265.0" dy="0" text-anchor="middle" class="tickxxs">1</text>
+<line x1="46" y1="16" x2="46" y2="238" class="axis"/>
+<line x1="46" y1="238" x2="704" y2="238" class="axis"/>
+<text x="375.0" y="286.0" dy="0" text-anchor="middle" class="axlbl">scale-index range  /  number of scales in the batch</text>
+</svg></div>
+    <div class="legend">
+      <span><i class="sw" style="background:var(--c-a);opacity:.55"></i>predicted from the 256² fit alone</span>
+      <span><i class="sw" style="background:var(--measured)"></i>observed at 512²</span>
+      <span>minutes</span>
+    </div>
+    <figcaption>Mean absolute error <b>7.4%</b>, and the makespan — the number that actually decides
+    whether a job fits — predicted at 1.26 h against 1.21 h observed. Refitting each resolution
+    independently confirms the mechanism rather than just the outcome: <b>both coefficients track data
+    volume</b>, the σ term to within 4% and the fixed term to within 11%.</figcaption>
+  </figure>
+
+  <p class="verdict">This specifically retires an earlier worry in <code>CLAUDE.md</code> that per-scale
+  cost blows up ~2.5× faster than <span class="m">O(L·σ)</span> reasoning predicts. <b>It doesn't.</b>
+  That anecdote compared two runs differing in <span class="m">n_times</span> as well as grid — and
+  <span class="m">n_times</span> turns out to be a first-order term in its own right.</p>
+</section>
+
+<section>
+  <div class="sechead">
+    <p class="eyebrow">the payoff</p>
+    <h2>At 1024², memory binds before walltime does</h2>
+  </div>
+  <p>Cost and memory are both linear in <span class="m">n_times</span>, and they hit their respective
+  ceilings at different points. Batch size moves walltime only — peak memory is set by one scale's working
+  set, so no <code>N_SCALE_JOBS</code> value rescues an over-budget run.</p>
+
+  <figure>
+    <div class="panelbox"><svg viewBox="0 0 720 340" class="chart" role="img">
+<line x1="93.9" y1="18" x2="93.9" y2="294" class="grid"/>
+<text x="93.9" y="310.0" dy="0" text-anchor="middle" class="tick">20</text>
+<line x1="245.4" y1="18" x2="245.4" y2="294" class="grid"/>
+<text x="245.4" y="310.0" dy="0" text-anchor="middle" class="tick">40</text>
+<line x1="396.9" y1="18" x2="396.9" y2="294" class="grid"/>
+<text x="396.9" y="310.0" dy="0" text-anchor="middle" class="tick">60</text>
+<line x1="548.4" y1="18" x2="548.4" y2="294" class="grid"/>
+<text x="548.4" y="310.0" dy="0" text-anchor="middle" class="tick">80</text>
+<line x1="56" y1="148.0" x2="662" y2="148.0" class="grid"/>
+<text x="48.0" y="148.0" dy="0.32em" text-anchor="end" class="tick">0h</text>
+<line x1="56" y1="88.0" x2="662" y2="88.0" class="grid"/>
+<text x="48.0" y="88.0" dy="0.32em" text-anchor="end" class="tick">12h</text>
+<line x1="56" y1="28.0" x2="662" y2="28.0" class="grid"/>
+<text x="48.0" y="28.0" dy="0.32em" text-anchor="end" class="tick">24h</text>
+<line x1="56" y1="294.0" x2="662" y2="294.0" class="grid"/>
+<text x="48.0" y="294.0" dy="0.32em" text-anchor="end" class="tick">0</text>
+<line x1="56" y1="253.8" x2="662" y2="253.8" class="grid"/>
+<text x="48.0" y="253.8" dy="0.32em" text-anchor="end" class="tick">340</text>
+<line x1="56" y1="213.4" x2="662" y2="213.4" class="grid"/>
+<text x="48.0" y="213.4" dy="0.32em" text-anchor="end" class="tick">682</text>
+<line x1="56" y1="175.8" x2="662" y2="175.8" class="grid"/>
+<text x="48.0" y="175.8" dy="0.32em" text-anchor="end" class="tick">1000</text>
+<line x1="56" y1="28.1" x2="662" y2="28.1" class="limit"/>
+<text x="658.0" y="21.1" dy="0" text-anchor="end" class="lbl-limit">23:59 walltime cap</text>
+<line x1="56" y1="213.4" x2="662" y2="213.4" class="limit"/>
+<text x="658.0" y="206.4" dy="0" text-anchor="end" class="lbl-limit">682 GiB request</text>
+<polyline points="56.0,130.8 63.6,129.6 71.2,128.5 78.7,127.3 86.3,126.2 93.9,125.0 101.5,123.9 109.0,122.7 116.6,121.6 124.2,120.4 131.8,119.3 139.3,118.1 146.9,117.0 154.5,115.8 162.1,114.7 169.6,113.5 177.2,112.4 184.8,111.2 192.3,110.1 199.9,108.9 207.5,107.8 215.1,106.6 222.7,105.5 230.2,104.3 237.8,103.2 245.4,102.0 252.9,100.9 260.5,99.7 268.1,98.6 275.7,97.5 283.2,96.3 290.8,95.2 298.4,94.0 306.0,92.9 313.6,91.7 321.1,90.6 328.7,89.4 336.3,88.3 343.9,87.1 351.4,86.0 359.0,84.8 366.6,83.7 374.1,82.5 381.7,81.4 389.3,80.2 396.9,79.1 404.4,77.9 412.0,76.8 419.6,75.6 427.2,74.5 434.8,73.3 442.3,72.2 449.9,71.0 457.5,69.9 465.1,68.7 472.6,67.6 480.2,66.4 487.8,65.3 495.4,64.1 502.9,63.0 510.5,61.8 518.1,60.7 525.6,59.5 533.2,58.4 540.8,57.2 548.4,56.1 556.0,54.9 563.5,53.8 571.1,52.6 578.7,51.5 586.2,50.4 593.8,49.2 601.4,48.1 609.0,46.9 616.5,45.8 624.1,44.6 631.7,43.5 639.3,42.3 646.9,41.2 654.4,40.0" class="ln ln-b"/>
+<polyline points="56.0,273.3 63.6,271.9 71.2,270.5 78.7,269.1 86.3,267.7 93.9,266.3 101.5,265.0 109.0,263.6 116.6,262.2 124.2,260.8 131.8,259.4 139.3,258.0 146.9,256.7 154.5,255.3 162.1,253.9 169.6,252.5 177.2,251.1 184.8,249.7 192.3,248.4 199.9,247.0 207.5,245.6 215.1,244.2 222.7,242.8 230.2,241.4 237.8,240.1 245.4,238.7 252.9,237.3 260.5,235.9 268.1,234.5 275.7,233.1 283.2,231.8 290.8,230.4 298.4,229.0 306.0,227.6 313.6,226.2 321.1,224.8 328.7,223.5 336.3,222.1 343.9,220.7 351.4,219.3 359.0,217.9 366.6,216.5 374.1,215.2 381.7,213.8 389.3,212.4 396.9,211.0 404.4,209.6 412.0,208.2 419.6,206.9 427.2,205.5 434.8,204.1 442.3,202.7 449.9,201.3 457.5,200.0 465.1,198.6 472.6,197.2 480.2,195.8 487.8,194.4 495.4,193.0 502.9,191.7 510.5,190.3 518.1,188.9 525.6,187.5 533.2,186.1 540.8,184.7 548.4,183.4 556.0,182.0 563.5,180.6 571.1,179.2 578.7,177.8 586.2,176.4 593.8,175.1 601.4,173.7 609.0,172.3 616.5,170.9 624.1,169.5 631.7,168.1 639.3,166.8 646.9,165.4 654.4,164.0" class="ln ln-b"/>
+<rect x="389.3" y="18" width="272.7" height="276" class="danger"/>
+<line x1="389.3" y1="18" x2="389.3" y2="294" class="limit"/>
+<text x="395.3" y="30.0" dy="0" text-anchor="start" class="lbl-limit">OOM beyond 59 timesteps</text>
+<circle cx="101.5" cy="123.9" r="4.5" class="dot dot-b"/>
+<text x="101.5" y="112.9" dy="0" text-anchor="middle" class="val">4.8 h</text>
+<circle cx="101.5" cy="265.0" r="4.5" class="dot dot-b"/>
+<text x="101.5" y="254.0" dy="0" text-anchor="middle" class="val">246 GiB</text>
+<circle cx="252.9" cy="100.9" r="4.5" class="dot dot-b"/>
+<text x="252.9" y="89.9" dy="0" text-anchor="middle" class="val">9.4 h</text>
+<circle cx="252.9" cy="237.3" r="4.5" class="dot dot-b"/>
+<text x="252.9" y="226.3" dy="0" text-anchor="middle" class="val">480 GiB</text>
+<text x="359.0" y="336.0" dy="0" text-anchor="middle" class="axlbl">timesteps in the sweep (after pair dedup and N_TIME_SKIP)</text>
+<line x1="56" y1="18" x2="56" y2="294" class="axis"/>
+</svg></div>
+    <figcaption>Top trace: makespan at <span class="m">N_SCALE_JOBS ≥ 12</span>, which equals the cost of
+    the single largest scale — the irreducible floor, since a scale can't be split. Bottom trace:
+    single-scale memory. <b>The memory ceiling arrives first</b>, at 57 timesteps, while walltime still
+    has room to 100+.</figcaption>
+  </figure>
+
+  <div class="tblwrap"><table>
+    <thead><tr><th>n_times</th><th>sequential</th><th>K ≥ 12 makespan</th><th>single-scale memory</th><th>verdict</th></tr></thead>
+    <tbody>
+      <tr class="pick"><td class="num">21</td><td class="num">39 h</td><td class="num">4.8 h</td><td class="num">246 GiB</td><td>comfortable</td></tr>
+      <tr class="pick"><td class="num">41</td><td class="num">77 h</td><td class="num">9.4 h</td><td class="num">480 GiB</td><td>2.5× walltime margin</td></tr>
+      <tr class="flag"><td class="num">81</td><td class="num">152 h</td><td class="num">18.6 h</td><td class="num">948 GiB</td><td>exceeds the 682 GiB request</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>What to run</h3>
+  <pre># 1024², keep the time axis at or below ~41
+cd postprocessing
+bash submit_sweep.sh NX=1024 NY=1024 NZ=64 N_SCALES=30 N_SCALE_JOBS=12 N_TIME_SKIP=2</pre>
+  <p><code>N_SCALE_JOBS=12</code> reaches the largest-single-scale floor; 15, 20 and 30 all give the same
+  makespan and only add queue wait for eight more 732 GB jobs. If the time axis can't come down, the
+  remaining lever is an FFT-based Gaussian filter — <span class="m">O(L log L)</span>, independent of σ —
+  which removes ℓ from the cost model rather than redistributing it.</p>
+</section>
+
+<footer>
+  <span>Fits: least squares on per-batch wall time, two runs of 8 PBS batch jobs each
+    (256×256×64 / 41 timesteps, 512×512×65 / 21 timesteps), 30 log-spaced filter scales from 2Δx to 0.4·Lx.</span>
+  <span>Memory figures are the anonymous baseline; PBS <code>resources_used.mem</code> also counts
+    reclaimable page cache from the per-scale checkpoints, which is why a 16-scale batch reports ~200 GiB
+    while its real working set is that of one scale.</span>
+  <span>Implemented in <code>sweep1_filter_fields.py --print-scale-ranges</code> · branch
+    <code>parallelize-sweep</code> · commits <code>86110f0</code>, <code>0f66e96</code>.</span>
+</footer>
+
+</div>
