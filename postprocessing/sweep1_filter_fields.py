@@ -185,9 +185,13 @@ if args.print_scale_ranges is not None:
               f"heaviest batch is one scale ({100*float(w.max())/total:.1f}% of the sweep) and the split "
               f"attains that floor -- {100*(loads.max()/_heaviest(n_useful) - 1):+.0f}% vs here. Past "
               f"{n_useful} nothing improves.")
+    elif n_jobs == n_useful:
+        print(f"SCALE_ADVICE N_SCALE_JOBS={n_jobs} is optimal: the heaviest batch is the single costliest "
+              f"scale, which no split can beat. More jobs than {n_useful} only add queue wait.")
     else:
-        print(f"SCALE_ADVICE N_SCALE_JOBS={n_jobs} is at or past the useful threshold ({n_useful}); the "
-              f"heaviest batch is the single costliest scale, so more jobs only add queue wait.")
+        print(f"SCALE_ADVICE N_SCALE_JOBS={n_jobs} is more than needed: the heaviest batch is already the "
+              f"single costliest scale at {n_useful} jobs, so the extra {n_jobs - n_useful} only add queue "
+              f"wait. {n_useful} is optimal.")
     raise SystemExit(0)
 
 # Resolve this invocation's slice of the full scale list. Defaults cover everything, so an invocation
