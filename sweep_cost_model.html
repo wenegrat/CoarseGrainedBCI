@@ -470,14 +470,17 @@ footer code{background:none;padding:0;color:var(--dim)}
   <h3>What to run</h3>
   <pre># 1024², keep the time axis at or below ~41
 cd postprocessing
-bash submit_sweep.sh NX=1024 NY=1024 NZ=64 N_SCALES=30 N_SCALE_JOBS=12 N_TIME_SKIP=2</pre>
-  <p><code>N_SCALE_JOBS=12</code> clears the threshold below which the split can't reach its own floor.
+bash submit_sweep.sh NX=1024 NY=1024 NZ=64 N_SCALES=30 N_SCALE_JOBS=10 N_TIME_SKIP=2</pre>
+  <p><code>N_SCALE_JOBS=10</code> is the threshold below which the split can't reach its own floor.
   Two bounds apply to the heaviest batch — an even share, and the single costliest scale, which is
-  indivisible. Under <span class="m">K = total/max(cost)</span> (9 at 1024², 11 at 512², 15 at 256²) the
-  even share binds, and contiguous ranges over log-spaced scales land 20–26% above it; an oracle splitter
+  indivisible. Under <span class="m">K = total/max(cost)</span> (10 at 1024², 14 at 512², 19 at 256²) the
+  even share binds, and contiguous ranges over log-spaced scales land 16–22% above it; an oracle splitter
   handed the exact costs does no better, so that gap is partition granularity, not a weighting error.
-  Above it the costliest scale binds and the existing split is exact. <b>Raising K is the fix, not a
-  cleverer partition.</b> The earlier K=8 advice sat below the threshold at every resolution. If the time axis can't come down, the
+  Above it the costliest scale binds and the split is exact. <b>Raising K is the fix, not a cleverer
+  partition.</b> The threshold is found by partitioning at each candidate K, not from
+  <span class="m">total/max(cost)</span> — that bound is where the floor stops improving, one to four jobs
+  short of where a contiguous split attains it. The earlier K=8 advice sat below it everywhere: +20% at
+  1024², +65% at 512². If the time axis can't come down, the
   remaining lever is an FFT-based Gaussian filter — <span class="m">O(L log L)</span>, independent of σ —
   which removes ℓ from the cost model rather than redistributing it.</p>
 </section>

@@ -272,11 +272,23 @@ partition** (dropping contiguity would recover that 25%, at the price of passing
 instead of a start/end range -- deliberately not done).
 
 The threshold rises as resolution falls, because the largest scale is a smaller share of a narrower cost
-range: **K≥9 at 1024², K≥11 at 512², K≥15 at 256²**. `--print-scale-ranges` now computes and prints this
-per run as `SCALE_ADVICE` lines, which `submit_sweep.sh` forwards to the terminal at submit time -- read
-them rather than guessing. `N_SCALE_JOBS=12` remains the recommendation at 1024²: past the threshold, with
-margin, and each job requests `mem=732GB:ncpus=8` on a shared queue so more only add queue wait. Note the
-earlier `K=8` guidance was *below* the threshold at every resolution and left ~26% on the table.
+range: **K=10 at 1024², 14 at 512², 19 at 256²** (for the default 30 scales). It is found by partitioning at
+each candidate K rather than from `ceil(total/max(w))` -- that analytic bound is where the *floor* stops
+improving, which is one to four jobs short of where the contiguous split actually attains it (9 vs 10 at
+1024², 15 vs 19 at 256²). `--print-scale-ranges` computes and prints this per run as `SCALE_ADVICE` lines,
+which `submit_sweep.sh` forwards to the terminal at submit time -- read them rather than guessing.
+
+**`N_SCALE_JOBS=10` is the recommendation at 1024²**, not the 12 previously suggested here and not the
+analytic 9: K=10 attains the floor exactly, K=9 lands 4% above it, and K>10 changes nothing but queue wait
+for jobs requesting `mem=732GB:ncpus=8` apiece. The earlier `K=8` guidance was below the threshold at every
+resolution (+20% at 1024², +65% at 512²).
+
+A bug found while checking this, and worth remembering because it was silent: the loop that splits ranges to
+reach `n_jobs` used to give up when the *costliest* range held a single scale -- which is exactly what an
+optimal split produces, so it returned fewer than `n_jobs` ranges precisely at the useful job counts.
+`submit_sweep.sh` requires the count to match and quietly falls back to the even-by-count split when it
+doesn't, so asking for the right K would have discarded the cost weighting entirely. It now picks the
+costliest *splittable* range instead.
 
 **Job memory: most of the reported high-water mark is reclaimable page cache, not heap.** The same 256²
 run measured 30.9 GiB for a 1-scale batch rising linearly to 198.7 GiB for a 16-scale batch -- alarming at
