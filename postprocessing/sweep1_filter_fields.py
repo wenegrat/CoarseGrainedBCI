@@ -36,12 +36,12 @@ parser.add_argument("--merge-only", action="store_true", default=False,
          "merging an incomplete set. Mutually exclusive with --scale-start-idx/--scale-end-idx.")
 parser.add_argument("--print-scale-ranges", type=int, default=None, metavar="N_JOBS",
     help="Print N_JOBS cost-weighted '<start> <end>' index ranges covering [0, n_scales) and exit without "
-         "filtering anything. Used by submit_sweep.sh to split the sweep across jobs. Weighted by ℓ rather "
-         "than split evenly by count because the scales are log-spaced and the Gaussian filter costs "
-         "O(L·σ) with σ ∝ ℓ, so the largest few scales dominate: at 1024², an even-by-count split into 6 "
-         "leaves one job holding ~60%% of the work. Lives here (rather than being reimplemented in the "
-         "submit script) so it reuses this script's own scale_min/scale_max/geomspace logic verbatim and "
-         "can't drift from it.")
+         "filtering anything. Used by submit_sweep.sh to split the sweep across jobs. Weighted by a "
+         "measured 'fixed cost per scale + cost ∝ kernel width in grid cells' model rather than split "
+         "evenly by count, because the scales are log-spaced and the largest ones cost several times the "
+         "smallest (12x at 1024², 3.7x at 256²) -- see the model's own comment below for the fit. Lives "
+         "here (rather than being reimplemented in the submit script) so it reuses this script's own "
+         "scale_min/scale_max/geomspace logic verbatim and can't drift from it.")
 args = parser.parse_args()
 
 if args.merge_only and (args.scale_start_idx is not None or args.scale_end_idx is not None):
@@ -84,14 +84,27 @@ n_scales = args.n_scales
 print(f"Filter scales: {scale_min/1e3:.1f}km to {scale_max/1e3:.1f}km ({n_scales} log-spaced steps)")
 
 if args.print_scale_ranges is not None:
-    # Partition [0, n_scales) into n_jobs contiguous ranges minimizing the heaviest range's cost, with
-    # cost ∝ ℓ (the Gaussian filter is a direct O(L·σ) correlation and σ ∝ ℓ). Binary-search the smallest
-    # feasible max-load, then walk greedily under it -- exact, and only a few lines. Costs are relative,
-    # so the same split applies to sweep2, whose per-scale filtering scales with ℓ the same way.
+    # Partition [0, n_scales) into n_jobs contiguous ranges minimizing the heaviest range's cost.
+    #
+    # Per-scale cost is NOT ∝ ℓ, which is what this originally assumed from the O(L·σ), σ ∝ ℓ filter
+    # scaling. That model ignores a large ℓ-independent cost per scale (loading/rechunking ds_filt, the
+    # density sort's downstream use, the checkpoint write -- all fixed-size work), and measurement at
+    # 256²/30 scales showed it dominating at small ℓ: the true cost ratio between the largest and smallest
+    # scale was 3.7x, not the 51x a pure-ℓ weighting predicts. An affine fit to that run (8 batches, wall
+    # times spanning 8.8-68.1 min) gives cost = 3.57 min + 0.0261 min/km · ℓ at dx=3.906 km, i.e.
+    #
+    #     cost ∝ 1 + K_SCALE_COST · (ℓ/dx)        [ℓ/dx = Gaussian kernel width in grid cells]
+    #
+    # written resolution-free because the fixed and ℓ-dependent parts scale differently with resolution
+    # (fixed ∝ data volume; ℓ-dependent ∝ data volume · σ ∝ data volume / dx), so a hardcoded ratio would
+    # only be right at the resolution it was fit at. Held-out check: predicts the three batches not used
+    # in the fit to within +10/+11/+14%.
+    K_SCALE_COST = 0.0286
     n_jobs = args.print_scale_ranges
     if not (1 <= n_jobs <= n_scales):
         parser.error(f"--print-scale-ranges must be between 1 and n_scales ({n_scales}), got {n_jobs}")
-    w = filter_scales.astype(float)
+    dx_min = float(max(ds.Δx_caa.min(), ds.Δy_aca.min()))
+    w = 1.0 + K_SCALE_COST * filter_scales.astype(float) / dx_min
 
     def _fits(limit):
         """Greedy pack under `limit`; returns the ranges if they fit in n_jobs batches, else None."""

@@ -43,12 +43,28 @@ fi
 # override on the qsub command line" pattern submit_all_pbs.sh already uses for GPU_FLAGS.
 SHORT_WALLTIME=(-l walltime=08:00:00)
 
+# A merge job that fails to submit is the one failure this script can't afford to shrug off: its batch jobs
+# still run and still write their per-scale checkpoints, so everything *looks* fine right up until nothing
+# assembles them and sweep3/4/5 never run. Observed once in practice (a 30-scale/8-job run where the
+# "Submitted transfer merge" line simply wasn't there). qsub's own stderr is left to pass through; this just
+# makes the missing job ID fatal instead of a blank line in the middle of otherwise-successful output.
+require_job() {
+    local id=$1 what=$2
+    if [ -z "$id" ]; then
+        echo "ERROR: qsub returned no job ID for $what -- batch jobs may already be queued, but nothing" >&2
+        echo "       will merge their output. Fix the qsub failure above, then submit the merge by hand:" >&2
+        echo "       qsub -v NX=$NX,NY=$NY,NZ=$NZ,...,MERGE_ONLY=1 <that stage's .pbs>" >&2
+        exit 1
+    fi
+}
+
 # Prints N_SCALE_JOBS lines of "start end" covering [0, N_SCALES).
 #
-# Splitting evenly by *count* is badly unbalanced here: the scales are log-spaced and the Gaussian filter
-# is a direct O(L·σ) correlation with σ ∝ ℓ, so cost per scale grows with ℓ and the largest few dominate.
-# At 1024x1024 with the default 2km-400km range, the top scale alone is ~17% of the total and an
-# even-by-count split into 6 leaves one job holding ~60% of the work (~1.7x speedup instead of 6x).
+# Splitting evenly by *count* is unbalanced here: the scales are log-spaced, and per-scale cost grows with
+# ℓ (a fixed cost plus a term proportional to the Gaussian kernel's width in grid cells -- an empirical fit,
+# see CLAUDE.md; the analytically-obvious "cost ∝ ℓ" model was measured and refuted). At 1024x1024 over the
+# default 2km-400km range the largest scale costs ~12x the smallest, so an even-by-count split leaves the
+# last job holding several times its share.
 # sweep1_filter_fields.py --print-scale-ranges does the cost-weighted partition, reusing its own
 # scale_min/scale_max/geomspace logic so this can't drift from the scales actually filtered. Falls back to
 # the even-by-count split if that call fails for any reason (no $PYTHON on the submit host, unreadable
@@ -119,6 +135,7 @@ else
                            "${SHORT_WALLTIME[@]}" \
                            -W "depend=$FILTER_MERGE_DEPEND" \
                            sweep_filter.pbs)
+    require_job "$FILTER_DONE_JOB" "the sweep1 filter merge"
     echo "Submitted filter merge (depends on ${FILTER_BATCH_JOBS[*]}): $FILTER_DONE_JOB"
 fi
 #---
@@ -201,6 +218,7 @@ submit_transfer() {
                 "${SHORT_WALLTIME[@]}" \
                 -W "depend=$merge_depend" \
                 sweep_transfer.pbs)
+    require_job "$mjob" "the sweep2 transfer merge (FIXED_REF=$fr)"
     echo "Submitted transfer merge FIXED_REF=$fr (depends on ${batch_jobs[*]}): $mjob"
 }
 

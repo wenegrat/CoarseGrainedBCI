@@ -155,7 +155,7 @@ cd postprocessing && bash submit_budgeting.sh NX=384 NY=384 NZ=128
 cd postprocessing && bash submit_sweep.sh NX=384 NY=384 NZ=128
 
 # Same sweep, fanned out across 6 concurrent jobs per stage (see "Parallelizing the sweep" below)
-cd postprocessing && bash submit_sweep.sh NX=1024 NY=1024 NZ=64 N_SCALES=30 N_SCALE_JOBS=6
+cd postprocessing && bash submit_sweep.sh NX=1024 NY=1024 NZ=64 N_SCALES=30 N_SCALE_JOBS=12
 ```
 
 Shared flags across the scripts that take them: `NX`/`NY`/`NZ` (grid resolution), `STOP_TIME` (simulation
@@ -189,21 +189,35 @@ this splits on:
   expanded to `afterok:<id>@casper-pbs:<id>@casper-pbs`). `N_SCALE_JOBS=1` is byte-for-byte the old
   behavior.
 
-**The split is cost-weighted, not even-by-count -- this matters a lot.** Scales are log-spaced and the
-Gaussian filter is a direct `O(L·σ)` correlation with `σ ∝ ℓ`, so per-scale cost grows with ℓ and the
-largest few dominate: at 1024x1024 over the default 2km-400km range, the **single largest scale is ~17% of
-total filtering cost and the top 5 are ~60%**. Splitting evenly by count therefore leaves the last job
-holding most of the work -- measured against that cost model, `N_SCALE_JOBS=6` would give only ~1.7x
-speedup instead of 6x. `submit_sweep.sh` instead calls `sweep1_filter_fields.py --print-scale-ranges N`
-(which reuses that script's own `scale_min`/`scale_max`/`geomspace` logic, so the weighting can't drift
-from the scales actually filtered) to get a cost-balanced contiguous partition, computed by binary-searching
-the smallest feasible max-load. Same numbers, weighted: 4.8x at K=6, 5.9x at K=8. If that call fails for any
-reason (no `$PYTHON` on the submit host, unreadable input), it warns and falls back to the even-by-count
-split -- worse balance, still correct and complete.
+**The split is cost-weighted, not even-by-count.** Scales are log-spaced, so per-scale cost varies enough
+that an even-by-count split leaves the last job holding several times its share. `submit_sweep.sh` calls
+`sweep1_filter_fields.py --print-scale-ranges N` (which reuses that script's own `scale_min`/`scale_max`/
+`geomspace` logic, so the weighting can't drift from the scales actually filtered) to get a cost-balanced
+contiguous partition, computed by binary-searching the smallest feasible max-load. If that call fails for
+any reason (no `$PYTHON` on the submit host, unreadable input), it warns and falls back to the
+even-by-count split -- worse balance, still correct and complete.
 
-**There's a hard ceiling at ~5.9x** for this configuration, no matter how many jobs: a single scale is the
-smallest indivisible unit of work, and the largest one is ~17% of the total. Past `N_SCALE_JOBS≈8` you get
-no further speedup, just more 732GB jobs queueing. This applies to both stages -- `sweep2` does *more*
+**The cost model is empirical, and the obvious analytical one is wrong.** The first version weighted
+purely by ℓ, reasoning that the Gaussian filter is a direct `O(L·σ)` correlation with `σ ∝ ℓ`. That was
+**measured and refuted**: a real 256²/30-scale/8-job run (the weighted split's own ranges, so all eight
+batches should have taken equal wall time) came back spanning 8.8-68.1 min instead. Per-scale cost turns
+out to be **affine, not proportional**, because a large ℓ-independent cost per scale (loading/rechunking
+`ds_filt`, the checkpoint write, the sort's downstream use -- all fixed-size work) dominates at small ℓ:
+
+    cost per scale  =  3.57 min  +  0.0261 min/km · ℓ        (at 256², dx = 3.906 km, 41 timesteps)
+
+so the true largest/smallest cost ratio was **3.7x, not the 51x** the pure-ℓ model predicted. The two
+terms scale differently with resolution (the fixed part with data volume, the ℓ-dependent part with data
+volume × σ, i.e. volume/dx), so the weighting is stored resolution-free as `w ∝ 1 + 0.0286·(ℓ/dx)` --
+"fixed cost plus a term proportional to kernel width in grid cells; a kernel ~35 cells wide doubles the
+per-scale cost." Fit on the 16-scale batch plus the largest single scale; predicts the three held-out
+batches to +10/+11/+14%. Re-splitting the same 256² run under the corrected weights gives batches of
+0.31-0.45 h instead of 0.15-1.13 h.
+
+**The ceiling is the largest single scale**, no matter how many jobs -- a scale is the smallest indivisible
+unit of work. At 1024², the model puts the ℓ=400km scale at **~12 h on its own** against a ~95 h sequential
+total, so the useful ceiling is `N_SCALE_JOBS≈12` (~7.8x); past that you get no further speedup, just more
+732GB jobs queueing. This applies to both stages -- `sweep2` does *more*
 ℓ-dependent filtering per scale than `sweep1` (the 3x3 `uⁱuʲ` stress tensor for Πₖ, `ρuᵢ` for τᵢ, plus
 `w·b_r` and `b_r`, ~14 filtered fields vs sweep1's 4), which is why one shared `N_SCALE_JOBS` is the right
 knob rather than separate per-stage ones. Note `sweep2` genuinely needs `include_pi_k=True` (unlike
@@ -235,19 +249,36 @@ fanning out, so a fresh parallel submission always starts clean rather than tryi
 across concurrently-running siblings. The sequential path (`N_SCALE_JOBS=1`) keeps its existing
 resume-from-existing-checkpoints behavior untouched.
 
-**Picking `N_SCALE_JOBS`: 8 is the recommended cap** (for the default 30-scale range at high resolution).
-Two independent reasons converge there: the ~5.9x indivisible-scale ceiling above is already reached at
-K=8 (K=15 and K=30 measure the same 5.9x), and each job requests `mem=732GB:ncpus=8` on a shared queue, so
-additional jobs past that just add queue wait for no speedup. Before committing to a full-scale run, time
-the most expensive single scale to check the budget actually closes:
+**Picking `N_SCALE_JOBS`: 12 for the default 30-scale range at 1024²** -- that's where the
+largest-single-scale ceiling above is reached (K=15/20/30 all give the same ~12 h makespan), and each job
+requests `mem=732GB:ncpus=8` on a shared queue, so more jobs past that only add queue wait. At lower
+resolution the ceiling is far away and K is limited by queue etiquette instead, not by the model.
+
+**Job memory: most of the reported high-water mark is reclaimable page cache, not heap.** The same 256²
+run measured 30.9 GiB for a 1-scale batch rising linearly to 198.7 GiB for a 16-scale batch -- alarming at
+first read, since the per-scale checkpointing is specifically supposed to bound peak memory to ~1 scale
+regardless of scale count. It still does: the ~11.1 GiB-per-extra-scale slope matches the per-scale
+checkpoint file size (4 3-D fields × `Nx·Ny·Nz` × 41 timesteps ≈ 5.1 GiB, written then read back), and
+PBS's `resources_used.mem` on a cgroup counts page cache. Real anonymous memory is the ~31 GiB baseline,
+plus ~5 GiB more at the largest filter scale (bigger kernel temporaries) -- the one place batch *content*,
+not batch *size*, moves the number. So **batch size is a walltime knob, not a memory knob**; size the
+`mem=` request from the baseline (~500 GiB projected at 1024², within the current 732GB request) rather
+than from a batch's reported total.
+
+Before committing to a full-scale run, time the most expensive single scale -- it's the one number no
+amount of splitting can improve:
 ```bash
-cd postprocessing        # times scale index 29 of 30 -- the largest, ~17% of the whole sweep's cost
+cd postprocessing        # times scale index 29 of 30 -- the largest, ~12% of the whole sweep's cost at 1024²
 qsub -N timing_test -o logs/timing_test.log -e logs/timing_test.log \
      -v NX=1024,NY=1024,NZ=64,N_SCALES=30,SCALE_START_IDX=29,SCALE_END_IDX=30 sweep_filter.pbs
 ```
-If that scale takes T, the full sequential sweep is roughly 6T (the largest scale being ~1/6 of the total),
-and the heaviest batch under a weighted K=8 split is about T -- so T itself needs to fit comfortably inside
-the 23:59:00 cap, since no split can make the largest single scale any cheaper.
+The model predicts T ≈ 12 h there, with the full sequential sweep ≈ 8T and the heaviest batch under a
+weighted K=12 split ≈ T. **Treat 12 h as optimistic**: it extrapolates a 16x-grid jump from a 256² fit,
+and the one previously-recorded resolution jump (256²→512², see the filter-scaling note below) came in
+~2.5x worse than the same `O(L·σ)` reasoning predicted. If that pessimism carries over, the largest scale
+alone exceeds the 23:59:00 cap and no `N_SCALE_JOBS` value rescues it -- the fix would have to be the
+FFT-based Gaussian filter noted below (`O(L log L)`, independent of σ), which is what actually removes ℓ
+from the cost model rather than redistributing it. Run the timing job before the full sweep.
 
 **Sort redundancy, fixed (`sweep_sort.pbs`).** `sweep2_energy_transfer.py` calls
 `calculate_energy_transfer()` once per scale, and that function only skips its own internal
