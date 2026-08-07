@@ -23,7 +23,28 @@ parser.add_argument("--write-mode", choices=["load", "synchronous"], default="lo
     help="How to avoid the dask-lazy .to_netcdf() write hang for each filter scale's checkpoint -- see "
          "write_dataset() in aux00_utils.py for what each mode does and the measured cost of 'synchronous' "
          "relative to 'load'.")
+# Scale batching, mirroring sweep1_filter_fields.py's own flags: lets the per-scale loop be split across
+# several concurrently-running PBS jobs (see submit_sweep.sh's N_SCALE_JOBS), each computing a disjoint
+# index range and checkpointing its own scales, followed by one --merge-only job that assembles them.
+# Unlike sweep1, batches here can't disagree about which scales exist: every invocation reads the same
+# already-merged ds_filt, so the scale list is a shared upstream artifact rather than one each job
+# recomputes independently.
+parser.add_argument("--scale-start-idx", type=int, default=None,
+    help="First scale index (0-based, into ds_filt's own filter_scale list) this invocation computes, "
+         "inclusive. Default: 0. Mutually exclusive with --merge-only.")
+parser.add_argument("--scale-end-idx", type=int, default=None,
+    help="Last scale index this invocation computes, EXCLUSIVE (half-open [start, end)). Default: all "
+         "scales in ds_filt. Mutually exclusive with --merge-only.")
+parser.add_argument("--merge-only", action="store_true", default=False,
+    help="Skip computing any scale; require an up-to-date checkpoint to already exist for every one of "
+         "ds_filt's filter_scale values, then concat + write the final merged output and delete the "
+         "checkpoints. Hard-errors naming any scale whose checkpoint is missing or stale. Mutually "
+         "exclusive with --scale-start-idx/--scale-end-idx.")
 args = parser.parse_args()
+
+if args.merge_only and (args.scale_start_idx is not None or args.scale_end_idx is not None):
+    parser.error("--merge-only cannot be combined with --scale-start-idx/--scale-end-idx "
+                 "(merge-only always covers every scale in ds_filt)")
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -52,21 +73,47 @@ filtered_filename = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities
 ds_filt = xr.open_dataset(filtered_filename, decode_times=False).chunk(dict(time=1, filter_scale=1))
 ds = ds.reindex(time=ds_filt.time).chunk(chunks)
 
-filter_scales = ds_filt.filter_scale.values
+filter_scales_full = ds_filt.filter_scale.values
+n_scales_full = len(filter_scales_full)
 print(f"  Loaded from: {filtered_filename}  ({time.time()-t0:.1f}s)")
-print(f"  Filter length scales: {filter_scales}")
+print(f"  Filter length scales: {filter_scales_full}")
 print(f"  Filter dimensions: x and y (horizontal)")
+
+# Resolve this invocation's slice of the scale list. Defaults cover everything, so an invocation passing
+# neither flag behaves exactly as it always has. NOTE: filter_scales_full comes straight from ds_filt and
+# is ascending (sweep1's combine="by_coords" merge guarantees it); the final xr.concat below relies on
+# that ordering, since concat does NOT sort. Don't reorder it.
+scale_start_idx = args.scale_start_idx if args.scale_start_idx is not None else 0
+scale_end_idx   = args.scale_end_idx   if args.scale_end_idx   is not None else n_scales_full
+if not (0 <= scale_start_idx < scale_end_idx <= n_scales_full):
+    parser.error(f"--scale-start-idx/--scale-end-idx must satisfy 0 <= start < end <= n_scales "
+                 f"(got start={scale_start_idx}, end={scale_end_idx}, n_scales={n_scales_full})")
+is_full_range = (scale_start_idx == 0 and scale_end_idx == n_scales_full)
+if not is_full_range:
+    print(f"  This invocation computes scale indices [{scale_start_idx}, {scale_end_idx}) only")
 #---
 
-#+++ Load sorted density (only when using fixed reference)
-rho_sorted = dz_sorted = None
-if fixed_reference:
-    sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sorted_density{ref_suffix}.nc"))
-    ds_sorted = xr.open_dataset(sorted_density_filename, decode_times=False).chunk(chunks)
-    ds_sorted = ds_sorted.reindex(time=ds_filt.time)
-    rho_sorted = ds_sorted.rho_sorted
-    dz_sorted  = ds_sorted.dz_sorted
-    print(f"  Sorted density loaded from: {sorted_density_filename}")
+#+++ Load sorted density (always -- not just for --fixed-reference)
+# The full-field density sort is scale-independent, but calculate_energy_transfer() only skips its own
+# internal sorted_timeseries() call when BOTH rho_sorted and dz_sorted are passed in. Since this script
+# calls it once per scale, leaving these as None (which is what the old --fixed-reference-only gate did
+# on the default path) redid that expensive sort from scratch on every single scale. 03_energy_transfer.py
+# already avoids this by loading 02_sort_density.py's output unconditionally; do the same here. Hard error
+# rather than falling back to the old behavior: silently re-sorting n_scales times is the bug being fixed,
+# and it's also what would make each parallel batch job redundantly redo the same sort.
+sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sorted_density{ref_suffix}.nc"))
+if not os.path.exists(sorted_density_filename):
+    raise FileNotFoundError(
+        f"Required sorted-density file not found: {sorted_density_filename}\n"
+        f"Run 02_sort_density.py --filename {args.filename}"
+        f"{' --fixed-reference' if fixed_reference else ''} first "
+        f"(sweep_sort.pbs does this on the HPC, and submit_sweep.sh submits it automatically when the "
+        f"file is missing).")
+ds_sorted = xr.open_dataset(sorted_density_filename, decode_times=False).chunk(chunks)
+ds_sorted = ds_sorted.reindex(time=ds_filt.time)
+rho_sorted = ds_sorted.rho_sorted
+dz_sorted  = ds_sorted.dz_sorted
+print(f"  Sorted density loaded from: {sorted_density_filename}")
 #---
 
 #+++ Calculate cross-scale transfer terms (checkpointed per filter scale)
@@ -87,10 +134,19 @@ print("Calculating cross-scale transfer terms...")
 # before moving to the next scale, same as it already does for calculate_energy_transfer()'s eager Π_A.
 transfer_list = []
 checkpoint_files = []
-n_scales = len(filter_scales)
+n_scales = n_scales_full
+filter_scales = filter_scales_full
 for i, ℓ in enumerate(filter_scales):
     checkpoint_path = PP_OUTPUT / (Path(filename).stem + f"_energy_transfer_sweep_checkpoint_l{ℓ:.4f}{ref_suffix}.nc")
     checkpoint_files.append(checkpoint_path)
+
+    # Batch mode: only compute the scales assigned to this invocation. Scales outside the range are
+    # skipped entirely here (their checkpoints belong to a sibling job); the --merge-only pass is what
+    # later requires all of them to be present. Checkpoint filenames are keyed by the ℓ value itself, so
+    # concurrent batches never collide the way sweep1's index-named tmp files could.
+    in_this_batch = scale_start_idx <= i < scale_end_idx
+    if not (in_this_batch or args.merge_only):
+        continue
 
     if checkpoint_path.exists():
         cached = xr.open_dataset(str(checkpoint_path), decode_times=False).chunk(chunks)
@@ -108,6 +164,11 @@ for i, ℓ in enumerate(filter_scales):
             print(f"\n--- filter {i+1}/{n_scales}: scale = {ℓ:.4f} (loading from checkpoint) ---")
             transfer_list.append(cached)
             continue
+        if args.merge_only:
+            raise RuntimeError(
+                f"--merge-only: checkpoint for filter_scale={ℓ:.4f} is stale (has "
+                f"{cached.sizes['time']} timesteps, this run expects {ds_filt.sizes['time']}) -- a batch "
+                f"covering this scale needs to (re)run before merging. Checkpoint: {checkpoint_path}")
         print(f"\n--- filter {i+1}/{n_scales}: scale = {ℓ:.4f}: checkpoint has {cached.sizes['time']} timesteps, "
               f"this run expects {ds_filt.sizes['time']} -- stale checkpoint from a different run, recomputing ---")
         cached.close()
@@ -116,6 +177,10 @@ for i, ℓ in enumerate(filter_scales):
         # the same path is immediately reopened for writing (confirmed directly: reusing the handle this way
         # raised a PermissionError from a stale cache entry). Removing the file first guarantees a clean open.
         checkpoint_path.unlink()
+    elif args.merge_only:
+        raise RuntimeError(
+            f"--merge-only: no checkpoint found for filter_scale={ℓ:.4f} (expected {checkpoint_path}) -- "
+            f"a batch covering this scale hasn't completed yet.")
 
     # Printed here (not inside calculate_energy_transfer(), which only knows the single-element list this
     # scale's call gets) so progress through the whole sweep is visible -- otherwise the "--- filter_scale =
@@ -134,6 +199,12 @@ for i, ℓ in enumerate(filter_scales):
     del transfer_ℓ
     gc.collect()
     transfer_list.append(xr.open_dataset(str(checkpoint_path), decode_times=False).chunk(chunks))
+
+if not is_full_range and not args.merge_only:
+    print(f"\nComputed scale indices [{scale_start_idx}, {scale_end_idx}) of [0, {n_scales}) -- a partial "
+          f"batch, so not merging. Rerun with --merge-only once every batch covering [0, {n_scales}) has "
+          f"finished.")
+    raise SystemExit(0)
 
 energy_transfer = xr.concat(transfer_list, dim="filter_scale")
 print("\nDone!")

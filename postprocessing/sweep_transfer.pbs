@@ -18,6 +18,12 @@
 # filter scales one at a time, checkpointing each to disk before moving to the next (same pattern as
 # 03_energy_transfer.py) -- bounds peak memory to ~1 filter scale regardless of --n-scales, after this was
 # confirmed as the cause of a real OOM at 512x512x64/40 days (see CLAUDE.md).
+#
+# SCALE_START_IDX/SCALE_END_IDX/MERGE_ONLY drive sweep2's scale batching (submit_sweep.sh's N_SCALE_JOBS
+# fan-out): each batch job computes a disjoint range of scales into its own per-scale checkpoints, then one
+# MERGE_ONLY=1 job assembles them into the final output. All three unset (the default) = today's single-job
+# full-range behavior, unchanged. Requires <stem>_sorted_density{_fixed_ref}.nc to already exist (see
+# sweep_sort.pbs) -- sweep2 now loads it unconditionally instead of re-sorting per scale.
 set -eo pipefail
 
 NX=${NX:-192}
@@ -25,8 +31,16 @@ NY=${NY:-192}
 NZ=${NZ:-32}
 SIM=bci_Nx${NX}_Ny${NY}_Nz${NZ}
 FIXED_REF=${FIXED_REF:-0}
+SCALE_START_IDX=${SCALE_START_IDX:-}
+SCALE_END_IDX=${SCALE_END_IDX:-}
+MERGE_ONLY=${MERGE_ONLY:-0}
 [ "$FIXED_REF" = "1" ] && FIXED_REF_FLAG="--fixed-reference" && REF_SUFFIX="_fixed_ref" || { FIXED_REF_FLAG=""; REF_SUFFIX=""; }
 JOB_NAME="${SIM}_sweep_transfer${REF_SUFFIX}"
+if [ "$MERGE_ONLY" = "1" ]; then
+    JOB_NAME="${JOB_NAME}_merge"
+elif [ -n "$SCALE_START_IDX" ] || [ -n "$SCALE_END_IDX" ]; then
+    JOB_NAME="${JOB_NAME}_batch_${SCALE_START_IDX:-0}_${SCALE_END_IDX:-end}"
+fi
 qalter -N "$JOB_NAME" "$PBS_JOBID"
 
 # Defaults to "synchronous" (bounded memory, ~30% slower than "load" -- measured at 256x256x64, see
@@ -37,12 +51,32 @@ WRITE_MODE=${WRITE_MODE:-synchronous}
 
 source ../hpc_env.sh
 
-time $PYTHON -u sweep2_energy_transfer.py        --filename output/${SIM}.nc --n-workers 8 --write-mode $WRITE_MODE $FIXED_REF_FLAG 2>&1 | tee    logs/${JOB_NAME}.out
-time $PYTHON -u sweep3_plot_transfer_spectrum.py --filename output/${SIM}.nc               $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
-time $PYTHON -u sweep4_plot_depth_scale.py       --filename output/${SIM}.nc               $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
-# sweep5's own --min-time-days/--max-time-days (default 10.0/latest) are left unpassed here, same
-# reasoning as plots.pbs leaving plot5/plot7/plot8's own time-window defaults unpassed -- every run gets
-# plotted over that same fixed window rather than one that silently shifts with each run's own length.
-time $PYTHON -u sweep5_transfer_summary.py       --filename output/${SIM}.nc               $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
+SCALE_ARGS=()
+[ -n "$SCALE_START_IDX" ] && SCALE_ARGS+=(--scale-start-idx "$SCALE_START_IDX")
+[ -n "$SCALE_END_IDX" ]   && SCALE_ARGS+=(--scale-end-idx "$SCALE_END_IDX")
+[ "$MERGE_ONLY" = "1" ]   && SCALE_ARGS+=(--merge-only)
+
+time $PYTHON -u sweep2_energy_transfer.py        --filename output/${SIM}.nc --n-workers 8 --write-mode $WRITE_MODE $FIXED_REF_FLAG "${SCALE_ARGS[@]}" 2>&1 | tee logs/${JOB_NAME}.out
+
+# sweep3/4/5 read the fully-merged _energy_transfer_sweep.nc, which only exists after a full (non-batched)
+# run or a MERGE_ONLY=1 fan-in job -- a partial-range batch job writes per-scale checkpoints only, so
+# running them there would fail on a missing/stale merged file.
+RUN_PLOTS=0
+if [ "$MERGE_ONLY" = "1" ]; then
+    RUN_PLOTS=1
+elif [ -z "$SCALE_START_IDX" ] && [ -z "$SCALE_END_IDX" ]; then
+    RUN_PLOTS=1
+fi
+
+if [ "$RUN_PLOTS" = "1" ]; then
+    time $PYTHON -u sweep3_plot_transfer_spectrum.py --filename output/${SIM}.nc               $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
+    time $PYTHON -u sweep4_plot_depth_scale.py       --filename output/${SIM}.nc               $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
+    # sweep5's own --min-time-days/--max-time-days (default 10.0/latest) are left unpassed here, same
+    # reasoning as plots.pbs leaving plot5/plot7/plot8's own time-window defaults unpassed -- every run gets
+    # plotted over that same fixed window rather than one that silently shifts with each run's own length.
+    time $PYTHON -u sweep5_transfer_summary.py       --filename output/${SIM}.nc               $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
+else
+    echo "Partial-range batch job -- skipping sweep3/4/5 (they need the merged output from the MERGE_ONLY job)" | tee -a logs/${JOB_NAME}.out
+fi
 
 qstat -f $PBS_JOBID >> logs/${JOB_NAME}.out

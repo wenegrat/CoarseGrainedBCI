@@ -138,7 +138,7 @@ on how much of the pipeline you need:
 | `bash submit_all_pbs.sh` | simulation → budgeting_filter → budgeting → plots (+ sweep_filter → sweep_transfer if `SWEEP=1`) | starting from scratch |
 | `bash submit_simulation.sh` | simulation only | you only want the `.nc` output, no post-processing yet |
 | `bash postprocessing/submit_budgeting.sh` | budgeting_filter → budgeting → plots | simulation already completed, (re)run analysis only (e.g. after changing filter scales, or after the simulation succeeded but post-processing failed) |
-| `bash postprocessing/submit_sweep.sh` | sweep_filter → sweep_transfer | just the many-filter-scale transfer-spectrum sweep, independent of the fixed-2-scale budgeting above |
+| `bash postprocessing/submit_sweep.sh` | sweep_sort + sweep_filter → sweep_transfer | just the many-filter-scale transfer-spectrum sweep, independent of the fixed-2-scale budgeting above. Optionally fans each stage out across `N_SCALE_JOBS` concurrent jobs -- see "Parallelizing the sweep" below |
 
 ```bash
 # Full pipeline, WENO advection on a GPU
@@ -153,6 +153,9 @@ cd postprocessing && bash submit_budgeting.sh NX=384 NY=384 NZ=128
 
 # Many-filter-scale sweep only
 cd postprocessing && bash submit_sweep.sh NX=384 NY=384 NZ=128
+
+# Same sweep, fanned out across 6 concurrent jobs per stage (see "Parallelizing the sweep" below)
+cd postprocessing && bash submit_sweep.sh NX=1024 NY=1024 NZ=64 N_SCALES=30 N_SCALE_JOBS=6
 ```
 
 Shared flags across the scripts that take them: `NX`/`NY`/`NZ` (grid resolution), `STOP_TIME` (simulation
@@ -164,10 +167,71 @@ to `budgeting_filter.pbs`/`01_filter_fields.py` and `plots.pbs` -- **left unset 
 "use whatever the simulation actually used" rather than a separate hardcoded default; see the "Filter
 scales: single source of truth" note below), `FIXED_REF=0|1|both` (fixed-in-time vs. recomputed reference
 density profile; `both` submits both budgeting variants, sharing one filter-step run), `SWEEP=1`
-(`submit_all_pbs.sh` only, adds the sweep branch after budgeting), `WRITE_MODE` (`budgeting.pbs`/
+(`submit_all_pbs.sh` only, adds the sweep branch after budgeting), `N_SCALES`/`N_SCALE_JOBS`
+(`submit_sweep.sh`, and `submit_all_pbs.sh` when `SWEEP=1` -- see "Parallelizing the sweep" below),
+`WRITE_MODE` (`budgeting.pbs`/
 `budgeting_filter.pbs`/`sweep_filter.pbs`/`sweep_transfer.pbs` only, passed through to the underlying
 scripts' own `--write-mode` -- see "Post-processing write mode" above; left unset means "use that PBS
 script's own default," which is `synchronous` for all four).
+
+**Parallelizing the sweep (`N_SCALE_JOBS`/`N_SCALES`, `submit_sweep.sh`).** Both sweep stages loop
+sequentially over `--n-scales` (default 30) filter scales inside one job, and both `sweep_filter.pbs`/
+`sweep_transfer.pbs` already request the walltime cap (`23:59:00`) -- at 1024x1024x64 the sequential loop
+risks simply not finishing, since per-scale cost scales worse than linearly with resolution (see the
+Gaussian-filter scaling note below: ~1 min/scale at 256x256x128 vs >20 min/scale at 512x512x128). Both
+scripts already checkpointed each scale to its own file before a final merge, which is exactly the seam
+this splits on:
+
+- `N_SCALE_JOBS` (default `1`) fans **each** stage out into that many batch jobs covering disjoint scale
+  index ranges (`[0, N_SCALES)` split as evenly as possible, remainder on the first jobs), followed by one
+  merge job depending on all of them via PBS's colon-joined multi-parent `-W depend=afterok:$J1:$J2:...`
+  (standard PBS Pro syntax, but this repo had no prior instance of it -- every other dependency here is
+  single-parent). `N_SCALE_JOBS=1` is byte-for-byte the old behavior.
+- `N_SCALES` (default `30`, matching `sweep1_filter_fields.py`'s own `--n-scales`) has to be passed at
+  submit time because the shell needs the total count up front to compute index ranges; every batch job
+  gets it explicitly so they all derive the identical `geomspace` array before slicing it.
+- Underneath, `sweep1_filter_fields.py`/`sweep2_energy_transfer.py` gained `--scale-start-idx`/
+  `--scale-end-idx` (half-open, default = everything) and `--merge-only` (mutually exclusive with them).
+  A partial-range run computes and checkpoints its slice, then exits **without** merging; `--merge-only`
+  computes nothing and merges what's on disk. `sweep_transfer.pbs` correspondingly only runs
+  `sweep3`/`sweep4`/`sweep5` for a full/non-batched run or the merge job -- a partial batch has no merged
+  file for them to read.
+- Merge and sort jobs override the `.pbs` headers' `23:59:00` down to `-l walltime=08:00:00` on the `qsub`
+  command line (same "static `#PBS` directives, override at submit time" trick `GPU_FLAGS` already uses):
+  they only read already-computed files, they don't loop over scales.
+
+**A real collision this required fixing**: `sweep1`'s per-scale tmp files were named from the loop's own
+`enumerate()` counter (`scale000.nc`, ...), so concurrent batch jobs would each start at 0 and silently
+clobber each other. They're now named by **global** scale index (`scale_start_idx + local_idx`) -- identical
+filenames to before in the full-range case. `sweep2` was already safe here, since its checkpoints are keyed
+by the ℓ value itself. `--merge-only` validates every expected file's `filter_scale` value *and* time axis,
+hard-erroring with the specific missing/stale indices rather than merging an incomplete set (the same class
+of stale-checkpoint bug documented below for `sweep2`, which had no equivalent guard in `sweep1`).
+
+**Resumability tradeoff**: with `N_SCALE_JOBS>1`, `submit_sweep.sh` clears the tmp dir/checkpoints before
+fanning out, so a fresh parallel submission always starts clean rather than trying to detect staleness
+across concurrently-running siblings. The sequential path (`N_SCALE_JOBS=1`) keeps its existing
+resume-from-existing-checkpoints behavior untouched. Operationally, don't just maximize `N_SCALE_JOBS`:
+each job requests `mem=732GB:ncpus=8` on a shared queue, so past some point queue wait eats the gain --
+start around 4-6 and tune.
+
+**Sort redundancy, fixed (`sweep_sort.pbs`).** `sweep2_energy_transfer.py` calls
+`calculate_energy_transfer()` once per scale, and that function only skips its own internal
+`sorted_timeseries()` call when **both** `rho_sorted` and `dz_sorted` are passed in. On the default
+(non-`--fixed-reference`) path sweep2 passed `None`/`None`, so the expensive full-field density sort was
+redone from scratch **on every single scale** -- 30x the necessary work, and it would have been redone
+independently in every parallel batch job too. `03_energy_transfer.py` already avoided this by loading
+`02_sort_density.py`'s output once; sweep2 now does the same, unconditionally (the file is keyed by the
+existing `ref_suffix`, so `--fixed-reference` still selects the right variant). Verified directly: output
+is bit-identical to the old redundant-sort path while logging "Using pre-sorted reference density (skipping
+sort)" for every scale. This makes `<stem>_sorted_density{_fixed_ref}.nc` a hard prerequisite for *every*
+sweep2 run (not just parallel ones) -- missing it is a `FileNotFoundError` naming the exact command to run,
+deliberately not a silent fallback to the slow path. `submit_sweep.sh` submits the new `sweep_sort.pbs`
+automatically, skipping it when the file already exists (e.g. the main budgeting pipeline already made it),
+and runs it concurrently with the filter stage since the sort touches only the raw, unfiltered density.
+`submit_all_pbs.sh`'s `SWEEP=1` branch no longer duplicates the sweep submission logic inline -- it calls
+`submit_sweep.sh` with a new `EXTRA_DEPEND` var so the sweep still chains behind budgeting. That branch
+would otherwise have hard-failed the moment the sort prerequisite landed, since it had no sort step.
 
 **Filter scales: single source of truth.** `baroclinic_adjustment.jl`'s `--filter_scales_m` (online
 diagnostics) and the offline pipeline's `--filter-scales`/`FILTER_SCALES_M` used to be two fully independent
