@@ -214,6 +214,17 @@ per-scale cost." Fit on the 16-scale batch plus the largest single scale; predic
 batches to +10/+11/+14%. Re-splitting the same 256² run under the corrected weights gives batches of
 0.31-0.45 h instead of 0.15-1.13 h.
 
+**Validated at 512², which also confirms the resolution scaling.** A second 30-scale/8-job run
+(512x512x65, 21 timesteps, using the corrected weights) came back at 36.6-72.6 min per batch -- a 2.0x
+spread, versus 7.8x for the same K=8 configuration under the old ℓ-weighting. Refitting each resolution
+independently and comparing gives the thing a single-resolution fit can't: **both terms scale with data
+volume** (`Nx·Ny·Nz·n_times`) as assumed -- the σ term to within 4%, the fixed term to within 11% -- so the
+ℓ-dependent *cost* really does go as volume/dx, and extrapolating to 1024² is sound. Predicted-vs-observed
+at 512²: makespan 1.10 h vs 1.21 h, largest single scale 0.67 h vs 0.71 h. Note this **specifically refutes**
+the worry recorded below (from the older 256²→512² anecdote) that per-scale cost blows up ~2.5x faster than
+`O(L·σ)` reasoning predicts; that anecdote compared runs differing in `n_times` as well as grid, which this
+model shows is a first-order effect in its own right.
+
 **The ceiling is the largest single scale**, no matter how many jobs -- a scale is the smallest indivisible
 unit of work. At 1024², the model puts the ℓ=400km scale at **~12 h on its own** against a ~95 h sequential
 total, so the useful ceiling is `N_SCALE_JOBS≈12` (~7.8x); past that you get no further speedup, just more
@@ -272,13 +283,23 @@ cd postprocessing        # times scale index 29 of 30 -- the largest, ~12% of th
 qsub -N timing_test -o logs/timing_test.log -e logs/timing_test.log \
      -v NX=1024,NY=1024,NZ=64,N_SCALES=30,SCALE_START_IDX=29,SCALE_END_IDX=30 sweep_filter.pbs
 ```
-The model predicts T ≈ 12 h there, with the full sequential sweep ≈ 8T and the heaviest batch under a
-weighted K=12 split ≈ T. **Treat 12 h as optimistic**: it extrapolates a 16x-grid jump from a 256² fit,
-and the one previously-recorded resolution jump (256²→512², see the filter-scaling note below) came in
-~2.5x worse than the same `O(L·σ)` reasoning predicted. If that pessimism carries over, the largest scale
-alone exceeds the 23:59:00 cap and no `N_SCALE_JOBS` value rescues it -- the fix would have to be the
-FFT-based Gaussian filter noted below (`O(L log L)`, independent of σ), which is what actually removes ℓ
-from the cost model rather than redistributing it. Run the timing job before the full sweep.
+The heaviest batch under a weighted K=12 split is ≈ T, and the full sequential sweep ≈ 8T.
+
+**`n_times` is the knob that decides whether 1024² is feasible at all**, more than K is. Cost and memory
+are both linear in it, and at 1024x1024x64 the projection (from the 512²-validated fit) is:
+
+| `n_times` | sequential | largest scale = K≥12 makespan | single-scale memory |
+|-----------|-----------|-------------------------------|---------------------|
+| 21        | 39 h      | **4.8 h**                     | ~246 GiB            |
+| 41        | 77 h      | **9.4 h**                     | ~480 GiB            |
+| 81        | 152 h     | 18.6 h                        | ~948 GiB -- **OOMs**|
+
+At 81 timesteps the *single-scale* baseline exceeds the 732GB (682 GiB) request, so no `N_SCALE_JOBS`
+value helps -- batch size is a walltime knob, not a memory knob (see above). Keep the sweep's time axis at
+or below ~41 via `N_TIME_SKIP` (which halves it per step, on top of the `ConsecutiveIterations` pair dedup);
+41 leaves ~2.5x walltime margin and ~200 GiB of memory headroom. The remaining lever if that isn't enough
+is the FFT-based Gaussian filter noted below (`O(L log L)`, independent of σ), which removes ℓ from the
+cost model rather than redistributing it.
 
 **Sort redundancy, fixed (`sweep_sort.pbs`).** `sweep2_energy_transfer.py` calls
 `calculate_energy_transfer()` once per scale, and that function only skips its own internal
