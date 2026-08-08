@@ -10,12 +10,19 @@ def sc(N,n=30):
     dx=1000/N; return np.geomspace(2*dx,400,n),dx
 o256=[((0,16),68.07),((16,21),27.13),((21,24),20.63),((24,26),16.28),((26,27),8.75),((27,28),9.72),((28,29),10.65),((29,30),14.02)]
 o512=[((0,9),72.55),((9,16),60.45),((16,21),58.42),((21,24),52.48),((24,26),46.60),((26,28),60.48),((28,29),36.57),((29,30),42.53)]
-V={256:256**2*64*41,512:512**2*65*21}
+def _hm(t):
+    h,m,sec=map(int,t.split(":")); return h*60+m+sec/60
+o1024=[((0,9),_hm("05:43:27")),((9,16),_hm("04:57:24")),((16,20),_hm("04:04:57")),((20,23),_hm("04:36:57")),
+       ((23,25),_hm("04:33:21")),((25,26),_hm("02:48:44")),((26,27),_hm("03:14:58")),((27,28),_hm("03:45:04")),
+       ((28,29),_hm("04:21:26")),((29,30),_hm("05:05:09"))]
+V={256:256**2*64*41,512:512**2*65*21,1024:1024**2*64*19}
 def design(obs,N):
     s,dx=sc(N); return np.array([[b-a,(s[a:b]/dx).sum()] for (a,b),_ in obs]),np.array([t for _,t in obs])
 X6,y6=design(o256,256); (A6,B6),*_=np.linalg.lstsq(X6,y6,rcond=None)
 X5,y5=design(o512,512); (A5,B5),*_=np.linalg.lstsq(X5,y5,rcond=None)
+X4,y4=design(o1024,1024); (A4,B4),*_=np.linalg.lstsq(X4,y4,rcond=None)
 r=V[512]/V[256]; pred=X5@np.array([A6*r,B6*r])
+r4=V[1024]/V[512]; pred4=X4@np.array([A5*r4,B5*r4])
 
 def esc(s): return s.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
 def txt(x,y,s,cls="",anc="middle",dy="0"):
@@ -59,7 +66,7 @@ def relcost(W=720,H=330,pad=(52,120,44,16)):
     # refuted pure-l line: cost ratio == l ratio
     o.append(f'<line x1="{X(1):.1f}" y1="{Y(1):.1f}" x2="{X(260):.1f}" y2="{Y(260):.1f}" class="refuted"/>')
     o.append(txt(X(150),Y(230),"assumed  cost ∝ ℓ","lbl-refuted","end"))
-    K=0.0230
+    K=0.0215
     cols={256:"a",512:"b",1024:"c"}
     for N,cl in cols.items():
         s,dx=sc(N); w=1+K*s/dx; rel=w/w[0]; xr=s/s[0]
@@ -75,16 +82,16 @@ def relcost(W=720,H=330,pad=(52,120,44,16)):
     return "\n".join(o)
 
 # ---------- Chart 3: out-of-sample predicted vs observed ----------
-def oos(W=720,H=290,pad=(46,16,52,16)):
+def oos(obs,yy,pp,W=720,H=290,pad=(46,16,52,16)):
     l,rr,b,t=pad; pw=W-l-rr; ph=H-t-b
-    vmax=max(max(y5),max(pred))*1.15
+    vmax=max(max(yy),max(pp))*1.15
     o=[f'<svg viewBox="0 0 {W} {H}" class="chart" role="img">']
     for g in range(5):
         yy=t+ph*g/4
         o.append(f'<line x1="{l}" y1="{yy:.1f}" x2="{W-rr}" y2="{yy:.1f}" class="grid"/>')
         o.append(txt(l-8,yy,f"{vmax*(1-g/4):.0f}","tick","end",dy="0.32em"))
-    n=len(o512); step=pw/n; bw=step*0.30
-    for i,(((a,bb),ov),pv) in enumerate(zip(o512,pred)):
+    n=len(obs); step=pw/n; bw=step*0.30
+    for i,(((a,bb),ov),pv) in enumerate(zip(obs,pp)):
         cx=l+step*(i+0.5)
         for j,(v,cls) in enumerate(((pv,"bar-pred"),(ov,"bar"))):
             x=cx-bw*1.05+j*bw*1.1; h=ph*v/vmax
@@ -102,10 +109,10 @@ def oos(W=720,H=290,pad=(46,16,52,16)):
 # ---------- Chart 4: 1024^2 feasibility vs n_times ----------
 def feas(W=720,H=340,pad=(56,58,46,18)):
     l,rr,b,t=pad; pw=W-l-rr; ph=H-t-b
-    nt=np.arange(15,95); V512=512**2*65*21
-    f=(1024**2*64*nt)/V512
-    s,dx=sc(1024); mk=(A5*f[:,None]+B5*f[:,None]*(s/dx)).max(axis=1)/60
-    mem=62.4*f
+    nt=np.arange(15,95)
+    f=nt/19.0                                   # measured at 1024^2 x64, 19 timesteps
+    s,dx=sc(1024); mk=(A4*f[:,None]+B4*f[:,None]*(s/dx)).max(axis=1)/60
+    mem=258.0*f
     X=lambda v:l+pw*(v-15)/(95-15)
     Ym=lambda v:t+ph/2-8-(ph/2-8)*v/26          # top panel: hours, 0..26
     Yg=lambda v:t+ph-(ph/2-8)*v/1100            # bottom: GiB, 0..1100
@@ -129,7 +136,7 @@ def feas(W=720,H=340,pad=(56,58,46,18)):
     o.append(f'<rect x="{X(over):.1f}" y="{t}" width="{W-rr-X(over):.1f}" height="{ph}" class="danger"/>')
     o.append(f'<line x1="{X(over):.1f}" y1="{t}" x2="{X(over):.1f}" y2="{t+ph}" class="limit"/>')
     o.append(txt(X(over)+6,t+12,f"OOM beyond {over} timesteps","lbl-limit","start"))
-    for v,lab in ((21,"21"),(41,"41")):
+    for v,lab in ((19,"19"),(41,"41")):
         i=list(nt).index(v)
         o.append(f'<circle cx="{X(v):.1f}" cy="{Ym(mk[i]):.1f}" r="4.5" class="dot dot-b"/>')
         o.append(txt(X(v),Ym(mk[i])-11,f"{mk[i]:.1f} h","val"))
@@ -140,7 +147,8 @@ def feas(W=720,H=340,pad=(56,58,46,18)):
     o.append('</svg>')
     return "\n".join(o)
 
-SVGS = dict(c1a=bars(o256), c1b=bars(o512), c2=relcost(), c3=oos(), c4=feas())
+SVGS = dict(c1a=bars(o256), c1b=bars(o512), c1c=bars(o1024),
+            c2=relcost(), c3=oos(o512,y5,pred), c3b=oos(o1024,y4,pred4), c4=feas())
 
 TEMPLATE = r"""<title>Sweep cost model — CoarseGrainedBCI</title>
 <style>
@@ -197,6 +205,8 @@ figcaption{font-size:.83rem;color:var(--dim);max-width:70ch}
 figcaption b{color:var(--ink);font-weight:600}
 .panelbox{background:var(--panel);border:1px solid var(--rule);border-radius:3px;padding:1rem .9rem .7rem}
 .pair{display:grid;grid-template-columns:1fr 1fr;gap:.9rem}
+.pair.three{grid-template-columns:repeat(3,1fr)}
+@media(max-width:900px){.pair.three{grid-template-columns:1fr}}
 @media(max-width:640px){.pair{grid-template-columns:1fr}}
 .ptitle{font-family:var(--mono);font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;
   color:var(--dim);margin:0 0 .1rem}
@@ -265,9 +275,10 @@ footer code{background:none;padding:0;color:var(--dim)}
   <h1>The filter-scale sweep costs what we measured, not what the algorithm suggested</h1>
   <p class="standfirst">Splitting a 30-scale sweep across PBS jobs needs a cost model to balance the
   batches. The obvious one — Gaussian filtering is an <span class="m">O(L·σ)</span> correlation with
-  <span class="m">σ ∝ ℓ</span>, so weight by ℓ — was wrong by an order of magnitude. Two runs at
-  256² and 512² replaced it with an affine model that predicts out of sample to 7%, and moved the
-  binding constraint at 1024² from walltime to memory.</p>
+  <span class="m">σ ∝ ℓ</span>, so weight by ℓ — was wrong by an order of magnitude. Three runs, at
+  256², 512² and 1024², replaced it with an affine model whose <i>shape</i> holds everywhere and whose
+  <i>magnitude</i> does not extrapolate. The corrected split turned 43.2 h of sequential work at 1024²
+  into 5.7 h.</p>
 </header>
 
 <div class="cards">
@@ -275,10 +286,10 @@ footer code{background:none;padding:0;color:var(--dim)}
     <span class="s">largest scale vs. smallest, weighting by ℓ</span></div>
   <div class="card hi"><span class="k">measured at 256²</span><span class="v">3.2×</span>
     <span class="s">what the affine fit gives instead</span></div>
-  <div class="card hi"><span class="k">out-of-sample error</span><span class="v">7.4%</span>
-    <span class="s">256² fit predicting eight 512² batches</span></div>
-  <div class="card warn"><span class="k">1024² hard limit</span><span class="v">57</span>
-    <span class="s">timesteps before a single scale exceeds the memory request</span></div>
+  <div class="card hi"><span class="k">out-of-sample error</span><span class="v">7 → 17%</span>
+    <span class="s">predicting the next resolution up, 256→512 then 512→1024</span></div>
+  <div class="card hi"><span class="k">1024² measured</span><span class="v">7.6×</span>
+    <span class="s">43.2 h of sequential work done in 5.7 h at K=10</span></div>
 </div>
 
 <section>
@@ -289,17 +300,23 @@ footer code{background:none;padding:0;color:var(--dim)}
   <p class="lede">The split is cost-weighted, so a correctly-weighted run produces batches of equal wall
   time by construction. That makes any real run a direct test of the weighting. The first one failed it.</p>
 
-  <div class="pair">
+  <div class="pair three">
     <div class="panelbox">
       <p class="ptitle">256² · weighted by ℓ</p>
-      <p class="pmeta">30 scales, K=8, 41 timesteps · minutes</p>
+      <p class="pmeta">K=8, 41 timesteps · minutes</p>
       @@c1a@@
       <p class="spread bad">spread <b>7.8×</b> — should be 1.0×</p>
     </div>
     <div class="panelbox">
       <p class="ptitle">512² · affine weights</p>
-      <p class="pmeta">30 scales, K=8, 21 timesteps · minutes</p>
+      <p class="pmeta">K=8, 21 timesteps · minutes</p>
       @@c1b@@
+      <p class="spread good">spread <b>2.0×</b></p>
+    </div>
+    <div class="panelbox">
+      <p class="ptitle">1024² · affine weights</p>
+      <p class="pmeta">K=10, 19 timesteps · minutes</p>
+      @@c1c@@
       <p class="spread good">spread <b>2.0×</b></p>
     </div>
   </div>
@@ -324,10 +341,10 @@ footer code{background:none;padding:0;color:var(--dim)}
 
   <p>Both terms scale with data volume <span class="m">Nx·Ny·Nz·n_times</span>, but only the second carries
   a <span class="m">1/Δx</span>, so the two diverge with resolution. Storing the weight resolution-free as
-  <span class="m">w ∝ 1 + 0.0230·(ℓ/Δx)</span> — a fixed cost plus a term proportional to kernel width in
-  grid cells — keeps it valid at any grid. A kernel about 43 cells wide doubles the per-scale cost. The
-  two runs independently imply 0.0221 and 0.0239 across a 2.08× change in data volume, which is the check
-  that the resolution-free form holds.</p>
+  <span class="m">w ∝ 1 + 0.0215·(ℓ/Δx)</span> — a fixed cost plus a term proportional to kernel width in
+  grid cells — keeps it valid at any grid. A kernel about 47 cells wide doubles the per-scale cost. The
+  three runs independently imply 0.0221, 0.0239 and 0.0203, a 16% spread with no trend across a 16× grid
+  range; 0.0215 is the largest value that still lets the split reach its floor at all three.</p>
 
   <figure>
     <div class="panelbox">@@c2@@</div>
@@ -350,27 +367,45 @@ footer code{background:none;padding:0;color:var(--dim)}
     <p class="eyebrow">the validation</p>
     <h2>Fit at 256², predict 512², check</h2>
   </div>
-  <p>A model fitted and evaluated on the same run proves nothing. The 512² run is a genuine held-out test:
-  take the 256² coefficients, scale both by the data-volume ratio (2.081), and predict all eight batches
-  before looking at them.</p>
+  <p>A model fitted and evaluated on the same run proves nothing. Each larger run is a genuine held-out
+  test: take the previous resolution's coefficients, scale both by the data-volume ratio, and predict every
+  batch before looking at it. Doing that twice is what separates a model that works from one that only
+  looked like it did.</p>
 
   <figure>
-    <div class="panelbox">@@c3@@</div>
-    <div class="legend">
-      <span><i class="sw" style="background:var(--c-a);opacity:.55"></i>predicted from the 256² fit alone</span>
-      <span><i class="sw" style="background:var(--measured)"></i>observed at 512²</span>
-      <span>minutes</span>
+    <div class="pair">
+      <div class="panelbox">
+        <p class="ptitle">256² fit → 512²</p>
+        <p class="pmeta">volume ratio 2.08 · minutes</p>
+        @@c3@@
+        <p class="spread good">mean error <b>7.4%</b></p>
+      </div>
+      <div class="panelbox">
+        <p class="ptitle">512² fit → 1024²</p>
+        <p class="pmeta">volume ratio 3.56 · minutes</p>
+        @@c3b@@
+        <p class="spread bad">mean error <b>17%</b></p>
+      </div>
     </div>
-    <figcaption>Mean absolute error <b>7.4%</b>, and the makespan — the number that actually decides
-    whether a job fits — predicted at 1.26 h against 1.21 h observed. Refitting each resolution
-    independently confirms the mechanism rather than just the outcome: <b>both coefficients track data
-    volume</b>, the σ term to within 4% and the fixed term to within 11%.</figcaption>
+    <div class="legend">
+      <span><i class="sw" style="background:var(--c-a);opacity:.55"></i>predicted from the previous resolution</span>
+      <span><i class="sw" style="background:var(--measured)"></i>observed</span>
+    </div>
+    <figcaption>The first test looked like a clean confirmation and the second wasn't: every 1024² batch
+    ran <b>longer</b> than predicted, and the sweep totalled 43.2 h against 35.7 h projected.</figcaption>
   </figure>
 
-  <p class="verdict">This specifically retires an earlier worry in <code>CLAUDE.md</code> that per-scale
-  cost blows up ~2.5× faster than <span class="m">O(L·σ)</span> reasoning predicts. <b>It doesn't.</b>
-  That anecdote compared two runs differing in <span class="m">n_times</span> as well as grid — and
-  <span class="m">n_times</span> turns out to be a first-order term in its own right.</p>
+  <p class="verdict">So the honest split is: the affine <b>shape</b> holds at every resolution (each run
+  fits to a few percent), and the weight ratio <span class="m">B/A</span> is stable across a 16× grid range
+  — 0.0221, 0.0239, 0.0203, no trend. That ratio is all the batch <b>balancing</b> depends on, which is why
+  the split works. What does <b>not</b> hold is cost ∝ data volume. 256²→512² landed slightly under it
+  (−11% fixed, −4% σ) and read as confirmation; 512²→1024² landed well over (<b>+34% and +14%</b>).</p>
+
+  <p>An earlier note in <code>CLAUDE.md</code> claimed per-scale cost blows up ~2.5× faster than
+  <span class="m">O(L·σ)</span> reasoning predicts. On two points I called that refuted. With three, it is
+  better described as wrong in magnitude but right in direction — there is a real super-volume trend of
+  roughly <b>+20% per 4× grid jump</b>. Use the model to balance batches against each other; add that
+  margin when using it to predict absolute runtime at a resolution nobody has run yet.</p>
 </section>
 
 <section>
@@ -378,29 +413,34 @@ footer code{background:none;padding:0;color:var(--dim)}
     <p class="eyebrow">the payoff</p>
     <h2>At 1024², memory binds before walltime does</h2>
   </div>
-  <p>Cost and memory are both linear in <span class="m">n_times</span>, and they hit their respective
-  ceilings at different points. Batch size moves walltime only — peak memory is set by one scale's working
-  set, so no <code>N_SCALE_JOBS</code> value rescues an over-budget run.</p>
+  <p>The run happened: 1024×1024×64, 30 scales, 19 timesteps, <code>N_SCALE_JOBS=10</code>. Sequential
+  work of 43.2 h finished in <b>5.7 h</b>, with 258 GiB per scale and a heaviest batch of 441 GiB —
+  inside both the 23:59 cap and the 682 GiB request, with room. Cost and memory are both linear in
+  <span class="m">n_times</span>, and they reach their ceilings at different points. Batch size moves
+  walltime only — peak memory is set by one scale's working set, so no <code>N_SCALE_JOBS</code> value
+  rescues an over-budget run.</p>
 
   <figure>
     <div class="panelbox">@@c4@@</div>
-    <figcaption>Top trace: makespan at <span class="m">N_SCALE_JOBS ≥ 12</span>, which equals the cost of
-    the single largest scale — the irreducible floor, since a scale can't be split. Bottom trace:
-    single-scale memory. <b>The memory ceiling arrives first</b>, at 57 timesteps, while walltime still
-    has room to 100+.</figcaption>
+    <figcaption>Both traces are the measured 1024² run scaled linearly in <span class="m">n_times</span>,
+    with the measured point marked at 19. Top: makespan at <span class="m">N_SCALE_JOBS = 10</span>, equal
+    to the cost of the single largest scale — the irreducible floor, since a scale can't be split. Bottom:
+    single-scale memory. <b>The memory ceiling arrives first</b>, around 50 timesteps, while walltime still
+    has room past 70.</figcaption>
   </figure>
 
   <div class="tblwrap"><table>
-    <thead><tr><th>n_times</th><th>sequential</th><th>K ≥ 12 makespan</th><th>single-scale memory</th><th>verdict</th></tr></thead>
+    <thead><tr><th>n_times</th><th>sequential</th><th>K = 10 makespan</th><th>single-scale memory</th><th>verdict</th></tr></thead>
     <tbody>
-      <tr class="pick"><td class="num">21</td><td class="num">39 h</td><td class="num">4.8 h</td><td class="num">246 GiB</td><td>comfortable</td></tr>
-      <tr class="pick"><td class="num">41</td><td class="num">77 h</td><td class="num">9.4 h</td><td class="num">480 GiB</td><td>2.5× walltime margin</td></tr>
-      <tr class="flag"><td class="num">81</td><td class="num">152 h</td><td class="num">18.6 h</td><td class="num">948 GiB</td><td>exceeds the 682 GiB request</td></tr>
+      <tr class="pick"><td class="num">19</td><td class="num">43.2 h</td><td class="num">5.7 h</td><td class="num">258 GiB</td><td>measured</td></tr>
+      <tr class="pick"><td class="num">41</td><td class="num">93 h</td><td class="num">12.3 h</td><td class="num">557 GiB</td><td>projected, still fits</td></tr>
+      <tr class="flag"><td class="num">51</td><td class="num">116 h</td><td class="num">15.3 h</td><td class="num">693 GiB</td><td>exceeds the 682 GiB request</td></tr>
     </tbody>
   </table></div>
 
   <h3>What to run</h3>
-  <pre># 1024², keep the time axis at or below ~41
+  <pre># 1024², keep the time axis at or below ~40. Run the sweep as its own step:
+# SWEEP=1 splits at submit time, before the simulation .nc exists to weight against.
 cd postprocessing
 bash submit_sweep.sh NX=1024 NY=1024 NZ=64 N_SCALES=30 N_SCALE_JOBS=10 N_TIME_SKIP=2</pre>
   <p><code>N_SCALE_JOBS=10</code> is the threshold below which the split can't reach its own floor.
@@ -418,8 +458,9 @@ bash submit_sweep.sh NX=1024 NY=1024 NZ=64 N_SCALES=30 N_SCALE_JOBS=10 N_TIME_SK
 </section>
 
 <footer>
-  <span>Fits: least squares on per-batch wall time, two runs of 8 PBS batch jobs each
-    (256×256×64 / 41 timesteps, 512×512×65 / 21 timesteps), 30 log-spaced filter scales from 2Δx to 0.4·Lx.</span>
+  <span>Fits: least squares on per-batch wall time from three real PBS fan-outs — 256×256×64 / 41
+    timesteps / 8 jobs, 512×512×65 / 21 / 8, and 1024×1024×64 / 19 / 10 — over 30 log-spaced filter scales
+    from 2Δx to 0.4·Lx.</span>
   <span>Memory figures are the anonymous baseline; PBS <code>resources_used.mem</code> also counts
     reclaimable page cache from the per-scale checkpoints, which is why a 16-scale batch reports ~200 GiB
     while its real working set is that of one scale.</span>
