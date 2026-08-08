@@ -15,18 +15,39 @@
 
 # Many-filter-scale sweep, step 1 of 2 (see CLAUDE.md: sweep1's --scale-min/--scale-max/--n-scales
 # default to a data-driven range now, not a hardcoded KH-unit range).
+#
+# SCALE_START_IDX/SCALE_END_IDX/MERGE_ONLY drive sweep1's scale batching (submit_sweep.sh's N_SCALE_JOBS
+# fan-out): each batch job filters a disjoint global index range into its own per-scale tmp files, then one
+# MERGE_ONLY=1 job combines them. All three unset (the default) = today's single-job full-range behavior,
+# unchanged. N_SCALES is always passed explicitly so every batch derives the identical geomspace array
+# before slicing it -- they must agree, or sweep1's --merge-only validation rejects the mismatched files.
 set -eo pipefail
 
 NX=${NX:-192}
 NY=${NY:-192}
 NZ=${NZ:-32}
 N_TIME_SKIP=${N_TIME_SKIP:-1}
+N_SCALES=${N_SCALES:-30}
+SCALE_START_IDX=${SCALE_START_IDX:-}
+SCALE_END_IDX=${SCALE_END_IDX:-}
+MERGE_ONLY=${MERGE_ONLY:-0}
 SIM=bci_Nx${NX}_Ny${NY}_Nz${NZ}
 JOB_NAME="${SIM}_sweep_filter"
+if [ "$MERGE_ONLY" = "1" ]; then
+    JOB_NAME="${JOB_NAME}_merge"
+elif [ -n "$SCALE_START_IDX" ] || [ -n "$SCALE_END_IDX" ]; then
+    JOB_NAME="${JOB_NAME}_batch_${SCALE_START_IDX:-0}_${SCALE_END_IDX:-$N_SCALES}"
+fi
 qalter -N "$JOB_NAME" "$PBS_JOBID"
 
 source ../hpc_env.sh
 
-time $PYTHON -u sweep1_filter_fields.py --filename output/${SIM}.nc --n-time-skip $N_TIME_SKIP 2>&1 | tee logs/${JOB_NAME}.out
+SCALE_ARGS=()
+[ -n "$SCALE_START_IDX" ] && SCALE_ARGS+=(--scale-start-idx "$SCALE_START_IDX")
+[ -n "$SCALE_END_IDX" ]   && SCALE_ARGS+=(--scale-end-idx "$SCALE_END_IDX")
+[ "$MERGE_ONLY" = "1" ]   && SCALE_ARGS+=(--merge-only)
+
+time $PYTHON -u sweep1_filter_fields.py --filename output/${SIM}.nc --n-time-skip $N_TIME_SKIP \
+    --n-scales $N_SCALES "${SCALE_ARGS[@]}" 2>&1 | tee logs/${JOB_NAME}.out
 
 qstat -f $PBS_JOBID >> logs/${JOB_NAME}.out

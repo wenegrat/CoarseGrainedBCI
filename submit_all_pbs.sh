@@ -10,6 +10,20 @@
 #   STOP_TIME   simulation length, in days
 #   FIXED_REF   use fixed-in-time reference profile: 0 or 1
 #   SWEEP       also run the many-filter-scale sweep (sweep1/2/3) after budgeting: 0 or 1
+#               NOTE: the sweep's cost-weighted scale split is computed at *submit* time and needs the
+#               simulation's own .nc to read Δx and the scale range -- which doesn't exist yet on a
+#               from-scratch run, so it falls back to an even-by-count split (warned on stderr, easy to
+#               miss). At 1024² that fallback puts the heaviest batch at ~24 h, past the walltime cap.
+#               Prefer two steps at high resolution: this script without SWEEP, then
+#               `cd postprocessing && bash submit_sweep.sh ...` once the simulation has finished.
+#   N_SCALES    number of filter scales in the sweep (SWEEP=1 only; default 30)
+#   N_SCALE_JOBS  how many concurrent jobs to split each sweep stage's scale loop across (SWEEP=1 only;
+#                 default 1 = one job per stage). >1 fans each stage out into that many batch jobs plus a
+#                 merge job -- use it when the sequential scale loop would exceed a job's walltime cap at
+#                 high resolution. Passed straight through to submit_sweep.sh; see CLAUDE.md.
+#   N_TIME_SKIP   keep every Nth sweep timestep (SWEEP=1 only; default 1 = all of them). Cost and peak
+#                 memory are both linear in the sweep's timestep count, and at 1024^2 a single filter
+#                 scale exceeds the memory request past ~57 timesteps -- see CLAUDE.md.
 #   EXTRA_ARGS  extra baroclinic_adjustment.jl CLI args, passed through verbatim (quote multi-word values).
 #               The simulation's own online filter scales are set here via --filter_scales_m, in METERS
 #               (e.g. EXTRA_ARGS='--filter_scales_m 30000 60000'; default 12000 50000).
@@ -26,6 +40,7 @@
 #   bash postprocessing/submit_budgeting.sh [NX=192] [NY=192] [NZ=32] [FIXED_REF=0|1|both]
 
 NX=192; NY=192; NZ=32; STOP_TIME=16; FIXED_REF=0; SWEEP=0; EXTRA_ARGS=""; GPU=0; FILTER_SCALES_M=""
+N_SCALES=30; N_SCALE_JOBS=1; N_TIME_SKIP=1
 for arg in "$@"; do case $arg in
   NX=*)         NX="${arg#*=}";;
   NY=*)         NY="${arg#*=}";;
@@ -36,6 +51,9 @@ for arg in "$@"; do case $arg in
   EXTRA_ARGS=*) EXTRA_ARGS="${arg#*=}";;
   GPU=*)        GPU="${arg#*=}";;
   FILTER_SCALES_M=*) FILTER_SCALES_M="${arg#*=}";;
+  N_SCALES=*)     N_SCALES="${arg#*=}";;
+  N_SCALE_JOBS=*) N_SCALE_JOBS="${arg#*=}";;
+  N_TIME_SKIP=*)  N_TIME_SKIP="${arg#*=}";;
 esac; done
 [ "$FIXED_REF" = "1" ] && REF_SUFFIX="_fixed_ref" || REF_SUFFIX=""
 SIM_NAME="bci_Nx${NX}_Ny${NY}_Nz${NZ}"
@@ -79,25 +97,15 @@ PLOTS_JOB=$(qsub -N "$PLOTS_NAME" \
                  plots.pbs)
 echo "Submitted plots+animations (depends on $PP_JOB): $PLOTS_JOB"
 
-# Optional many-filter-scale sweep — parallel branch after budgeting, since sweep2 redoes its own
-# Winters sort per scale rather than reusing budgeting's (see CLAUDE.md)
+# Optional many-filter-scale sweep — parallel branch after budgeting. Delegated to submit_sweep.sh rather
+# than duplicating its submission logic here: sweep2 now requires a sorted-density file (produced by
+# sweep_sort.pbs, which submit_sweep.sh submits conditionally) and optionally fans each stage out across
+# N_SCALE_JOBS batch jobs plus a merge job -- keeping a second copy of all that in sync by hand is exactly
+# the drift this avoids. EXTRA_DEPEND chains the sweep's own first-stage jobs behind budgeting, preserving
+# the dependency this branch had before.
 if [ "$SWEEP" = "1" ]; then
-    SF_NAME="${SIM_NAME}_sweep_filter"
-    SF_JOB=$(qsub -N "$SF_NAME" \
-                  -o "logs/${SF_NAME}.log" \
-                  -e "logs/${SF_NAME}.log" \
-                  -v NX=$NX,NY=$NY,NZ=$NZ \
-                  -W depend=afterok:$PP_JOB \
-                  sweep_filter.pbs)
-    echo "Submitted sweep filter (depends on $PP_JOB): $SF_JOB"
-
-    ST_NAME="${SIM_NAME}_sweep_transfer${REF_SUFFIX}"
-    ST_JOB=$(qsub -N "$ST_NAME" \
-                  -o "logs/${ST_NAME}.log" \
-                  -e "logs/${ST_NAME}.log" \
-                  -v NX=$NX,NY=$NY,NZ=$NZ,FIXED_REF=$FIXED_REF \
-                  -W depend=afterok:$SF_JOB \
-                  sweep_transfer.pbs)
-    echo "Submitted sweep transfer (depends on $SF_JOB): $ST_JOB"
+    bash submit_sweep.sh NX=$NX NY=$NY NZ=$NZ FIXED_REF=$FIXED_REF \
+                         N_SCALES=$N_SCALES N_SCALE_JOBS=$N_SCALE_JOBS \
+                         N_TIME_SKIP=$N_TIME_SKIP EXTRA_DEPEND=$PP_JOB
 fi
 cd ..

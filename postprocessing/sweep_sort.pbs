@@ -1,0 +1,39 @@
+#!/bin/bash -l
+#PBS -A UMCP0023
+#PBS -N bci_sweep_sort
+#PBS -o logs/bci_sweep_sort.log
+#PBS -e logs/bci_sweep_sort.log
+# Note: job name above is a default; qalter below updates it at runtime based on Nx/Ny/Nz/FIXED_REF
+# Log file paths (-o/-e) cannot be changed at runtime; use the .out file for per-run logs
+#PBS -l walltime=08:00:00
+#PBS -q casper
+#PBS -M wenegrat@umd.edu
+#PBS -m ae
+#PBS -r n
+#PBS -l select=1:ncpus=8:mem=732GB:ngpus=0
+#PBS -l job_priority=regular
+
+# Sort prerequisite for the sweep pipeline: runs 02_sort_density.py to produce
+# <stem>_sorted_density{_fixed_ref}.nc, which sweep2_energy_transfer.py now loads unconditionally instead
+# of letting calculate_energy_transfer() redo the same full-field density sort once per filter scale.
+# Independent of sweep1's filtering (the sort only touches the raw, unfiltered density field), so
+# submit_sweep.sh runs this concurrently with the filter stage rather than chaining it.
+#
+# 08:00:00 rather than the 23:59:00 the filter/transfer stages request: this is one bounded sort of the
+# raw density field, not a loop over n_scales filter scales.
+set -eo pipefail
+
+NX=${NX:-192}
+NY=${NY:-192}
+NZ=${NZ:-32}
+SIM=bci_Nx${NX}_Ny${NY}_Nz${NZ}
+FIXED_REF=${FIXED_REF:-0}
+[ "$FIXED_REF" = "1" ] && FIXED_REF_FLAG="--fixed-reference" && REF_SUFFIX="_fixed_ref" || { FIXED_REF_FLAG=""; REF_SUFFIX=""; }
+JOB_NAME="${SIM}_sweep_sort${REF_SUFFIX}"
+qalter -N "$JOB_NAME" "$PBS_JOBID"
+
+source ../hpc_env.sh
+
+time $PYTHON -u 02_sort_density.py --filename output/${SIM}.nc --n-workers 8 $FIXED_REF_FLAG 2>&1 | tee logs/${JOB_NAME}.out
+
+qstat -f $PBS_JOBID >> logs/${JOB_NAME}.out
