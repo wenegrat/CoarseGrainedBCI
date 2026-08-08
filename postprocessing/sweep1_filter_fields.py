@@ -99,11 +99,17 @@ if args.print_scale_ranges is not None:
     # (fixed ∝ data volume; ℓ-dependent ∝ data volume · σ ∝ data volume / dx), so a hardcoded ratio would
     # only be right at the resolution it was fit at.
     #
-    # The constant is a least-squares fit over all 16 measured batches from two runs (256²/41 timesteps
-    # and 512²/21 timesteps), which independently imply 0.0221 and 0.0239 -- an 8% spread across a 2.08x
-    # change in data volume, which is the check that the resolution-free form actually holds. It replaces
-    # an earlier 0.0286 taken from a 2-point fit at one resolution, which over-weighted the ℓ term by 25%.
-    K_SCALE_COST = 0.0230
+    # Fitted independently at three resolutions -- 256²/41 timesteps, 512²/21, 1024²/19 -- which imply
+    # 0.0221, 0.0239 and 0.0203: a 16% spread with no clean trend, so a single constant is the right model
+    # even though it is exact at none of them. 0.0215 rather than the 0.0221 mean because it is the largest
+    # value that still lets the split reach its floor at all three resolutions' own useful job counts -- the
+    # mean leaves 1024² 5.5% short. Supersedes 0.0230, and before that 0.0286 from a 2-point single-
+    # resolution fit.
+    #
+    # Note the *magnitude* is a different matter from this ratio: total cost does not track data volume
+    # cleanly (see CLAUDE.md -- 512²→1024² came in ~20% above volume scaling), so use this to balance
+    # batches against each other, not to predict absolute runtime at an unmeasured resolution.
+    K_SCALE_COST = 0.0215
     n_jobs = args.print_scale_ranges
     if not (1 <= n_jobs <= n_scales):
         parser.error(f"--print-scale-ranges must be between 1 and n_scales ({n_scales}), got {n_jobs}")

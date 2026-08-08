@@ -217,16 +217,23 @@ volume, which is the check that the resolution-free form holds. It replaces an e
 2-point fit at one resolution, which over-weighted the ℓ term by 25%. Re-splitting the same 256² run under the corrected weights gives batches of
 0.31-0.45 h instead of 0.15-1.13 h.
 
-**Validated at 512², which also confirms the resolution scaling.** A second 30-scale/8-job run
-(512x512x65, 21 timesteps, using the corrected weights) came back at 36.6-72.6 min per batch -- a 2.0x
-spread, versus 7.8x for the same K=8 configuration under the old ℓ-weighting. Refitting each resolution
-independently and comparing gives the thing a single-resolution fit can't: **both terms scale with data
-volume** (`Nx·Ny·Nz·n_times`) as assumed -- the σ term to within 4%, the fixed term to within 11% -- so the
-ℓ-dependent *cost* really does go as volume/dx, and extrapolating to 1024² is sound. Predicted-vs-observed
-at 512²: makespan 1.10 h vs 1.21 h, largest single scale 0.67 h vs 0.71 h. Note this **specifically refutes**
-the worry recorded below (from the older 256²→512² anecdote) that per-scale cost blows up ~2.5x faster than
-`O(L·σ)` reasoning predicts; that anecdote compared runs differing in `n_times` as well as grid, which this
-model shows is a first-order effect in its own right.
+**Validated at 512² and 1024². The affine *shape* holds; the absolute *magnitude* does not extrapolate.**
+Two further 30-scale runs used the corrected weights: 512x512x65/21 timesteps at K=8 (36.6-72.6 min per
+batch, a 2.0x spread versus 7.8x for the same K under the old ℓ-weighting) and 1024x1024x64/19 timesteps at
+K=10 (2.8-5.7 h, 2.0x). The affine form fits each run to a few percent, and the weight constant `B/A` is
+stable across a 16x grid range (0.0221 / 0.0239 / 0.0203, 16% spread, no trend) -- which is what the
+*balancing* actually depends on.
+
+What does **not** hold is cost ∝ data volume (`Nx·Ny·Nz·n_times`), and this was overclaimed here on the
+strength of two points. 256²→512² came in slightly *under* volume scaling (fixed term -11%, σ term -4%),
+which looked like confirmation; 512²→1024² came in well *over* it (**+34% and +14%**). The 512² fit
+consequently under-predicted the 1024² sweep by 17% (35.7 h projected vs 43.2 h sequential observed).
+
+So the older 256²→512² anecdote recorded below -- that per-scale cost grows ~2.5x faster than `O(L·σ)`
+reasoning predicts -- was wrong in magnitude but right in direction. There is a real super-volume trend of
+roughly +20% per 4x grid jump, on top of `n_times` being a first-order term in its own right. **Use the
+model to balance batches against each other; add ~20% per doubling when using it to predict absolute
+runtime at an unmeasured resolution.**
 
 **The ceiling is the largest single scale**, no matter how many jobs -- a scale is the smallest indivisible
 unit of work. At 1024², the model puts the ℓ=400km scale at **~12 h on its own** against a ~95 h sequential
@@ -273,15 +280,15 @@ partition** (dropping contiguity would recover that 25%, at the price of passing
 instead of a start/end range -- deliberately not done).
 
 The threshold rises as resolution falls, because the largest scale is a smaller share of a narrower cost
-range: **K=10 at 1024², 14 at 512², 19 at 256²** (for the default 30 scales). It is found by partitioning at
+range: **K=10 at 1024², 14 at 512², 19 at 256²** (for the default 30 scales). Confirmed at 1024²: K=10 gave
+a 5.7 h makespan against a 5.1 h costliest scale, i.e. within 13% of a floor no split can beat. It is found by partitioning at
 each candidate K rather than from `ceil(total/max(w))` -- that analytic bound is where the *floor* stops
 improving, which is one to four jobs short of where the contiguous split actually attains it (9 vs 10 at
 1024², 15 vs 19 at 256²). `--print-scale-ranges` computes and prints this per run as `SCALE_ADVICE` lines,
 which `submit_sweep.sh` forwards to the terminal at submit time -- read them rather than guessing.
 
-**`N_SCALE_JOBS=10` is the recommendation at 1024²**, not the 12 previously suggested here and not the
-analytic 9: K=10 attains the floor exactly, K=9 lands 4% above it, and K>10 changes nothing but queue wait
-for jobs requesting `mem=732GB:ncpus=8` apiece. The earlier `K=8` guidance was below the threshold at every
+**`N_SCALE_JOBS=10` is the recommendation at 1024²** -- since measured: 43.2 h of sequential work done in
+5.7 h. K>10 changes nothing but queue wait for jobs requesting `mem=732GB:ncpus=8` apiece. The earlier `K=8` guidance was below the threshold at every
 resolution (+20% at 1024², +65% at 512²).
 
 A bug found while checking this, and worth remembering because it was silent: the loop that splits ranges to
@@ -311,21 +318,24 @@ qsub -N timing_test -o logs/timing_test.log -e logs/timing_test.log \
 ```
 The heaviest batch under a weighted K=12 split is ≈ T, and the full sequential sweep ≈ 8T.
 
-**`n_times` is the knob that decides whether 1024² is feasible at all**, more than K is. Cost and memory
-are both linear in it, and at 1024x1024x64 the projection (from the 512²-validated fit) is:
+**`n_times` is the knob that decides whether 1024² is feasible at all**, more than K is -- cost and memory
+are both linear in it. **Measured** at 1024x1024x64, 30 scales, `N_TIME_SKIP=2` giving 19 timesteps, K=10:
+sequential 43.2 h, makespan **5.7 h** (7.6x), single-scale memory **258 GiB**, heaviest batch 441 GiB --
+all comfortably inside the 23:59:00 cap and the 732GB (682 GiB) request. Scaling that measurement linearly
+in `n_times`:
 
-| `n_times` | sequential | largest scale = K≥12 makespan | single-scale memory |
-|-----------|-----------|-------------------------------|---------------------|
-| 21        | 39 h      | **4.8 h**                     | ~246 GiB            |
-| 41        | 77 h      | **9.4 h**                     | ~480 GiB            |
-| 81        | 152 h     | 18.6 h                        | ~948 GiB -- **OOMs**|
+| `n_times` | sequential | makespan at K=10 | single-scale memory |
+|-----------|-----------|------------------|---------------------|
+| 19 (measured) | 43.2 h | **5.7 h**    | **258 GiB**         |
+| 41        | 93 h      | 12.3 h           | ~557 GiB            |
+| 51        | 116 h     | 15.3 h           | ~693 GiB -- **over**|
 
-At 81 timesteps the *single-scale* baseline exceeds the 732GB (682 GiB) request, so no `N_SCALE_JOBS`
-value helps -- batch size is a walltime knob, not a memory knob (see above). Keep the sweep's time axis at
-or below ~41 via `N_TIME_SKIP` (which halves it per step, on top of the `ConsecutiveIterations` pair dedup);
-41 leaves ~2.5x walltime margin and ~200 GiB of memory headroom. The remaining lever if that isn't enough
-is the FFT-based Gaussian filter noted below (`O(L log L)`, independent of σ), which removes ℓ from the
-cost model rather than redistributing it.
+The memory ceiling arrives around **50 timesteps**, before the walltime one: past it the *single-scale*
+working set exceeds the request, and no `N_SCALE_JOBS` value helps, since batch size is a walltime knob
+only (see above). Keep the sweep's time axis at or below ~40 via `N_TIME_SKIP` (which thins it on top of the
+`ConsecutiveIterations` pair dedup). The remaining lever if that isn't enough is the FFT-based Gaussian
+filter noted below (`O(L log L)`, independent of σ), which removes ℓ from the cost model rather than
+redistributing it.
 
 **Sort redundancy, fixed (`sweep_sort.pbs`).** `sweep2_energy_transfer.py` calls
 `calculate_energy_transfer()` once per scale, and that function only skips its own internal
