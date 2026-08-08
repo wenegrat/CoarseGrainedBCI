@@ -10,6 +10,12 @@
 #   STOP_TIME   simulation length, in days
 #   FIXED_REF   use fixed-in-time reference profile: 0 or 1
 #   SWEEP       also run the many-filter-scale sweep (sweep1/2/3) after budgeting: 0 or 1
+#               NOTE: the sweep's cost-weighted scale split is computed at *submit* time and needs the
+#               simulation's own .nc to read Δx and the scale range -- which doesn't exist yet on a
+#               from-scratch run, so it falls back to an even-by-count split (warned on stderr, easy to
+#               miss). At 1024² that fallback puts the heaviest batch at ~24 h, past the walltime cap.
+#               Prefer two steps at high resolution: this script without SWEEP, then
+#               `cd postprocessing && bash submit_sweep.sh ...` once the simulation has finished.
 #   N_SCALES    number of filter scales in the sweep (SWEEP=1 only; default 30)
 #   N_SCALE_JOBS  how many concurrent jobs to split each sweep stage's scale loop across (SWEEP=1 only;
 #                 default 1 = one job per stage). >1 fans each stage out into that many batch jobs plus a

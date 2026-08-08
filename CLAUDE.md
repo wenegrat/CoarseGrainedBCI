@@ -136,6 +136,7 @@ on how much of the pipeline you need:
 | Script | Stages run | Use when |
 |--------|-----------|----------|
 | `bash submit_all_pbs.sh` | simulation → budgeting_filter → budgeting → plots (+ sweep_filter → sweep_transfer if `SWEEP=1`) | starting from scratch |
+| | | **but see the `SWEEP=1` caveat below** -- prefer two steps at high resolution |
 | `bash submit_simulation.sh` | simulation only | you only want the `.nc` output, no post-processing yet |
 | `bash postprocessing/submit_budgeting.sh` | budgeting_filter → budgeting → plots | simulation already completed, (re)run analysis only (e.g. after changing filter scales, or after the simulation succeeded but post-processing failed) |
 | `bash postprocessing/submit_sweep.sh` | sweep_sort + sweep_filter → sweep_transfer | just the many-filter-scale transfer-spectrum sweep, independent of the fixed-2-scale budgeting above. Optionally fans each stage out across `N_SCALE_JOBS` concurrent jobs -- see "Parallelizing the sweep" below |
@@ -343,6 +344,19 @@ and runs it concurrently with the filter stage since the sort touches only the r
 `submit_all_pbs.sh`'s `SWEEP=1` branch no longer duplicates the sweep submission logic inline -- it calls
 `submit_sweep.sh` with a new `EXTRA_DEPEND` var so the sweep still chains behind budgeting. That branch
 would otherwise have hard-failed the moment the sort prerequisite landed, since it had no sort step.
+
+**`SWEEP=1` can't cost-weight the split on a from-scratch run.** `submit_sweep.sh` computes the scale
+split by calling `sweep1_filter_fields.py --print-scale-ranges`, which opens the simulation's own `.nc` to
+read Δx and the data-driven scale range. On a full-pipeline run that file doesn't exist yet at submit time
+(the sweep jobs are queued behind the simulation, not submitted after it), so `compute_ranges` falls back to
+the even-by-count split -- warned on stderr, but easy to lose in the submit output. **At 1024²/41 timesteps
+that fallback puts the heaviest batch at ~24 h against a 9.4 h cost-weighted split, i.e. past the 23:59:00
+cap**, so the job burns a full day and produces nothing mergeable. Use two steps at high resolution:
+`submit_all_pbs.sh` without `SWEEP`, then `submit_sweep.sh` once the simulation has finished and the split
+can be computed from real data. Fixing this properly would mean deriving Δx/Lx in the submit path instead of
+from the file, which duplicates a physics constant (`Lx = 1000kilometers`, hardcoded in
+`baroclinic_adjustment.jl`) into bash -- deliberately not done, since the two-step workflow is what you want
+at that resolution anyway.
 
 **Filter scales: single source of truth.** `baroclinic_adjustment.jl`'s `--filter_scales_m` (online
 diagnostics) and the offline pipeline's `--filter-scales`/`FILTER_SCALES_M` used to be two fully independent
