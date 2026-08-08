@@ -15,6 +15,9 @@
 #                 default 1 = one job per stage). >1 fans each stage out into that many batch jobs plus a
 #                 merge job -- use it when the sequential scale loop would exceed a job's walltime cap at
 #                 high resolution. Passed straight through to submit_sweep.sh; see CLAUDE.md.
+#   N_TIME_SKIP   keep every Nth sweep timestep (SWEEP=1 only; default 1 = all of them). Cost and peak
+#                 memory are both linear in the sweep's timestep count, and at 1024^2 a single filter
+#                 scale exceeds the memory request past ~57 timesteps -- see CLAUDE.md.
 #   EXTRA_ARGS  extra baroclinic_adjustment.jl CLI args, passed through verbatim (quote multi-word values).
 #               The simulation's own online filter scales are set here via --filter_scales_m, in METERS
 #               (e.g. EXTRA_ARGS='--filter_scales_m 30000 60000'; default 12000 50000).
@@ -31,7 +34,7 @@
 #   bash postprocessing/submit_budgeting.sh [NX=192] [NY=192] [NZ=32] [FIXED_REF=0|1|both]
 
 NX=192; NY=192; NZ=32; STOP_TIME=16; FIXED_REF=0; SWEEP=0; EXTRA_ARGS=""; GPU=0; FILTER_SCALES_M=""
-N_SCALES=30; N_SCALE_JOBS=1
+N_SCALES=30; N_SCALE_JOBS=1; N_TIME_SKIP=1
 for arg in "$@"; do case $arg in
   NX=*)         NX="${arg#*=}";;
   NY=*)         NY="${arg#*=}";;
@@ -44,6 +47,7 @@ for arg in "$@"; do case $arg in
   FILTER_SCALES_M=*) FILTER_SCALES_M="${arg#*=}";;
   N_SCALES=*)     N_SCALES="${arg#*=}";;
   N_SCALE_JOBS=*) N_SCALE_JOBS="${arg#*=}";;
+  N_TIME_SKIP=*)  N_TIME_SKIP="${arg#*=}";;
 esac; done
 [ "$FIXED_REF" = "1" ] && REF_SUFFIX="_fixed_ref" || REF_SUFFIX=""
 SIM_NAME="bci_Nx${NX}_Ny${NY}_Nz${NZ}"
@@ -95,6 +99,7 @@ echo "Submitted plots+animations (depends on $PP_JOB): $PLOTS_JOB"
 # the dependency this branch had before.
 if [ "$SWEEP" = "1" ]; then
     bash submit_sweep.sh NX=$NX NY=$NY NZ=$NZ FIXED_REF=$FIXED_REF \
-                         N_SCALES=$N_SCALES N_SCALE_JOBS=$N_SCALE_JOBS EXTRA_DEPEND=$PP_JOB
+                         N_SCALES=$N_SCALES N_SCALE_JOBS=$N_SCALE_JOBS \
+                         N_TIME_SKIP=$N_TIME_SKIP EXTRA_DEPEND=$PP_JOB
 fi
 cd ..
